@@ -2,6 +2,9 @@
 
 A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core.
 
+[![npm version](https://img.shields.io/npm/v/rnxorm.svg)](https://www.npmjs.com/package/rnxorm)
+[![GitHub](https://img.shields.io/badge/github-BaryoDev%2FrnxORM-blue)](https://github.com/BaryoDev/rnxORM)
+
 ## Installation
 
 ```bash
@@ -189,6 +192,12 @@ If you change the type of a property (e.g., from `string` to `number`), rnxORM a
 -   **Renaming Columns**: If you rename a property, rnxORM sees it as a "missing" column (the new name) and adds it. The old column remains in the database. It does **not** rename the existing column.
 -   **Deleting Columns**: If you remove a property from your class, the column remains in the database. rnxORM does **not** delete columns to prevent accidental data loss.
 -   **Complex Constraints**: Foreign keys, unique constraints (other than PK), and indexes are not currently supported via decorators.
+
+## Repository
+
+- **GitHub**: [https://github.com/BaryoDev/rnxORM](https://github.com/BaryoDev/rnxORM)
+- **npm**: [https://www.npmjs.com/package/rnxorm](https://www.npmjs.com/package/rnxorm)
+- **Issues**: [https://github.com/BaryoDev/rnxORM/issues](https://github.com/BaryoDev/rnxORM/issues)
 
 ## License
 
