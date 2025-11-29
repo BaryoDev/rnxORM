@@ -38,6 +38,34 @@ export class DbSet<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).where(column, operator, value);
     }
 
+    /**
+     * Returns a query builder with no-tracking enabled.
+     * Entities returned will be frozen (read-only) for better performance.
+     * @returns QueryBuilder with no-tracking enabled
+     */
+    asNoTracking(): QueryBuilder<T> {
+        return new QueryBuilder(this.entityType, this.context, this.tableName, true);
+    }
+
+    /**
+     * Finds an entity by its primary key value.
+     * @param id - The primary key value
+     * @returns The entity if found, null otherwise
+     */
+    async find(id: any): Promise<T | null> {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (!metadata) return null;
+
+        const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
+        if (!pkColumn) throw new Error("Primary key not defined");
+
+        const sql = `SELECT * FROM ${this.tableName} WHERE ${pkColumn.columnName} = $1`;
+        const res = await this.context.query(sql, [id]);
+
+        if (res.rows.length === 0) return null;
+        return this.mapRowToEntity(res.rows[0]);
+    }
+
     async update(entity: T): Promise<void> {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (!metadata) return;
@@ -68,25 +96,56 @@ export class DbSet<T> {
         await this.context.query(sql, [pkValue]);
     }
 
-    private mapRowToEntity(row: any): T {
+    private mapRowToEntity(row: any, freeze: boolean = false): T {
         const entity = new this.entityType();
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         metadata?.columns.forEach(col => {
             (entity as any)[col.propertyName] = row[col.columnName];
         });
-        return entity;
+        return freeze ? Object.freeze(entity) : entity;
+    }
+
+    /**
+     * Shared helper to map database rows to entities
+     * @internal
+     */
+    static mapRowToEntity<T>(entityType: new () => T, row: any, freeze: boolean = false): T {
+        const entity = new entityType();
+        const metadata = MetadataStorage.get().getEntity(entityType);
+        metadata?.columns.forEach(col => {
+            (entity as any)[col.propertyName] = row[col.columnName];
+        });
+        return freeze ? Object.freeze(entity) : entity;
     }
 }
 
 export class QueryBuilder<T> {
     private conditions: string[] = [];
     private params: any[] = [];
+    private noTracking: boolean = false;
 
-    constructor(private entityType: new () => T, private context: DbContext, private tableName: string) { }
+    constructor(
+        private entityType: new () => T,
+        private context: DbContext,
+        private tableName: string,
+        noTracking: boolean = false
+    ) {
+        this.noTracking = noTracking;
+    }
 
     where(column: string, operator: string, value: any): this {
         this.conditions.push(`${column} ${operator} $${this.params.length + 1}`);
         this.params.push(value);
+        return this;
+    }
+
+    /**
+     * Enables no-tracking mode for this query.
+     * Entities will be frozen (read-only) for better performance.
+     * @returns This query builder
+     */
+    asNoTracking(): this {
+        this.noTracking = true;
         return this;
     }
 
@@ -95,14 +154,7 @@ export class QueryBuilder<T> {
         const sql = `SELECT * FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, this.params);
 
-        // Mapping logic (duplicated for now, should be shared)
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        return res.rows.map((row: any) => {
-            const entity = new this.entityType();
-            metadata?.columns.forEach(col => {
-                (entity as any)[col.propertyName] = row[col.columnName];
-            });
-            return entity;
-        });
+        // Use shared mapping logic with optional freezing
+        return res.rows.map((row: any) => DbSet.mapRowToEntity(this.entityType, row, this.noTracking));
     }
 }

@@ -1,7 +1,7 @@
 {
   "name": "rnxorm",
-  "version": "1.0.2",
-  "description": "",
+  "version": "1.1.0",
+  "description": "A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

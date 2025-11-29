@@ -104,6 +104,8 @@ main();
 - **CRUD Operations**: `add`, `update`, `remove`, `toList`
 - **Fluent Query API**: `.where().toList()`
 - **Repository Pattern**: `DbSet<T>`
+- **Query Optimization**: `.asNoTracking()` for read-only queries
+- **Primary Key Lookup**: `.find(id)` for quick entity retrieval
 
 ## Type Mapping
 
@@ -145,6 +147,55 @@ The `.where(column, operator, value)` method supports standard SQL operators:
 // Examples
 users.where("age", ">=", 21);
 users.where("name", "ILIKE", "%doe%");
+```
+
+## Query Optimization
+
+### AsNoTracking
+
+For read-only queries, use `asNoTracking()` to improve performance. Entities returned from no-tracking queries are frozen (immutable), which prevents accidental modifications and signals to the runtime that these objects won't be updated.
+
+```typescript
+// Read-only query - entities are frozen for better performance
+const products = await productSet.asNoTracking().toList();
+
+// Attempting to modify will throw an error
+products[0].price = 999; // ❌ Error: Cannot assign to read only property
+
+// Can be combined with where clauses
+const expensiveProducts = await productSet
+  .asNoTracking()
+  .where("price", ">", 100)
+  .toList();
+
+// Or chain in different order
+const affordableProducts = await productSet
+  .where("price", "<=", 50)
+  .asNoTracking()
+  .toList();
+```
+
+**When to use AsNoTracking:**
+- Displaying read-only lists
+- Generating reports
+- Bulk data export
+- Any query where you won't modify the results
+
+### Find by Primary Key
+
+Quickly retrieve a single entity by its primary key value:
+
+```typescript
+// Find by ID
+const user = await users.find(42);
+if (user) {
+  console.log(user.name);
+} else {
+  console.log("User not found");
+}
+
+// find() returns null if not found
+const notFound = await users.find(99999); // null
 ```
 
 ## Schema Evolution
