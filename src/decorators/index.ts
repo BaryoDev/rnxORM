@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { MetadataStorage } from "../core/MetadataStorage";
 
 export function Entity(tableName?: string) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     return function (target: Function) {
         MetadataStorage.get().addEntity(target, tableName || target.name.toLowerCase());
     };
@@ -14,7 +15,7 @@ export interface ColumnOptions {
 }
 
 export function Column(options: ColumnOptions = {}) {
-    return function (target: Object, propertyName: string) {
+    return function (target: object, propertyName: string) {
         const designType = Reflect.getMetadata("design:type", target, propertyName);
         let type = options.type;
 
@@ -34,7 +35,7 @@ export function Column(options: ColumnOptions = {}) {
 }
 
 export function PrimaryKey() {
-    return function (target: Object, propertyName: string) {
+    return function (target: object, propertyName: string) {
         const designType = Reflect.getMetadata("design:type", target, propertyName);
         let type = "integer"; // Default PK type
 

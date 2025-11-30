@@ -1,0 +1,69 @@
+
+> rnxorm@1.1.1 lint
+> eslint src test
+
+
+/Users/arnelirobles/rnxORM/src/core/DbContext.ts
+   30:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   30:56  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   82:77  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  115:41  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/arnelirobles/rnxORM/src/core/DbSet.ts
+   28:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   36:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   41:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   59:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   82:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   84:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   98:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  103:33  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  107:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  116:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  120:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  128:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  140:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  162:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/arnelirobles/rnxORM/src/core/MetadataStorage.ts
+   2:13  error  The `Function` type accepts any function-like value.
+Prefer explicitly defining any function parameters and return type  @typescript-eslint/no-unsafe-function-type
+  11:13  error  The `Function` type accepts any function-like value.
+Prefer explicitly defining any function parameters and return type  @typescript-eslint/no-unsafe-function-type
+  29:23  error  The `Function` type accepts any function-like value.
+Prefer explicitly defining any function parameters and return type  @typescript-eslint/no-unsafe-function-type
+  43:23  error  The `Function` type accepts any function-like value.
+Prefer explicitly defining any function parameters and return type  @typescript-eslint/no-unsafe-function-type
+  64:23  error  The `Function` type accepts any function-like value.
+Prefer explicitly defining any function parameters and return type  @typescript-eslint/no-unsafe-function-type
+
+/Users/arnelirobles/rnxORM/src/decorators/index.ts
+   5:30  error  The `Function` type accepts any function-like value.
+Prefer explicitly defining any function parameters and return type  @typescript-eslint/no-unsafe-function-type
+  17:30  error  Prefer using the primitive `object` as a type name, rather than the upper-cased `Object`                                 @typescript-eslint/no-wrapper-object-types
+  37:30  error  Prefer using the primitive `object` as a type name, rather than the upper-cased `Object`                                 @typescript-eslint/no-wrapper-object-types
+
+/Users/arnelirobles/rnxORM/test/demo_features.ts
+  72:14  warning  'error' is defined but never used         @typescript-eslint/no-unused-vars
+  72:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/arnelirobles/rnxORM/test/integration/UserFlow.test.ts
+  4:10  warning  'Pool' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/arnelirobles/rnxORM/test/schema_evolution.ts
+   9:7  warning  'TestEntityV1' is defined but never used  @typescript-eslint/no-unused-vars
+  19:7  warning  'TestEntityV2' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/arnelirobles/rnxORM/test/test_no_tracking.ts
+  127:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/arnelirobles/rnxORM/test/type_migration.ts
+    9:7   warning  'TestEntityV1' is defined but never used       @typescript-eslint/no-unused-vars
+   19:7   warning  'TestEntityV2' is defined but never used       @typescript-eslint/no-unused-vars
+  104:15  warning  'TestEntityBoolean' is defined but never used  @typescript-eslint/no-unused-vars
+  122:15  warning  'TestEntityBool' is defined but never used     @typescript-eslint/no-unused-vars
+  153:15  warning  'TestEntityIntStr' is defined but never used   @typescript-eslint/no-unused-vars
+
+✖ 37 problems (8 errors, 29 warnings)
+  2 errors and 0 warnings potentially fixable with the `--fix` option.
+

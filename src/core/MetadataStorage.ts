@@ -1,4 +1,5 @@
 export interface ColumnMetadata {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     target: Function;
     propertyName: string;
     columnName: string;
@@ -8,6 +9,7 @@ export interface ColumnMetadata {
 }
 
 export interface EntityMetadata {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     target: Function;
     tableName: string;
     columns: ColumnMetadata[];
@@ -26,6 +28,7 @@ export class MetadataStorage {
         return MetadataStorage.instance;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addEntity(target: Function, tableName: string) {
         console.log(`MetadataStorage: Adding entity ${target.name} -> ${tableName}`);
         let entity = this.entities.find((e) => e.target === target);
@@ -40,6 +43,7 @@ export class MetadataStorage {
         }
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addColumn(target: Function, propertyName: string, options: Partial<ColumnMetadata> = {}) {
         let entity = this.entities.find((e) => e.target === target);
         if (!entity) {
@@ -61,6 +65,7 @@ export class MetadataStorage {
         });
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     getEntity(target: Function): EntityMetadata | undefined {
         const entity = this.entities.find((e) => e.target === target);
         console.log(`MetadataStorage: Getting entity ${target.name} -> ${entity ? 'Found' : 'Not Found'}`);
