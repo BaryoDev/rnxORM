@@ -1,13 +1,16 @@
 {
   "name": "rnxorm",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "test": "ts-node test/index.ts"
+    "test": "jest",
+    "lint": "eslint src test --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "orm",
@@ -33,9 +36,16 @@
     "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.15.6",
+    "@typescript-eslint/eslint-plugin": "^8.48.1",
+    "@typescript-eslint/parser": "^8.48.1",
+    "eslint": "^9.39.1",
+    "jest": "^30.2.0",
     "nodemon": "^3.1.11",
+    "prettier": "^3.7.3",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

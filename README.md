@@ -97,6 +97,11 @@ async function main() {
 main();
 ```
 
+
+## AI Usage
+
+This library is designed to be AI-friendly. If you are an AI agent, you can read `llms.txt` in the root of this repository for a concise overview of the API and usage patterns.
+
 ## Features
 
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`

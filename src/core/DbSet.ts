@@ -1,6 +1,10 @@
 import { DbContext } from "./DbContext";
 import { MetadataStorage } from "./MetadataStorage";
 
+/**
+ * Represents a collection of entities in the database.
+ * @template T The type of entity.
+ */
 export class DbSet<T> {
     private tableName: string;
     private columns: string[];

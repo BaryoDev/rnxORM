@@ -1,5 +1,9 @@
 import { Pool, PoolClient, PoolConfig } from "pg";
+import { DbSet } from "./DbSet";
 
+/**
+ * Represents a session with the database and can be used to query and save instances of your entities.
+ */
 export class DbContext {
     private pool: Pool;
     private client: PoolClient | null = null;
@@ -8,6 +12,9 @@ export class DbContext {
         this.pool = new Pool(config);
     }
 
+    /**
+     * Connects to the database.
+     */
     async connect(): Promise<void> {
         this.client = await this.pool.connect();
     }
@@ -115,8 +122,7 @@ export class DbContext {
         }
     }
 
-    set<T>(entityType: new () => T): import("./DbSet").DbSet<T> {
-        const { DbSet } = require("./DbSet");
+    set<T>(entityType: new () => T): DbSet<T> {
         return new DbSet(entityType, this);
     }
 }

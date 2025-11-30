@@ -27,6 +27,7 @@ export class MetadataStorage {
     }
 
     addEntity(target: Function, tableName: string) {
+        console.log(`MetadataStorage: Adding entity ${target.name} -> ${tableName}`);
         let entity = this.entities.find((e) => e.target === target);
         if (entity) {
             entity.tableName = tableName;
@@ -61,7 +62,9 @@ export class MetadataStorage {
     }
 
     getEntity(target: Function): EntityMetadata | undefined {
-        return this.entities.find((e) => e.target === target);
+        const entity = this.entities.find((e) => e.target === target);
+        console.log(`MetadataStorage: Getting entity ${target.name} -> ${entity ? 'Found' : 'Not Found'}`);
+        return entity;
     }
 
     getEntities(): EntityMetadata[] {

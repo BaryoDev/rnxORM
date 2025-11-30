@@ -1,0 +1,69 @@
+# rnxORM
+
+A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core.
+
+## Features
+
+- **Decorators**: `@Entity`, `@Column`, `@PrimaryKey` for defining models.
+- **DbContext**: Manages database connections and entity sets.
+- **DbSet**: Repository pattern implementation for CRUD operations.
+- **QueryBuilder**: Fluent API for building SQL queries safely.
+- **Schema Evolution**: Automatically creates tables and adds missing columns.
+- **Type Safety**: Full TypeScript support with type inference.
+
+## Usage Example
+
+```typescript
+import { Entity, Column, PrimaryKey, DbContext } from "rnxorm";
+
+@Entity("users")
+class User {
+  @PrimaryKey() id!: number;
+  @Column() name!: string;
+  @Column() age!: number;
+}
+
+const db = new DbContext({
+  host: "localhost",
+  port: 5432,
+  user: "postgres",
+  password: "password",
+  database: "mydb",
+});
+
+async function main() {
+  await db.connect();
+  await db.ensureCreated();
+
+  const users = db.set(User);
+  await users.add({ name: "Alice", age: 30 } as User);
+  
+  const allUsers = await users.toList();
+  console.log(allUsers);
+  
+  await db.disconnect();
+}
+```
+
+## API Reference
+
+### DbContext
+- `connect()`: Connect to the database.
+- `disconnect()`: Disconnect from the database.
+- `ensureCreated()`: Ensure database schema exists and is up to date.
+- `set(Entity)`: Get a `DbSet` for the given entity.
+
+### DbSet<T>
+- `add(entity)`: Add a new entity.
+- `update(entity)`: Update an existing entity.
+- `remove(entity)`: Remove an entity.
+- `find(id)`: Find an entity by primary key.
+- `toList()`: Get all entities.
+- `where(col, op, val)`: Filter entities.
+- `asNoTracking()`: Get read-only entities (faster).
+
+## Installation
+
+```bash
+npm install rnxorm pg reflect-metadata
+```
