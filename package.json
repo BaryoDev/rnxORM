@@ -20,7 +20,7 @@
     "entity-framework"
   ],
   "author": "Arnel Robles",
-  "license": "ISC",
+  "license": "MPL-2.0",
   "files": [
     "dist",
     "README.md",
