@@ -159,6 +159,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
 - **Eager Loading**: `.include()` to load related entities
 - **Schema Scaffolding**: Automatically create tables, foreign keys, indexes, and constraints
+- **Migrations**: Version-controlled database schema changes with rollback support
 - **CRUD Operations**: `add`, `update`, `remove`, `toList`
 - **Fluent Query API**: `.where().orderBy().skip().take()`
 - **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
@@ -168,6 +169,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **Primary Key Lookup**: `.find(id)` for quick entity retrieval
 - **Transactions**: `beginTransaction()`, `commitTransaction()`, `rollbackTransaction()`
 - **Schema Evolution**: Auto-detect and migrate schema changes
+- **CLI Tools**: Generate migration files with `rnxorm` command
 
 ## Type Mapping
 
@@ -617,6 +619,237 @@ If you change the type of a property (e.g., from `string` to `number`), rnxORM a
 2.  **Warning**: It logs a warning if a mismatch is found.
 3.  **Auto-Fix**: It attempts to migrate the column using `ALTER COLUMN ... TYPE ... USING ...`.
 4.  **Safety**: If the existing data is incompatible with the new type (e.g., converting "abc" to integer), the migration **fails gracefully**. An error is logged, and the column is left unchanged to prevent data loss.
+
+## Migrations
+
+rnxORM provides a powerful migration system for versioning and managing database schema changes over time, similar to Entity Framework Core migrations.
+
+### Why Use Migrations?
+
+While `ensureCreated()` is great for development, migrations provide:
+- **Version Control**: Track schema changes in your codebase
+- **Collaboration**: Share database changes with your team
+- **Production Safety**: Apply changes incrementally with rollback capability
+- **History**: Maintain a complete audit trail of schema evolution
+
+### Creating a Migration
+
+Use the CLI to generate a new migration file:
+
+```bash
+npx rnxorm migration:create add-users-table
+```
+
+This creates a timestamped migration file in the `migrations/` directory:
+
+```typescript
+import { Migration, MigrationBuilder } from "rnxorm";
+
+export class AddUsersTable extends Migration {
+    constructor() {
+        super("20240115120000", "add-users-table");
+    }
+
+    async up(builder: MigrationBuilder): Promise<void> {
+        builder.createTable('users', [
+            { name: 'id', type: 'integer', isPrimaryKey: true, isAutoIncrement: true },
+            { name: 'email', type: 'varchar(255)', nullable: false },
+            { name: 'name', type: 'varchar(100)', nullable: false },
+            { name: 'created_at', type: 'timestamp', defaultValue: 'CURRENT_TIMESTAMP' }
+        ]);
+    }
+
+    async down(builder: MigrationBuilder): Promise<void> {
+        builder.dropTable('users');
+    }
+}
+```
+
+### Migration Builder API
+
+The `MigrationBuilder` provides a fluent API for schema operations:
+
+**Table Operations:**
+```typescript
+// Create table
+builder.createTable('products', [
+    { name: 'id', type: 'integer', isPrimaryKey: true, isAutoIncrement: true },
+    { name: 'name', type: 'varchar(255)', nullable: false },
+    { name: 'price', type: 'decimal(10,2)', nullable: false }
+]);
+
+// Drop table
+builder.dropTable('products');
+
+// Rename table
+builder.renameTable('products', 'items');
+```
+
+**Column Operations:**
+```typescript
+// Add column
+builder.addColumn('users', 'phone', 'varchar(20)', { nullable: true });
+
+// Drop column
+builder.dropColumn('users', 'phone');
+
+// Alter column
+builder.alterColumn('users', 'email', 'varchar(320)', { nullable: false });
+
+// Rename column
+builder.renameColumn('users', 'name', 'full_name');
+```
+
+**Index Operations:**
+```typescript
+// Create index
+builder.createIndex('users', 'idx_users_email', ['email'], true); // unique
+
+// Create composite index
+builder.createIndex('orders', 'idx_orders_user_date', ['user_id', 'order_date']);
+
+// Drop index
+builder.dropIndex('users', 'idx_users_email');
+```
+
+**Foreign Key Operations:**
+```typescript
+// Add foreign key
+builder.addForeignKey(
+    'posts',              // table
+    'fk_posts_user',      // constraint name
+    'author_id',          // column
+    'users',              // referenced table
+    'id',                 // referenced column
+    'CASCADE'             // on delete action
+);
+
+// Drop foreign key
+builder.dropForeignKey('posts', 'fk_posts_user');
+```
+
+**Raw SQL:**
+```typescript
+// Execute custom SQL
+builder.sql('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+builder.sql('UPDATE users SET status = $1 WHERE created_at < $2', ['inactive', new Date()]);
+```
+
+### Running Migrations
+
+Create a migration runner script (e.g., `migrate.ts`):
+
+```typescript
+import { DbContext, PostgreSQLProvider, Migrator } from "rnxorm";
+import { AddUsersTable } from "./migrations/20240115120000_add-users-table";
+import { CreatePostsTable } from "./migrations/20240115130000_create-posts-table";
+
+async function runMigrations() {
+    const db = new DbContext(new PostgreSQLProvider({
+        host: "localhost",
+        port: 5432,
+        user: "postgres",
+        password: "password",
+        database: "mydb",
+    }));
+
+    await db.connect();
+
+    const migrator = new Migrator(db);
+    migrator.addMigrations([
+        new AddUsersTable(),
+        new CreatePostsTable()
+    ]);
+
+    // Apply all pending migrations
+    await migrator.migrate();
+
+    // Or check status
+    // await migrator.status();
+
+    // Or revert last migration
+    // await migrator.revert();
+
+    await db.disconnect();
+}
+
+runMigrations().catch(console.error);
+```
+
+Run it:
+```bash
+npx ts-node migrate.ts
+```
+
+### Migration Commands
+
+**Check Migration Status:**
+```typescript
+await migrator.status();
+```
+
+Output:
+```
+=== Migration Status ===
+
+Applied Migrations:
+  ✓ 20240115120000_add-users-table (applied: 2024-01-15T12:00:00.000Z)
+  ✓ 20240115130000_create-posts-table (applied: 2024-01-15T13:00:00.000Z)
+
+Pending Migrations:
+  ○ 20240115140000_add-comments-table
+```
+
+**Apply Pending Migrations:**
+```typescript
+const count = await migrator.migrate();
+console.log(`Applied ${count} migrations`);
+```
+
+**Revert Last Migration:**
+```typescript
+const reverted = await migrator.revert();
+if (reverted) {
+    console.log('Migration reverted successfully');
+}
+```
+
+**Revert to Specific Migration:**
+```typescript
+// Revert all migrations back to and including this one
+await migrator.revertTo('20240115120000');
+```
+
+### Migration History
+
+rnxORM automatically creates a `__MigrationHistory` table to track applied migrations:
+
+| migration_id      | migration_name          | applied_at            |
+|------------------|-------------------------|-----------------------|
+| 20240115120000   | add-users-table        | 2024-01-15 12:00:00  |
+| 20240115130000   | create-posts-table     | 2024-01-15 13:00:00  |
+
+### Best Practices
+
+1. **Always include down() logic**: Ensure every migration can be reverted
+2. **Test migrations**: Test both up() and down() before deploying
+3. **Small migrations**: Keep migrations focused on single changes
+4. **Never modify applied migrations**: Create new migrations for changes
+5. **Backup before migrating**: Always backup production databases first
+6. **Use transactions**: Migrations are automatically wrapped in transactions
+
+### Migration vs ensureCreated()
+
+| Feature | ensureCreated() | Migrations |
+|---------|----------------|------------|
+| **Use Case** | Development/prototyping | Production |
+| **Version Control** | No | Yes |
+| **Rollback** | No | Yes |
+| **Team Collaboration** | Limited | Full |
+| **Audit Trail** | No | Yes |
+| **Custom Logic** | No | Yes (via SQL) |
+
+**Recommendation**: Use `ensureCreated()` during early development, switch to migrations before production.
 
 ## FAQ
 

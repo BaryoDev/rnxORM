@@ -4,6 +4,9 @@
   "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "rnxorm": "dist/migrations/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
