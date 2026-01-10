@@ -166,8 +166,11 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **Schema Scaffolding**: Automatically create tables, foreign keys, indexes, and constraints
 - **Migrations**: Version-controlled database schema changes with rollback support
 - **CRUD Operations**: `add`, `update`, `remove` with automatic tracking
+- **Bulk Operations**: `addRange`, `updateRange`, `removeRange` for batch operations
 - **Fluent Query API**: `.where().orderBy().skip().take()`
 - **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
+- **Raw SQL Queries**: Execute custom SQL via `fromSqlRaw()` and `executeSqlRaw()`
+- **Keyless Entity Types**: Query database views and ad-hoc queries via `hasNoKey()`
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
 - **Repository Pattern**: `DbSet<T>` with integrated change tracking
 - **Default Values**: Set column defaults via `hasDefaultValue()`
@@ -1185,6 +1188,299 @@ modelBuilder.entity(User)
 - Your application needs to read or modify the values
 - The data is part of your business logic
 - You need to query or filter by these values from TypeScript
+
+## Bulk Operations
+
+For better performance when working with multiple entities, rnxORM provides bulk operation methods that track multiple entities at once.
+
+### AddRange - Bulk Insert
+
+Add multiple entities in a single operation:
+
+```typescript
+const newUsers = [
+    { name: 'Alice', email: 'alice@example.com', age: 25 },
+    { name: 'Bob', email: 'bob@example.com', age: 30 },
+    { name: 'Charlie', email: 'charlie@example.com', age: 35 }
+].map(data => {
+    const user = new User();
+    Object.assign(user, data);
+    return user;
+});
+
+// Add all users at once
+users.addRange(newUsers);
+await db.saveChanges(); // INSERT all users in a single transaction
+
+console.log(`Inserted ${newUsers.length} users`);
+```
+
+### UpdateRange - Bulk Update
+
+Update multiple entities in a single operation:
+
+```typescript
+// Load users
+const usersToUpdate = await users.where('age', '<', 18).toList();
+
+// Modify them
+usersToUpdate.forEach(user => {
+    user.status = 'minor';
+});
+
+// Update all at once
+users.updateRange(usersToUpdate);
+await db.saveChanges(); // UPDATE all users in a single transaction
+```
+
+### RemoveRange - Bulk Delete
+
+Delete multiple entities in a single operation:
+
+```typescript
+// Load users to delete
+const inactiveUsers = await users.where('lastLogin', '<', oldDate).toList();
+
+// Delete all at once
+users.removeRange(inactiveUsers);
+await db.saveChanges(); // DELETE all users in a single transaction
+
+console.log(`Deleted ${inactiveUsers.length} inactive users`);
+```
+
+### Benefits of Bulk Operations
+
+- **Better Performance**: Reduce overhead of tracking entities individually
+- **Atomic Operations**: All changes in a single transaction
+- **Cleaner Code**: More readable than loops with individual operations
+- **Memory Efficient**: Batch processing for large datasets
+
+## Raw SQL Queries
+
+When you need to execute complex SQL that can't be expressed through the fluent API, rnxORM provides raw SQL query support with full entity mapping.
+
+### FromSqlRaw - Query Entities
+
+Execute raw SQL and map results to entity types:
+
+```typescript
+// Simple raw query
+const adults = await db.set(User)
+    .fromSqlRaw('SELECT * FROM users WHERE age >= 18')
+    .toList();
+
+// Parameterized query (safe from SQL injection)
+const activeUsers = await db.set(User)
+    .fromSqlRaw(
+        'SELECT * FROM users WHERE status = $1 AND created_at > $2',
+        ['active', '2024-01-01']
+    )
+    .toList();
+
+// Complex join query
+const userOrders = await db.set(User)
+    .fromSqlRaw(`
+        SELECT u.*
+        FROM users u
+        INNER JOIN orders o ON u.id = o.user_id
+        WHERE o.total > $1
+        GROUP BY u.id
+        HAVING COUNT(o.id) > $2
+    `, [1000, 5])
+    .toList();
+
+// Get first result
+const topUser = await db.set(User)
+    .fromSqlRaw('SELECT * FROM users ORDER BY points DESC LIMIT 1')
+    .first();
+```
+
+### ExecuteSqlRaw - Non-Query Operations
+
+Execute UPDATE, DELETE, or other SQL statements and get the affected row count:
+
+```typescript
+// Bulk update with raw SQL
+const updated = await db.executeSqlRaw(
+    'UPDATE users SET status = $1 WHERE last_login < $2',
+    ['inactive', '2020-01-01']
+);
+console.log(`Updated ${updated} users`);
+
+// Bulk delete
+const deleted = await db.executeSqlRaw(
+    'DELETE FROM logs WHERE created_at < $1',
+    ['2023-01-01']
+);
+console.log(`Deleted ${deleted} log entries`);
+
+// Call stored procedure
+await db.executeSqlRaw('CALL refresh_materialized_views()');
+
+// Execute database maintenance
+await db.executeSqlRaw('VACUUM ANALYZE users');
+```
+
+### Query Filters with Raw SQL
+
+Global query filters are automatically applied to raw SQL results:
+
+```typescript
+// If User has a soft delete filter
+modelBuilder.entity(User)
+    .hasQueryFilter(u => !u.isDeleted);
+
+// This query automatically excludes deleted users
+const users = await db.set(User)
+    .fromSqlRaw('SELECT * FROM users WHERE age > $1', [18])
+    .toList(); // Deleted users are filtered out
+
+// Bypass filters if needed
+const allUsers = await db.set(User)
+    .fromSqlRaw('SELECT * FROM users')
+    .toListNoTracking(); // No filters, no tracking
+```
+
+### When to Use Raw SQL
+
+✅ **Use raw SQL when:**
+- Executing complex joins not supported by fluent API
+- Calling database-specific functions (window functions, CTEs, etc.)
+- Performance-critical queries requiring fine-tuned SQL
+- Working with database views or stored procedures
+- Bulk operations that are more efficient in SQL
+
+⚠️ **Important Notes:**
+- Always use parameterized queries to prevent SQL injection
+- Column names in raw SQL should match database column names (not property names)
+- Results are still subject to global query filters (unless using `toListNoTracking()`)
+- Value converters are applied to results
+
+## Keyless Entity Types
+
+Keyless entity types are entities without a primary key, perfect for mapping to database views, query results, or read-only data.
+
+### Defining Keyless Entities
+
+Use `hasNoKey()` to mark an entity as keyless:
+
+```typescript
+// Entity for database view
+@Entity("vw_user_summary")
+export class UserSummary {
+    @Column() userName!: string;
+    @Column() orderCount!: number;
+    @Column() totalSpent!: number;
+    @Column() lastOrderDate!: Date;
+}
+
+// Configure as keyless
+export class AppDbContext extends DbContext {
+    protected onModelCreating(modelBuilder: ModelBuilder): void {
+        modelBuilder.entity(UserSummary)
+            .hasNoKey()
+            .toTable('vw_user_summary'); // Maps to database view
+    }
+}
+```
+
+### Querying Keyless Entities
+
+Keyless entities work just like regular entities:
+
+```typescript
+// Query the view
+const summaries = await db.set(UserSummary).toList();
+
+// Filter results
+const bigSpenders = await db.set(UserSummary)
+    .where('totalSpent', '>', 10000)
+    .orderByDescending('totalSpent')
+    .toList();
+
+// Raw SQL with keyless entities
+const topSummaries = await db.set(UserSummary)
+    .fromSqlRaw(`
+        SELECT * FROM vw_user_summary
+        WHERE order_count > $1
+        ORDER BY total_spent DESC
+        LIMIT 10
+    `, [5])
+    .toList();
+```
+
+### Use Cases for Keyless Entities
+
+**Database Views:**
+```typescript
+@Entity("vw_product_inventory")
+export class ProductInventory {
+    @Column() productName!: string;
+    @Column() categoryName!: string;
+    @Column() stockLevel!: number;
+    @Column() reorderPoint!: number;
+    @Column() needsReorder!: boolean;
+}
+
+modelBuilder.entity(ProductInventory)
+    .hasNoKey()
+    .toTable('vw_product_inventory');
+```
+
+**Stored Procedure Results:**
+```typescript
+@Entity("sp_sales_report")
+export class SalesReport {
+    @Column() month!: string;
+    @Column() revenue!: number;
+    @Column() expenses!: number;
+    @Column() profit!: number;
+}
+
+modelBuilder.entity(SalesReport)
+    .hasNoKey();
+
+// Query stored procedure
+const report = await db.set(SalesReport)
+    .fromSqlRaw('SELECT * FROM sp_get_monthly_sales($1, $2)', [2024, 1])
+    .toList();
+```
+
+**Ad-hoc Query Results:**
+```typescript
+@Entity("order_statistics")
+export class OrderStatistics {
+    @Column() customerId!: number;
+    @Column() totalOrders!: number;
+    @Column() avgOrderValue!: number;
+    @Column() firstOrder!: Date;
+    @Column() lastOrder!: Date;
+}
+
+modelBuilder.entity(OrderStatistics)
+    .hasNoKey();
+
+const stats = await db.set(OrderStatistics)
+    .fromSqlRaw(`
+        SELECT
+            customer_id,
+            COUNT(*) as total_orders,
+            AVG(total) as avg_order_value,
+            MIN(created_at) as first_order,
+            MAX(created_at) as last_order
+        FROM orders
+        GROUP BY customer_id
+    `)
+    .toList();
+```
+
+### Important Notes
+
+- **Read-Only**: Keyless entities cannot be inserted, updated, or deleted
+- **No Identity**: Cannot use `.find()` (no primary key to search by)
+- **Change Tracking**: Keyless entities are not tracked by default
+- **Views**: Perfect for mapping to database views that aggregate data
+- **Performance**: No overhead from primary key constraints or identity checks
 
 ## Query Optimization
 

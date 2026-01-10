@@ -283,6 +283,24 @@ export class EntityTypeBuilder<T> {
     }
 
     /**
+     * Marks this entity as keyless (no primary key)
+     * Keyless entities are useful for database views, query types, or read-only entities
+     * @example
+     * modelBuilder.entity(ProductSummary)
+     *     .hasNoKey()
+     *     .toTable('vw_product_summary'); // Database view
+     */
+    hasNoKey(): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            metadata.isKeyless = true;
+            // Clear any existing primary keys
+            metadata.columns.forEach(c => c.isPrimaryKey = false);
+        }
+        return this;
+    }
+
+    /**
      * Configures a property
      */
     property<TProp>(selector: (entity: T) => TProp): PropertyBuilder<T, TProp> {

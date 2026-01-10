@@ -28,6 +28,17 @@ export class DbSet<T> {
     }
 
     /**
+     * Add multiple entities to the context in the Added state.
+     * Call context.saveChanges() to insert them into the database.
+     * @param entities Array of entities to add
+     */
+    addRange(entities: T[]): void {
+        for (const entity of entities) {
+            this.context.changeTracker.track(entity, EntityState.Added);
+        }
+    }
+
+    /**
      * Update an entity in the context in the Modified state.
      * Call context.saveChanges() to update it in the database.
      */
@@ -36,11 +47,33 @@ export class DbSet<T> {
     }
 
     /**
+     * Update multiple entities in the context in the Modified state.
+     * Call context.saveChanges() to update them in the database.
+     * @param entities Array of entities to update
+     */
+    updateRange(entities: T[]): void {
+        for (const entity of entities) {
+            this.context.changeTracker.track(entity, EntityState.Modified);
+        }
+    }
+
+    /**
      * Remove an entity from the context in the Deleted state.
      * Call context.saveChanges() to delete it from the database.
      */
     remove(entity: T): void {
         this.context.changeTracker.track(entity, EntityState.Deleted);
+    }
+
+    /**
+     * Remove multiple entities from the context in the Deleted state.
+     * Call context.saveChanges() to delete them from the database.
+     * @param entities Array of entities to remove
+     */
+    removeRange(entities: T[]): void {
+        for (const entity of entities) {
+            this.context.changeTracker.track(entity, EntityState.Deleted);
+        }
     }
 
     async toList(): Promise<T[]> {
@@ -218,6 +251,20 @@ export class DbSet<T> {
     groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
         const propertyName = extractPropertyName(selector);
         return new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
+    }
+
+    /**
+     * Creates a query using raw SQL
+     * @param sql Raw SQL query
+     * @param parameters Optional parameters for the query
+     * @returns QueryBuilder with raw SQL query
+     * @example
+     * const users = await db.set(User)
+     *     .fromSqlRaw('SELECT * FROM users WHERE age > $1', [18])
+     *     .toList();
+     */
+    fromSqlRaw(sql: string, parameters?: any[]): RawSqlQueryBuilder<T> {
+        return new RawSqlQueryBuilder(this.entityType, this.context, sql, parameters);
     }
 
     private mapRowToEntity(row: any, track: boolean = false): T {
@@ -1007,6 +1054,75 @@ export class SelectQueryBuilder<T, TResult> {
             // Error parsing selector - use in-memory projection
             return null;
         }
+    }
+}
+
+/**
+ * Query builder for raw SQL queries
+ * Allows executing custom SQL and mapping results to entities
+ */
+export class RawSqlQueryBuilder<T> {
+    constructor(
+        private entityType: new () => T,
+        private context: DbContext,
+        private sql: string,
+        private parameters?: any[]
+    ) {}
+
+    /**
+     * Execute the raw SQL query and return results as entities
+     */
+    async toList(): Promise<T[]> {
+        const res = await this.context.query(this.sql, this.parameters);
+
+        // Map rows to entities
+        const entities = res.rows.map((row: any) =>
+            DbSet.mapRowToEntity(this.entityType, row, false, this.context)
+        );
+
+        // Apply global query filter
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata?.queryFilter) {
+            return entities.filter(metadata.queryFilter);
+        }
+
+        return entities;
+    }
+
+    /**
+     * Execute the raw SQL query without tracking
+     */
+    async toListNoTracking(): Promise<T[]> {
+        const res = await this.context.query(this.sql, this.parameters);
+
+        // Map rows to entities without tracking
+        const entities = res.rows.map((row: any) =>
+            DbSet.mapRowToEntity(this.entityType, row, true)
+        );
+
+        // Apply global query filter
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata?.queryFilter) {
+            return entities.filter(metadata.queryFilter);
+        }
+
+        return entities;
+    }
+
+    /**
+     * Get first result or null
+     */
+    async first(): Promise<T | null> {
+        const results = await this.toList();
+        return results.length > 0 ? results[0] : null;
+    }
+
+    /**
+     * Count results
+     */
+    async count(): Promise<number> {
+        const results = await this.toList();
+        return results.length;
     }
 }
 

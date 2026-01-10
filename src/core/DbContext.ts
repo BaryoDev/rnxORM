@@ -59,6 +59,23 @@ export class DbContext {
         return await this.provider.query(text, params);
     }
 
+    /**
+     * Executes raw SQL against the database and returns the number of rows affected
+     * Use this for UPDATE, DELETE, or other non-query operations
+     * @param sql Raw SQL statement
+     * @param parameters Optional parameters for the query
+     * @returns Number of rows affected
+     * @example
+     * const rowsAffected = await db.executeSqlRaw(
+     *     'UPDATE users SET status = $1 WHERE created_at < $2',
+     *     ['inactive', '2020-01-01']
+     * );
+     */
+    async executeSqlRaw(sql: string, parameters?: any[]): Promise<number> {
+        const result = await this.provider.query(sql, parameters);
+        return result.rowCount;
+    }
+
     // Transaction management
     async beginTransaction() {
         await this.provider.beginTransaction();
@@ -277,6 +294,12 @@ export class DbContext {
         // Phase 1: Create all tables first (without foreign keys)
         console.log('Creating tables...');
         for (const entity of entities) {
+            // Skip keyless entities (they're typically views or query types)
+            if (entity.isKeyless) {
+                console.log(`Skipping keyless entity: ${entity.tableName}`);
+                continue;
+            }
+
             const createTableSql = this.provider.generateCreateTableSql(entity);
             await this.query(createTableSql);
         }

@@ -79,6 +79,7 @@ export interface EntityMetadata {
     uniqueConstraints: UniqueConstraintMetadata[];
     seedData?: any[]; // Initial data for seeding
     queryFilter?: (entity: any) => boolean; // Global query filter (e.g., soft delete)
+    isKeyless?: boolean; // Is this a keyless entity type (for views, query types)
 }
 
 export class MetadataStorage {
