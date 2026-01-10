@@ -224,7 +224,17 @@ export class DbSet<T> {
         const entity = new this.entityType();
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         metadata?.columns.forEach(col => {
-            (entity as any)[col.propertyName] = row[col.columnName];
+            let value = row[col.columnName];
+
+            // Apply value conversion from database to entity
+            if (col.hasConversion && col.convertFromDb) {
+                value = col.convertFromDb(value);
+            }
+
+            // Only set non-shadow properties on the entity
+            if (!col.isShadowProperty) {
+                (entity as any)[col.propertyName] = value;
+            }
         });
 
         // Track the entity if requested
@@ -249,7 +259,17 @@ export class DbSet<T> {
         const entity = new entityType();
         const metadata = MetadataStorage.get().getEntity(entityType);
         metadata?.columns.forEach(col => {
-            (entity as any)[col.propertyName] = row[col.columnName];
+            let value = row[col.columnName];
+
+            // Apply value conversion from database to entity
+            if (col.hasConversion && col.convertFromDb) {
+                value = col.convertFromDb(value);
+            }
+
+            // Only set non-shadow properties on the entity
+            if (!col.isShadowProperty) {
+                (entity as any)[col.propertyName] = value;
+            }
         });
 
         // Track the entity if tracking is enabled and context is provided
@@ -277,6 +297,7 @@ export class QueryBuilder<T> {
     private skipCount?: number;
     private takeCount?: number;
     private isDistinct: boolean = false;
+    private ignoreFilters: boolean = false;
 
     constructor(
         private entityType: new () => T,
@@ -362,6 +383,16 @@ export class QueryBuilder<T> {
         return this;
     }
 
+    /**
+     * Disables global query filters for this query.
+     * Useful for accessing soft-deleted entities or bypassing tenant filters.
+     * @returns This query builder
+     */
+    ignoreQueryFilters(): this {
+        this.ignoreFilters = true;
+        return this;
+    }
+
     async toList(): Promise<T[]> {
         let whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
 
@@ -397,12 +428,21 @@ export class QueryBuilder<T> {
             DbSet.mapRowToEntity(this.entityType, row, this.noTracking, this.context)
         );
 
-        // Load includes (eager loading)
-        if (this.includes.length > 0) {
-            await this.loadIncludes(entities);
+        // Apply global query filter (unless ignored)
+        let filteredEntities = entities;
+        if (!this.ignoreFilters) {
+            const metadata = MetadataStorage.get().getEntity(this.entityType);
+            if (metadata?.queryFilter) {
+                filteredEntities = entities.filter(metadata.queryFilter);
+            }
         }
 
-        return entities;
+        // Load includes (eager loading)
+        if (this.includes.length > 0) {
+            await this.loadIncludes(filteredEntities);
+        }
+
+        return filteredEntities;
     }
 
     /**

@@ -10,6 +10,10 @@ export interface ColumnMetadata {
     defaultValue?: any; // Default value for column
     isComputed?: boolean; // Is this a computed column?
     computedColumnSql?: string; // SQL for computed column
+    isShadowProperty?: boolean; // Is this a shadow property (no entity property)?
+    hasConversion?: boolean; // Does this column have value conversion?
+    convertToDb?: (value: any) => any; // Convert from entity to database
+    convertFromDb?: (value: any) => any; // Convert from database to entity
 }
 
 export enum RelationType {
@@ -74,6 +78,7 @@ export interface EntityMetadata {
     indexes: IndexMetadata[];
     uniqueConstraints: UniqueConstraintMetadata[];
     seedData?: any[]; // Initial data for seeding
+    queryFilter?: (entity: any) => boolean; // Global query filter (e.g., soft delete)
 }
 
 export class MetadataStorage {

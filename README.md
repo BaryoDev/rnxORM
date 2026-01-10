@@ -172,6 +172,9 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **Repository Pattern**: `DbSet<T>` with integrated change tracking
 - **Default Values**: Set column defaults via `hasDefaultValue()`
 - **Computed Columns**: Database-calculated columns via `hasComputedColumnSql()`
+- **Global Query Filters**: Automatic filtering for soft deletes, multi-tenancy via `hasQueryFilter()`
+- **Value Converters**: Transform values between entity and database representations via `hasConversion()`
+- **Shadow Properties**: Database-only columns without entity properties via `shadowProperty()`
 - **Query Optimization**: `.asNoTracking()` for read-only queries
 - **Primary Key Lookup**: `.find(id)` for quick entity retrieval
 - **Transactions**: Automatic transaction wrapping for `saveChanges()`
@@ -845,6 +848,343 @@ protected onModelCreating(modelBuilder: ModelBuilder): void {
         ]);
 }
 ```
+
+## Global Query Filters
+
+Global query filters automatically apply to all queries for an entity, making them perfect for implementing soft deletes, multi-tenancy, or other row-level filtering requirements.
+
+### Defining Query Filters
+
+Use `hasQueryFilter()` in your `onModelCreating()` method:
+
+```typescript
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    // Soft delete filter - only return non-deleted entities
+    modelBuilder.entity(User)
+        .hasQueryFilter(u => !u.isDeleted);
+
+    // Multi-tenant filter - only return entities for current tenant
+    modelBuilder.entity(Document)
+        .hasQueryFilter(d => d.tenantId === this.currentTenantId);
+
+    // Combine multiple conditions
+    modelBuilder.entity(Post)
+        .hasQueryFilter(p => p.isPublished && !p.isDeleted);
+}
+```
+
+### Automatic Filtering
+
+Query filters are **automatically applied** to all queries:
+
+```typescript
+// This query automatically filters out deleted users
+const users = await db.set(User).toList();
+// SQL: SELECT * FROM users WHERE NOT is_deleted
+
+// Filters apply to where clauses too
+const admins = await db.set(User).where('role', '=', 'admin').toList();
+// SQL: SELECT * FROM users WHERE role = 'admin' AND NOT is_deleted
+
+// Filters apply to find()
+const user = await db.set(User).find(1);
+// Returns null if user.id = 1 but user.isDeleted = true
+```
+
+### Bypassing Query Filters
+
+Use `ignoreQueryFilters()` to bypass global filters when needed:
+
+```typescript
+// Get ALL users, including deleted ones
+const allUsers = await db.set(User)
+    .ignoreQueryFilters()
+    .toList();
+
+// Useful for admin interfaces or data recovery
+const deletedUsers = await db.set(User)
+    .ignoreQueryFilters()
+    .where('isDeleted', '=', true)
+    .toList();
+
+// Works with all query methods
+const user = await db.set(User)
+    .ignoreQueryFilters()
+    .find(1); // Returns user even if deleted
+```
+
+### Use Cases
+
+**Soft Deletes:**
+```typescript
+@Entity("users")
+export class User {
+    @PrimaryKey() id!: number;
+    @Column() name!: string;
+    @Column() isDeleted!: boolean;
+    @Column() deletedAt?: Date;
+}
+
+modelBuilder.entity(User)
+    .hasQueryFilter(u => !u.isDeleted);
+
+// In your code:
+const user = await users.find(1);
+user.isDeleted = true;
+user.deletedAt = new Date();
+await db.saveChanges(); // User is "soft deleted"
+
+// Regular queries won't return deleted users
+const activeUsers = await users.toList(); // Excludes soft-deleted users
+```
+
+**Multi-Tenancy:**
+```typescript
+export class AppDbContext extends DbContext {
+    constructor(provider: IDatabaseProvider, private tenantId: string) {
+        super(provider);
+    }
+
+    protected onModelCreating(modelBuilder: ModelBuilder): void {
+        modelBuilder.entity(Order)
+            .hasQueryFilter(o => o.tenantId === this.tenantId);
+
+        modelBuilder.entity(Customer)
+            .hasQueryFilter(c => c.tenantId === this.tenantId);
+    }
+}
+
+// Each tenant only sees their own data
+const db = new AppDbContext(provider, 'tenant-123');
+const orders = await db.set(Order).toList(); // Only returns tenant-123's orders
+```
+
+## Value Converters
+
+Value converters allow you to transform values between their entity representation (TypeScript) and database representation (SQL), enabling complex type mappings and data transformations.
+
+### Defining Value Converters
+
+Use `hasConversion()` in your `onModelCreating()` method:
+
+```typescript
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    // Convert JSON object to string for storage
+    modelBuilder.entity(User)
+        .property(u => u.preferences)
+        .hasConversion(
+            // To database: serialize object to JSON string
+            (value: any) => JSON.stringify(value),
+            // From database: parse JSON string to object
+            (value: string) => JSON.parse(value)
+        );
+
+    // Convert boolean to integer (0/1)
+    modelBuilder.entity(Product)
+        .property(p => p.isActive)
+        .hasConversion(
+            (value: boolean) => value ? 1 : 0,
+            (value: number) => value === 1
+        );
+
+    // Encrypt sensitive data
+    modelBuilder.entity(User)
+        .property(u => u.ssn)
+        .hasConversion(
+            (value: string) => encrypt(value),
+            (value: string) => decrypt(value)
+        );
+
+    // Convert enums to strings
+    modelBuilder.entity(Order)
+        .property(o => o.status)
+        .hasConversion(
+            (value: OrderStatus) => OrderStatus[value],
+            (value: string) => OrderStatus[value as keyof typeof OrderStatus]
+        );
+}
+```
+
+### Automatic Conversion
+
+Conversions are **automatically applied** when reading from or writing to the database:
+
+```typescript
+// When saving
+const user = new User();
+user.preferences = { theme: 'dark', notifications: true };
+users.add(user);
+await db.saveChanges();
+// Database stores: '{"theme":"dark","notifications":true}'
+
+// When querying
+const loadedUser = await users.find(1);
+console.log(loadedUser.preferences); // { theme: 'dark', notifications: true }
+// Automatically converted from JSON string to object
+```
+
+### Common Conversion Patterns
+
+**JSON Serialization:**
+```typescript
+modelBuilder.entity(Product)
+    .property(p => p.metadata)
+    .hasColumnType('text')
+    .hasConversion(
+        (value: any) => JSON.stringify(value),
+        (value: string) => JSON.parse(value || '{}')
+    );
+```
+
+**Date Formatting:**
+```typescript
+modelBuilder.entity(Event)
+    .property(e => e.scheduledDate)
+    .hasConversion(
+        (value: Date) => value.toISOString(),
+        (value: string) => new Date(value)
+    );
+```
+
+**Array Storage:**
+```typescript
+modelBuilder.entity(User)
+    .property(u => u.tags)
+    .hasConversion(
+        (value: string[]) => value.join(','),
+        (value: string) => value ? value.split(',') : []
+    );
+```
+
+**Custom Objects:**
+```typescript
+class Address {
+    constructor(public street: string, public city: string, public zip: string) {}
+}
+
+modelBuilder.entity(User)
+    .property(u => u.address)
+    .hasConversion(
+        (value: Address) => `${value.street}|${value.city}|${value.zip}`,
+        (value: string) => {
+            const [street, city, zip] = value.split('|');
+            return new Address(street, city, zip);
+        }
+    );
+```
+
+## Shadow Properties
+
+Shadow properties are database columns that don't have corresponding properties on your entity class. They're useful for database-managed metadata like timestamps, audit fields, or computed values that you don't want to expose in your entity model.
+
+### Defining Shadow Properties
+
+Use `shadowProperty()` in your `onModelCreating()` method:
+
+```typescript
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    modelBuilder.entity(User)
+        // Timestamp shadow properties
+        .shadowProperty('created_at', 'timestamp', {
+            defaultValue: 'CURRENT_TIMESTAMP'
+        })
+        .shadowProperty('updated_at', 'timestamp', {
+            defaultValue: 'CURRENT_TIMESTAMP'
+        })
+        // Audit shadow properties
+        .shadowProperty('created_by_id', 'integer', {
+            nullable: true
+        })
+        .shadowProperty('row_version', 'integer', {
+            defaultValue: 1
+        });
+
+    modelBuilder.entity(Product)
+        // Custom column name
+        .shadowProperty('internal_id', 'varchar(50)', {
+            columnName: 'internal_product_id',
+            nullable: false
+        });
+}
+```
+
+### Shadow Property Behavior
+
+**Not Mapped to Entity:**
+```typescript
+@Entity("users")
+export class User {
+    @PrimaryKey() id!: number;
+    @Column() name!: string;
+    @Column() email!: string;
+    // Note: NO created_at or updated_at properties!
+}
+
+// But the database has these columns:
+// CREATE TABLE users (
+//     id INTEGER PRIMARY KEY,
+//     name TEXT,
+//     email TEXT,
+//     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+//     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+// );
+```
+
+**Automatic Database Management:**
+- Shadow properties are **included in CREATE TABLE** statements
+- They're **included in INSERT** statements (using default values)
+- They're **excluded from entity mapping** (not set on TypeScript objects)
+- They're **managed entirely by the database**
+
+### Use Cases
+
+**Audit Timestamps:**
+```typescript
+modelBuilder.entity(Order)
+    .shadowProperty('created_at', 'timestamp', {
+        defaultValue: 'CURRENT_TIMESTAMP'
+    })
+    .shadowProperty('updated_at', 'timestamp', {
+        defaultValue: 'CURRENT_TIMESTAMP'
+    });
+```
+
+**Database-Level Metadata:**
+```typescript
+modelBuilder.entity(Document)
+    .shadowProperty('db_created_at', 'timestamp', {
+        defaultValue: 'NOW()'
+    })
+    .shadowProperty('db_last_modified', 'timestamp', {
+        defaultValue: 'NOW()'
+    })
+    .shadowProperty('db_version', 'integer', {
+        defaultValue: 1
+    });
+```
+
+**Soft Delete with Timestamp:**
+```typescript
+modelBuilder.entity(User)
+    .shadowProperty('deleted_at', 'timestamp', {
+        nullable: true
+    })
+    .hasQueryFilter(u => !u.isDeleted);
+```
+
+### When to Use Shadow Properties
+
+✅ **Use shadow properties when:**
+- Database needs columns that your application doesn't use
+- Implementing database-level audit trails
+- Working with legacy databases with extra columns
+- Database-managed timestamps or versioning
+- Columns are purely for database constraints or triggers
+
+❌ **Don't use shadow properties when:**
+- Your application needs to read or modify the values
+- The data is part of your business logic
+- You need to query or filter by these values from TypeScript
 
 ## Query Optimization
 

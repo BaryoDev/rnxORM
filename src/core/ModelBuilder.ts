@@ -114,6 +114,33 @@ export class PropertyBuilder<T, TProp> {
         }
         return this;
     }
+
+    /**
+     * Configures value conversion for this property
+     * @param convertToDb Function to convert from entity value to database value
+     * @param convertFromDb Function to convert from database value to entity value
+     * @example
+     * // Store enum as string
+     * property(u => u.role).hasConversion(
+     *     role => role.toString(),
+     *     value => UserRole[value as keyof typeof UserRole]
+     * )
+     */
+    hasConversion<TProperty, TProvider>(
+        convertToDb: (value: TProperty) => TProvider,
+        convertFromDb: (value: TProvider) => TProperty
+    ): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.hasConversion = true;
+                column.convertToDb = convertToDb as any;
+                column.convertFromDb = convertFromDb as any;
+            }
+        }
+        return this;
+    }
 }
 
 /**
@@ -434,6 +461,65 @@ export class EntityTypeBuilder<T> {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
             metadata.seedData = data;
+        }
+        return this;
+    }
+
+    /**
+     * Configures a global query filter for this entity
+     * The filter is automatically applied to all queries
+     * @param filter Predicate function to filter entities
+     * @example
+     * // Soft delete filter
+     * modelBuilder.entity(User)
+     *     .hasQueryFilter(u => u.isDeleted === false)
+     *
+     * // Multi-tenancy filter
+     * modelBuilder.entity(Order)
+     *     .hasQueryFilter(o => o.tenantId === currentTenantId)
+     */
+    hasQueryFilter(filter: (entity: T) => boolean): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            metadata.queryFilter = filter as any;
+        }
+        return this;
+    }
+
+    /**
+     * Defines a shadow property - a column that exists in the database but not on the entity class
+     * @param propertyName Name of the shadow property
+     * @param columnType Database column type
+     * @param options Additional options
+     * @example
+     * modelBuilder.entity(User)
+     *     .shadowProperty('CreatedAt', 'timestamp', { defaultValue: 'CURRENT_TIMESTAMP' })
+     *     .shadowProperty('UpdatedAt', 'timestamp')
+     */
+    shadowProperty(
+        propertyName: string,
+        columnType: string,
+        options?: {
+            columnName?: string;
+            nullable?: boolean;
+            defaultValue?: any;
+        }
+    ): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const existing = metadata.columns.find(c => c.propertyName === propertyName);
+            if (!existing) {
+                metadata.columns.push({
+                    target: this.entityType,
+                    propertyName,
+                    columnName: options?.columnName || propertyName,
+                    type: columnType,
+                    isPrimaryKey: false,
+                    isNullable: options?.nullable !== false,
+                    isShadowProperty: true,
+                    defaultValue: options?.defaultValue
+                });
+            }
         }
         return this;
     }

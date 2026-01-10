@@ -151,13 +151,25 @@ export class DbContext {
      */
     private async insertEntity(entity: any, metadata: any, tableName: string): Promise<void> {
         const columns = metadata.columns.filter((c: any) => {
+            // Skip shadow properties
+            if (c.isShadowProperty) return true;
+
             const value = entity[c.propertyName];
             // Skip auto-increment primary keys with undefined/null values
             return !(c.isPrimaryKey && c.isAutoIncrement && (value === undefined || value === null));
         });
 
         const columnNames = columns.map((c: any) => c.columnName);
-        const values = columns.map((c: any) => entity[c.propertyName]);
+        const values = columns.map((c: any) => {
+            let value = c.isShadowProperty ? c.defaultValue : entity[c.propertyName];
+
+            // Apply value conversion from entity to database
+            if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
+                value = c.convertToDb(value);
+            }
+
+            return value;
+        });
 
         const placeholders = values.map((_: any, i: number) => this.provider.getParameterPlaceholder(i + 1));
 
@@ -190,7 +202,15 @@ export class DbContext {
             const column = metadata.columns.find((c: any) => c.propertyName === propName);
             if (column && !column.isPrimaryKey) {
                 setClause.push(`${column.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
-                values.push(entity[propName]);
+
+                let value = entity[propName];
+
+                // Apply value conversion from entity to database
+                if (column.hasConversion && column.convertToDb && value !== undefined && value !== null) {
+                    value = column.convertToDb(value);
+                }
+
+                values.push(value);
             }
         }
 
@@ -198,7 +218,14 @@ export class DbContext {
             return; // No non-PK columns to update
         }
 
-        values.push(entity[pkColumn.propertyName]);
+        let pkValue = entity[pkColumn.propertyName];
+
+        // Apply value conversion to primary key if needed
+        if (pkColumn.hasConversion && pkColumn.convertToDb && pkValue !== undefined && pkValue !== null) {
+            pkValue = pkColumn.convertToDb(pkValue);
+        }
+
+        values.push(pkValue);
 
         const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex)}`;
 
@@ -209,7 +236,13 @@ export class DbContext {
      * Delete an entity
      */
     private async deleteEntity(entity: any, metadata: any, tableName: string, pkColumn: any): Promise<void> {
-        const pkValue = entity[pkColumn.propertyName];
+        let pkValue = entity[pkColumn.propertyName];
+
+        // Apply value conversion to primary key if needed
+        if (pkColumn.hasConversion && pkColumn.convertToDb && pkValue !== undefined && pkValue !== null) {
+            pkValue = pkColumn.convertToDb(pkValue);
+        }
+
         const placeholder = this.provider.getParameterPlaceholder(1);
 
         const sql = `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
@@ -421,11 +454,20 @@ export class DbContext {
                         if (!exists) {
                             // Insert seed data
                             const columns = entity.columns.filter(c =>
-                                (seedItem as any)[c.propertyName] !== undefined
+                                (seedItem as any)[c.propertyName] !== undefined || c.isShadowProperty
                             );
 
                             const columnNames = columns.map(c => c.columnName);
-                            const values = columns.map(c => (seedItem as any)[c.propertyName]);
+                            const values = columns.map(c => {
+                                let value = c.isShadowProperty ? c.defaultValue : (seedItem as any)[c.propertyName];
+
+                                // Apply value conversion from entity to database
+                                if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
+                                    value = c.convertToDb(value);
+                                }
+
+                                return value;
+                            });
                             const placeholders = values.map((_: any, i: number) =>
                                 this.provider.getParameterPlaceholder(i + 1)
                             );
