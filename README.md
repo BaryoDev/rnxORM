@@ -1,6 +1,6 @@
 # rnxORM
 
-A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core.
+A lightweight TypeScript ORM for **PostgreSQL**, **SQL Server**, and **MariaDB**, inspired by Entity Framework Core.
 
 [![npm version](https://img.shields.io/npm/v/rnxorm.svg)](https://www.npmjs.com/package/rnxorm)
 [![GitHub](https://img.shields.io/badge/github-BaryoDev%2FrnxORM-blue)](https://github.com/BaryoDev/rnxORM)
@@ -10,8 +10,21 @@ A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core.
 
 ## Installation
 
+**For PostgreSQL:**
 ```bash
 npm install rnxorm pg reflect-metadata
+npm install -D typescript @types/node @types/pg
+```
+
+**For SQL Server:**
+```bash
+npm install rnxorm mssql reflect-metadata
+npm install -D typescript @types/node @types/mssql
+```
+
+**For MariaDB/MySQL:**
+```bash
+npm install rnxorm mariadb reflect-metadata
 npm install -D typescript @types/node
 ```
 
@@ -48,23 +61,57 @@ export class User {
 }
 ```
 
-### 2. Connect and Query
+### 2. Connect to Database
+
+rnxORM supports multiple databases through provider pattern:
+
+**PostgreSQL:**
+```typescript
+import { DbContext, PostgreSQLProvider } from "rnxorm";
+
+const db = new DbContext(new PostgreSQLProvider({
+  host: "localhost",
+  port: 5432,
+  user: "postgres",
+  password: "password",
+  database: "mydb",
+}));
+```
+
+**SQL Server:**
+```typescript
+import { DbContext, MSSQLProvider } from "rnxorm";
+
+const db = new DbContext(new MSSQLProvider({
+  host: "localhost",
+  port: 1433,
+  user: "sa",
+  password: "YourPassword123",
+  database: "mydb",
+}));
+```
+
+**MariaDB/MySQL:**
+```typescript
+import { DbContext, MariaDBProvider } from "rnxorm";
+
+const db = new DbContext(new MariaDBProvider({
+  host: "localhost",
+  port: 3306,
+  user: "root",
+  password: "password",
+  database: "mydb",
+}));
+```
+
+### 3. Basic CRUD Operations
 
 ```typescript
-import { DbContext } from "rnxorm";
 import { User } from "./User";
 
 async function main() {
-  const db = new DbContext({
-    host: "localhost",
-    port: 5432,
-    user: "postgres",
-    password: "password",
-    database: "mydb",
-  });
-
   await db.connect();
-  
+
   // Create tables if they don't exist
   await db.ensureCreated();
 
@@ -107,13 +154,20 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 
 ## Features
 
-- **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`
-- **Schema Scaffolding**: Automatically create tables with `ensureCreated()`
+- **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL
+- **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
+- **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
+- **Eager Loading**: `.include()` to load related entities
+- **Schema Scaffolding**: Automatically create tables, foreign keys, indexes, and constraints
 - **CRUD Operations**: `add`, `update`, `remove`, `toList`
-- **Fluent Query API**: `.where().toList()`
+- **Fluent Query API**: `.where().orderBy().skip().take()`
+- **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
+- **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
 - **Repository Pattern**: `DbSet<T>`
 - **Query Optimization**: `.asNoTracking()` for read-only queries
 - **Primary Key Lookup**: `.find(id)` for quick entity retrieval
+- **Transactions**: `beginTransaction()`, `commitTransaction()`, `rollbackTransaction()`
+- **Schema Evolution**: Auto-detect and migrate schema changes
 
 ## Type Mapping
 
@@ -155,6 +209,330 @@ The `.where(column, operator, value)` method supports standard SQL operators:
 // Examples
 users.where("age", ">=", 21);
 users.where("name", "ILIKE", "%doe%");
+```
+
+## Relationships
+
+rnxORM supports all major relationship types with automatic foreign key generation and eager loading.
+
+### One-to-Many / Many-to-One
+
+```typescript
+import { Entity, Column, PrimaryKey, OneToMany, ManyToOne } from "rnxorm";
+
+@Entity("users")
+export class User {
+  @PrimaryKey()
+  id!: number;
+
+  @Column()
+  name!: string;
+
+  @OneToMany(() => Post, post => post.author)
+  posts!: Post[];
+}
+
+@Entity("posts")
+export class Post {
+  @PrimaryKey()
+  id!: number;
+
+  @Column()
+  title!: string;
+
+  @ManyToOne(() => User, user => user.posts)
+  author!: User;
+}
+
+// Query with eager loading
+const users = await db.set(User)
+  .include(u => u.posts)
+  .toList();
+
+users[0].posts.forEach(post => console.log(post.title));
+```
+
+### Many-to-Many
+
+```typescript
+import { Entity, PrimaryKey, Column, ManyToMany } from "rnxorm";
+
+@Entity("students")
+export class Student {
+  @PrimaryKey()
+  id!: number;
+
+  @Column()
+  name!: string;
+
+  @ManyToMany(() => Course, course => course.students, {
+    joinTable: "student_courses",
+    joinColumn: "studentId",
+    inverseJoinColumn: "courseId"
+  })
+  courses!: Course[];
+}
+
+@Entity("courses")
+export class Course {
+  @PrimaryKey()
+  id!: number;
+
+  @Column()
+  name!: string;
+
+  @ManyToMany(() => Student, student => student.courses)
+  students!: Student[];
+}
+
+// Query with eager loading
+const students = await db.set(Student)
+  .include(s => s.courses)
+  .toList();
+```
+
+### One-to-One
+
+```typescript
+import { Entity, PrimaryKey, Column, OneToOne } from "rnxorm";
+
+@Entity("users")
+export class User {
+  @PrimaryKey()
+  id!: number;
+
+  @Column()
+  name!: string;
+
+  @OneToOne(() => Profile, profile => profile.user)
+  profile!: Profile;
+}
+
+@Entity("profiles")
+export class Profile {
+  @PrimaryKey()
+  id!: number;
+
+  @Column()
+  bio!: string;
+
+  @OneToOne(() => User, user => user.profile)
+  user!: User;
+}
+```
+
+### Cascade Options
+
+Control what happens when parent entities are deleted:
+
+```typescript
+@ManyToOne(() => User, user => user.posts, {
+  onDelete: "CASCADE",  // Options: CASCADE, SET_NULL, RESTRICT, NO_ACTION
+  onUpdate: "CASCADE"
+})
+author!: User;
+```
+
+## LINQ-Style Query API
+
+rnxORM provides a comprehensive LINQ-style API for querying data.
+
+### Aggregations
+
+```typescript
+// Sum
+const totalAge = await users.sum(u => u.age);
+
+// Average
+const avgAge = await users.average(u => u.age);
+
+// Min/Max
+const youngest = await users.min(u => u.age);
+const oldest = await users.max(u => u.age);
+
+// Count
+const userCount = await users.count();
+
+// With conditions
+const adultCount = await users.where("age", ">=", 18).count();
+```
+
+### Projections (Select)
+
+```typescript
+// Simple projection
+const names = await users
+  .select(u => ({ name: u.name, email: u.email }))
+  .toList();
+
+// With transformations
+const summary = await users
+  .select(u => ({
+    fullInfo: `${u.name} (${u.age})`,
+    isAdult: u.age >= 18
+  }))
+  .toList();
+```
+
+### Group By
+
+```typescript
+// Group users by age
+const grouped = await users
+  .groupBy(u => u.age)
+  .select(g => ({
+    age: g.key,
+    count: g.count(),
+    avgSalary: g.average(u => u.salary),
+    totalSalary: g.sum(u => u.salary)
+  }))
+  .toList();
+
+// With HAVING clause
+const popularAges = await users
+  .groupBy(u => u.age)
+  .having('COUNT(*)', '>', 5)
+  .select(g => ({ age: g.key, count: g.count() }))
+  .toList();
+```
+
+### Distinct
+
+```typescript
+// Get unique ages
+const uniqueAges = await users
+  .select(u => u.age)
+  .distinct()
+  .toList();
+```
+
+### Advanced Queries
+
+```typescript
+// Single - throws if 0 or >1 results
+const user = await users.where("email", "=", "alice@example.com").single();
+
+// SingleOrDefault - returns null if not found, throws if >1
+const maybeUser = await users.where("age", "=", 25).singleOrDefault();
+
+// FirstOrThrow - throws if no results
+const firstUser = await users.orderBy("name").firstOrThrow();
+
+// All - checks if all entities match predicate
+const allAdults = await users.all(u => u.age >= 18);
+```
+
+## Fluent API / ModelBuilder
+
+Configure entities programmatically by overriding `onModelCreating()` in your DbContext:
+
+```typescript
+import { DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
+
+export class AppDbContext extends DbContext {
+  constructor() {
+    super(new PostgreSQLProvider({ /* config */ }));
+  }
+
+  protected onModelCreating(modelBuilder: ModelBuilder): void {
+    // Configure User entity
+    modelBuilder.entity(User)
+      .toTable('users')
+      .hasKey(u => u.id)
+      .hasIndex(u => u.email, { unique: true })
+      .property(u => u.email)
+        .isRequired()
+        .hasMaxLength(255)
+        .hasColumnType('varchar(255)');
+
+    // Configure relationships
+    modelBuilder.entity(Post)
+      .hasOne(p => p.author, User)
+        .withMany(u => u.posts)
+        .hasForeignKey('authorId')
+        .onDelete('CASCADE');
+
+    // Configure many-to-many
+    modelBuilder.entity(Student)
+      .hasManyToMany(s => s.courses, Course, {
+        joinTable: 'student_courses',
+        leftKey: 'studentId',
+        rightKey: 'courseId'
+      });
+
+    // Configure indexes and constraints
+    modelBuilder.entity(User)
+      .hasCompositeIndex([u => u.firstName, u => u.lastName])
+      .hasUnique(u => u.username);
+  }
+}
+```
+
+### Available Fluent API Methods
+
+**Entity Configuration:**
+- `.toTable(name)` - Set table name
+- `.hasKey(selector)` - Set primary key
+- `.hasIndex(selector, options?)` - Add index
+- `.hasCompositeIndex(selectors, options?)` - Add composite index
+- `.hasUnique(selector, options?)` - Add unique constraint
+
+**Property Configuration:**
+- `.property(selector)` - Configure a property
+  - `.isRequired()` - Mark as NOT NULL
+  - `.isOptional()` - Mark as nullable
+  - `.hasMaxLength(length)` - Set max length for strings
+  - `.hasColumnName(name)` - Set column name
+  - `.hasColumnType(type)` - Set database type
+
+**Relationship Configuration:**
+- `.hasOne(selector, type)` - Configure one-to-one or many-to-one
+  - `.withOne(selector)` - Inverse for one-to-one
+  - `.withMany(selector)` - Inverse for one-to-many
+  - `.hasForeignKey(column)` - Set foreign key column
+  - `.onDelete(action)` - Set ON DELETE behavior
+  - `.onUpdate(action)` - Set ON UPDATE behavior
+- `.hasMany(selector, type)` - Configure one-to-many
+- `.hasManyToMany(selector, type, options)` - Configure many-to-many
+  - `.usingJoinTable(table, leftKey, rightKey)` - Configure join table
+
+## Indexes and Constraints
+
+### Using Decorators
+
+```typescript
+import { Entity, Column, PrimaryKey, Index, Unique } from "rnxorm";
+
+@Entity("users")
+@Index(["email"], { unique: true })
+@Index(["lastName", "firstName"])
+@Unique(["username"])
+export class User {
+  @PrimaryKey()
+  id!: number;
+
+  @Column()
+  @Unique()
+  email!: string;
+
+  @Column()
+  username!: string;
+
+  @Column()
+  firstName!: string;
+
+  @Column()
+  lastName!: string;
+}
+```
+
+### Using Fluent API
+
+```typescript
+modelBuilder.entity(User)
+  .hasIndex(u => u.email, { unique: true, name: 'idx_user_email' })
+  .hasCompositeIndex([u => u.lastName, u => u.firstName], { name: 'idx_user_name' })
+  .hasUnique(u => u.username, { name: 'uq_user_username' });
 ```
 
 ## Query Optimization
@@ -250,7 +628,7 @@ If you change the type of a property (e.g., from `string` to `number`), rnxORM a
 ### What is NOT handled?
 -   **Renaming Columns**: If you rename a property, rnxORM sees it as a "missing" column (the new name) and adds it. The old column remains in the database. It does **not** rename the existing column.
 -   **Deleting Columns**: If you remove a property from your class, the column remains in the database. rnxORM does **not** delete columns to prevent accidental data loss.
--   **Complex Constraints**: Foreign keys, unique constraints (other than PK), and indexes are not currently supported via decorators.
+-   **Data Migrations**: Complex data transformations during schema changes must be handled manually.
 
 ## Repository
 
@@ -260,4 +638,4 @@ If you change the type of a property (e.g., from `string` to `number`), rnxORM a
 
 ## License
 
-ISC
+MPL-2.0

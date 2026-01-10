@@ -231,6 +231,16 @@ export class DbSet<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).distinct();
     }
 
+    /**
+     * Group entities by a property
+     * @param selector Property selector function
+     * @example await users.groupBy(u => u.department).select(g => ({ dept: g.key, count: g.count() })).toList()
+     */
+    groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
+        const propertyName = extractPropertyName(selector);
+        return new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
+    }
+
     private mapRowToEntity(row: any, freeze: boolean = false): T {
         const entity = new this.entityType();
         const metadata = MetadataStorage.get().getEntity(this.entityType);
@@ -554,6 +564,19 @@ export class QueryBuilder<T> {
     distinct(): this {
         this.isDistinct = true;
         return this;
+    }
+
+    /**
+     * Group filtered results by a property
+     * @param selector Property selector function
+     */
+    groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
+        const propertyName = extractPropertyName(selector);
+        const builder = new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
+        // Copy current query state (WHERE conditions)
+        builder['conditions'] = [...this.conditions];
+        builder['params'] = [...this.params];
+        return builder;
     }
 
     private async loadIncludes(entities: T[]): Promise<void> {
@@ -946,5 +969,337 @@ export class SelectQueryBuilder<T, TResult> {
             // Error parsing selector - use in-memory projection
             return null;
         }
+    }
+}
+
+/**
+ * Represents a grouping of entities with a common key
+ * Used for GroupBy operations
+ */
+export interface IGrouping<TKey, TElement> {
+    key: TKey;
+    count(): number;
+    sum(selector: (element: TElement) => number): number;
+    average(selector: (element: TElement) => number): number;
+    min(selector: (element: TElement) => any): any;
+    max(selector: (element: TElement) => any): any;
+}
+
+/**
+ * Query builder for GROUP BY operations
+ * Allows grouping entities and performing aggregations
+ */
+export class GroupedQueryBuilder<T, TKey> {
+    private conditions: string[] = [];
+    private params: any[] = [];
+    private havingConditions: string[] = [];
+    private havingParams: any[] = [];
+    private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
+    private skipCount?: number;
+    private takeCount?: number;
+
+    constructor(
+        private entityType: new () => T,
+        private context: DbContext,
+        private tableName: string,
+        private groupByProperty: string
+    ) {}
+
+    /**
+     * Filter groups using HAVING clause
+     * @param column Aggregate column or group column
+     * @param operator Comparison operator
+     * @param value Value to compare
+     * @example groupBy(u => u.dept).having('COUNT(*)', '>', 5)
+     */
+    having(column: string, operator: string, value: any): this {
+        const provider = this.context.getProvider();
+        const placeholder = provider.getParameterPlaceholder(this.params.length + this.havingParams.length + 1);
+        this.havingConditions.push(`${column} ${operator} ${placeholder}`);
+        this.havingParams.push(value);
+        return this;
+    }
+
+    /**
+     * Order grouped results
+     */
+    orderBy(column: string): this {
+        this.orderByColumns.push({ column, direction: 'ASC' });
+        return this;
+    }
+
+    /**
+     * Order grouped results descending
+     */
+    orderByDescending(column: string): this {
+        this.orderByColumns.push({ column, direction: 'DESC' });
+        return this;
+    }
+
+    /**
+     * Skip N groups
+     */
+    skip(count: number): this {
+        this.skipCount = count;
+        return this;
+    }
+
+    /**
+     * Take N groups
+     */
+    take(count: number): this {
+        this.takeCount = count;
+        return this;
+    }
+
+    /**
+     * Project grouped results with aggregations
+     * @param selector Function to build result from grouped data
+     * @example
+     * .select(g => ({
+     *   department: g.key,
+     *   count: g.count(),
+     *   avgSalary: g.average(u => u.salary)
+     * }))
+     */
+    select<TResult>(selector: (group: IGrouping<TKey, T>) => TResult): GroupedSelectBuilder<T, TKey, TResult> {
+        return new GroupedSelectBuilder(
+            this.entityType,
+            this.context,
+            this.tableName,
+            this.groupByProperty,
+            selector,
+            this.conditions,
+            this.params,
+            this.havingConditions,
+            this.havingParams,
+            this.orderByColumns,
+            this.skipCount,
+            this.takeCount
+        );
+    }
+
+    /**
+     * Execute group by and return groups with their elements (in-memory grouping)
+     * Warning: This loads all data into memory
+     */
+    async toList(): Promise<IGrouping<TKey, T>[]> {
+        // This is a simple in-memory grouping fallback
+        // For production, you should use .select() with aggregations
+        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const sql = `SELECT * FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
+        const res = await this.context.query(sql, this.params);
+
+        const entities = res.rows.map((row: any) =>
+            DbSet.mapRowToEntity(this.entityType, row, false)
+        );
+
+        // Group in memory
+        const groups = new Map<TKey, T[]>();
+        entities.forEach(entity => {
+            const key = (entity as any)[this.groupByProperty] as TKey;
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+            groups.get(key)!.push(entity);
+        });
+
+        // Convert to IGrouping interface
+        return Array.from(groups.entries()).map(([key, elements]) => ({
+            key,
+            count: () => elements.length,
+            sum: (selector: (e: T) => number) => elements.reduce((sum, e) => sum + selector(e), 0),
+            average: (selector: (e: T) => number) => {
+                const sum = elements.reduce((s, e) => s + selector(e), 0);
+                return elements.length > 0 ? sum / elements.length : 0;
+            },
+            min: (selector: (e: T) => any) => {
+                if (elements.length === 0) return null;
+                return Math.min(...elements.map(e => selector(e)));
+            },
+            max: (selector: (e: T) => any) => {
+                if (elements.length === 0) return null;
+                return Math.max(...elements.map(e => selector(e)));
+            }
+        }));
+    }
+}
+
+/**
+ * Builder for SELECT projections on grouped data
+ * Handles SQL GROUP BY with aggregations
+ */
+export class GroupedSelectBuilder<T, TKey, TResult> {
+    constructor(
+        private entityType: new () => T,
+        private context: DbContext,
+        private tableName: string,
+        private groupByProperty: string,
+        private selector: (group: IGrouping<TKey, T>) => TResult,
+        private conditions: string[],
+        private params: any[],
+        private havingConditions: string[],
+        private havingParams: any[],
+        private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[],
+        private skipCount?: number,
+        private takeCount?: number
+    ) {}
+
+    /**
+     * Execute the grouped query with aggregations
+     */
+    async toList(): Promise<TResult[]> {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const groupColumn = metadata?.columns.find(c => c.propertyName === this.groupByProperty);
+
+        if (!groupColumn) {
+            throw new Error(`Property ${this.groupByProperty} not found on entity`);
+        }
+
+        // Parse the selector to extract aggregations
+        const selectorStr = this.selector.toString();
+
+        // Extract aggregation and key references from selector
+        const aggregations = this.parseAggregations(selectorStr, groupColumn.columnName);
+
+        // Build SQL query
+        const selectClauses: string[] = [];
+        const aliases: string[] = [];
+
+        // Always include the grouping column
+        selectClauses.push(`${groupColumn.columnName}`);
+
+        // Add aggregations
+        aggregations.forEach(agg => {
+            selectClauses.push(agg.sql);
+            aliases.push(agg.alias);
+        });
+
+        let sql = `SELECT ${selectClauses.join(', ')} FROM ${this.tableName}`;
+
+        // WHERE clause
+        if (this.conditions.length > 0) {
+            sql += ` WHERE ${this.conditions.join(' AND ')}`;
+        }
+
+        // GROUP BY clause
+        sql += ` GROUP BY ${groupColumn.columnName}`;
+
+        // HAVING clause
+        if (this.havingConditions.length > 0) {
+            sql += ` HAVING ${this.havingConditions.join(' AND ')}`;
+        }
+
+        // ORDER BY clause
+        if (this.orderByColumns.length > 0) {
+            const orderBy = this.orderByColumns.map(o => `${o.column} ${o.direction}`).join(', ');
+            sql += ` ORDER BY ${orderBy}`;
+        }
+
+        // LIMIT/OFFSET
+        if (this.takeCount !== undefined) {
+            sql += ` LIMIT ${this.takeCount}`;
+        }
+        if (this.skipCount !== undefined) {
+            sql += ` OFFSET ${this.skipCount}`;
+        }
+
+        // Execute query
+        const allParams = [...this.params, ...this.havingParams];
+        const res = await this.context.query(sql, allParams);
+
+        // Map results (rows already have the shape we want from SQL)
+        return res.rows as TResult[];
+    }
+
+    /**
+     * Get first grouped result
+     */
+    async first(): Promise<TResult | null> {
+        const results = await this.toList();
+        return results.length > 0 ? results[0] : null;
+    }
+
+    /**
+     * Count number of groups
+     */
+    async count(): Promise<number> {
+        const results = await this.toList();
+        return results.length;
+    }
+
+    /**
+     * Parse selector string to extract SQL aggregations
+     */
+    private parseAggregations(selectorStr: string, groupColumn: string): Array<{ sql: string; alias: string }> {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const aggregations: Array<{ sql: string; alias: string }> = [];
+
+        // Match patterns like: count: g.count()
+        const countMatch = selectorStr.match(/(\w+)\s*:\s*\w+\.count\(\)/);
+        if (countMatch) {
+            aggregations.push({
+                sql: 'COUNT(*) as ' + countMatch[1],
+                alias: countMatch[1]
+            });
+        }
+
+        // Match patterns like: avgSalary: g.average(u => u.salary)
+        const avgMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.average\(\w+\s*=>\s*\w+\.(\w+)\)/g);
+        for (const match of avgMatches) {
+            const alias = match[1];
+            const propertyName = match[2];
+            const column = metadata?.columns.find(c => c.propertyName === propertyName);
+            if (column) {
+                aggregations.push({
+                    sql: `AVG(${column.columnName}) as ${alias}`,
+                    alias
+                });
+            }
+        }
+
+        // Match patterns like: totalSalary: g.sum(u => u.salary)
+        const sumMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.sum\(\w+\s*=>\s*\w+\.(\w+)\)/g);
+        for (const match of sumMatches) {
+            const alias = match[1];
+            const propertyName = match[2];
+            const column = metadata?.columns.find(c => c.propertyName === propertyName);
+            if (column) {
+                aggregations.push({
+                    sql: `SUM(${column.columnName}) as ${alias}`,
+                    alias
+                });
+            }
+        }
+
+        // Match patterns like: minAge: g.min(u => u.age)
+        const minMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.min\(\w+\s*=>\s*\w+\.(\w+)\)/g);
+        for (const match of minMatches) {
+            const alias = match[1];
+            const propertyName = match[2];
+            const column = metadata?.columns.find(c => c.propertyName === propertyName);
+            if (column) {
+                aggregations.push({
+                    sql: `MIN(${column.columnName}) as ${alias}`,
+                    alias
+                });
+            }
+        }
+
+        // Match patterns like: maxAge: g.max(u => u.age)
+        const maxMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.max\(\w+\s*=>\s*\w+\.(\w+)\)/g);
+        for (const match of maxMatches) {
+            const alias = match[1];
+            const propertyName = match[2];
+            const column = metadata?.columns.find(c => c.propertyName === propertyName);
+            if (column) {
+                aggregations.push({
+                    sql: `MAX(${column.columnName}) as ${alias}`,
+                    alias
+                });
+            }
+        }
+
+        return aggregations;
     }
 }

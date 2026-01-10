@@ -1,6 +1,7 @@
 import { DbSet } from "./DbSet";
 import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
 import { RelationType } from "./MetadataStorage";
+import { ModelBuilder } from "./ModelBuilder";
 
 /**
  * Represents a session with the database and can be used to query and save instances of your entities.
@@ -10,6 +11,25 @@ export class DbContext {
 
     constructor(provider: IDatabaseProvider) {
         this.provider = provider;
+        // Configure the model using Fluent API
+        const modelBuilder = new ModelBuilder();
+        this.onModelCreating(modelBuilder);
+    }
+
+    /**
+     * Override this method to configure the model using the Fluent API.
+     * This is called automatically when the DbContext is constructed.
+     * @param modelBuilder The builder used to configure entities
+     * @example
+     * protected onModelCreating(modelBuilder: ModelBuilder): void {
+     *     modelBuilder.entity(User)
+     *         .toTable('users')
+     *         .hasKey(u => u.id)
+     *         .property(u => u.email).isRequired().hasMaxLength(255);
+     * }
+     */
+    protected onModelCreating(modelBuilder: ModelBuilder): void {
+        // Override this method in derived classes to configure entities
     }
 
     /**

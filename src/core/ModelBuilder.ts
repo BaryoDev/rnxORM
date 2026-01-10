@@ -1,0 +1,425 @@
+import { MetadataStorage, RelationType, CascadeOption } from "./MetadataStorage";
+
+/**
+ * Builder for configuring entity properties
+ */
+export class PropertyBuilder<T, TProp> {
+    constructor(
+        private entityType: Function,
+        private propertyName: string
+    ) {}
+
+    /**
+     * Marks the property as required (NOT NULL)
+     */
+    isRequired(): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.isNullable = false;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Marks the property as optional (nullable)
+     */
+    isOptional(): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.isNullable = true;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Sets the maximum length for string properties
+     */
+    hasMaxLength(length: number): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.type = `varchar(${length})`;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Sets the column name in the database
+     */
+    hasColumnName(name: string): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.columnName = name;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Sets the column type in the database
+     */
+    hasColumnType(type: string): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.type = type;
+            }
+        }
+        return this;
+    }
+}
+
+/**
+ * Builder for configuring entity relationships
+ */
+export class RelationshipBuilder<T, TRelated> {
+    constructor(
+        private entityType: Function,
+        private propertyName: string,
+        private relatedEntityType: Function,
+        private relationType: RelationType
+    ) {}
+
+    /**
+     * Sets the foreign key column name
+     */
+    hasForeignKey(columnName: string): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
+            if (relation) {
+                relation.foreignKeyColumn = columnName;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Sets the inverse navigation property
+     */
+    withMany(inverseProperty?: (entity: TRelated) => any): this {
+        if (inverseProperty) {
+            const inverseName = extractPropertyName(inverseProperty);
+            const metadata = MetadataStorage.get().getEntity(this.entityType);
+            if (metadata) {
+                const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
+                if (relation) {
+                    relation.inverseSide = inverseName;
+                }
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Sets the inverse navigation property for one-to-one
+     */
+    withOne(inverseProperty?: (entity: TRelated) => any): this {
+        if (inverseProperty) {
+            const inverseName = extractPropertyName(inverseProperty);
+            const metadata = MetadataStorage.get().getEntity(this.entityType);
+            if (metadata) {
+                const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
+                if (relation) {
+                    relation.inverseSide = inverseName;
+                }
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Sets ON DELETE behavior
+     */
+    onDelete(action: CascadeOption): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
+            if (relation) {
+                relation.onDelete = action;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Sets ON UPDATE behavior
+     */
+    onUpdate(action: CascadeOption): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
+            if (relation) {
+                relation.onUpdate = action;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Configures the join table for many-to-many relationships
+     */
+    usingJoinTable(tableName: string, leftKey: string, rightKey: string): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
+            if (relation) {
+                relation.joinTable = tableName;
+                relation.joinColumn = leftKey;
+                relation.inverseJoinColumn = rightKey;
+            }
+        }
+        return this;
+    }
+}
+
+/**
+ * Builder for configuring an entity type
+ */
+export class EntityTypeBuilder<T> {
+    constructor(private entityType: new () => T) {}
+
+    /**
+     * Sets the table name in the database
+     */
+    toTable(tableName: string): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            metadata.tableName = tableName;
+        }
+        return this;
+    }
+
+    /**
+     * Configures the primary key
+     */
+    hasKey(selector: (entity: T) => any): this {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            // Clear existing primary keys
+            metadata.columns.forEach(c => c.isPrimaryKey = false);
+            // Set new primary key
+            const column = metadata.columns.find(c => c.propertyName === propertyName);
+            if (column) {
+                column.isPrimaryKey = true;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Configures a property
+     */
+    property<TProp>(selector: (entity: T) => TProp): PropertyBuilder<T, TProp> {
+        const propertyName = extractPropertyName(selector);
+        return new PropertyBuilder<T, TProp>(this.entityType, propertyName);
+    }
+
+    /**
+     * Configures an index
+     */
+    hasIndex(selector: (entity: T) => any, options?: { unique?: boolean; name?: string }): this {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const existingIndex = metadata.indexes.find(idx =>
+                idx.columns.length === 1 && idx.columns[0] === propertyName
+            );
+            if (!existingIndex) {
+                metadata.indexes.push({
+                    target: this.entityType,
+                    columns: [propertyName],
+                    unique: options?.unique || false,
+                    name: options?.name
+                });
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Configures a composite index
+     */
+    hasCompositeIndex(selectors: Array<(entity: T) => any>, options?: { unique?: boolean; name?: string }): this {
+        const propertyNames = selectors.map(s => extractPropertyName(s));
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            metadata.indexes.push({
+                target: this.entityType,
+                columns: propertyNames,
+                unique: options?.unique || false,
+                name: options?.name
+            });
+        }
+        return this;
+    }
+
+    /**
+     * Configures a unique constraint
+     */
+    hasUnique(selector: (entity: T) => any, options?: { name?: string }): this {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const existingConstraint = metadata.uniqueConstraints.find(uc =>
+                uc.columns.length === 1 && uc.columns[0] === propertyName
+            );
+            if (!existingConstraint) {
+                metadata.uniqueConstraints.push({
+                    target: this.entityType,
+                    columns: [propertyName],
+                    name: options?.name
+                });
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Configures a one-to-many relationship
+     */
+    hasMany<TRelated>(
+        navigationProperty: (entity: T) => TRelated[],
+        relatedEntityType: new () => TRelated
+    ): RelationshipBuilder<T, TRelated> {
+        const propertyName = extractPropertyName(navigationProperty);
+
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const existingRelation = metadata.relations.find(r => r.propertyName === propertyName);
+            if (!existingRelation) {
+                metadata.relations.push({
+                    target: this.entityType,
+                    propertyName,
+                    relatedEntity: () => relatedEntityType,
+                    relationType: RelationType.OneToMany
+                });
+            }
+        }
+
+        return new RelationshipBuilder<T, TRelated>(
+            this.entityType,
+            propertyName,
+            relatedEntityType,
+            RelationType.OneToMany
+        );
+    }
+
+    /**
+     * Configures a many-to-one relationship
+     */
+    hasOne<TRelated>(
+        navigationProperty: (entity: T) => TRelated,
+        relatedEntityType: new () => TRelated
+    ): RelationshipBuilder<T, TRelated> {
+        const propertyName = extractPropertyName(navigationProperty);
+
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const existingRelation = metadata.relations.find(r => r.propertyName === propertyName);
+            if (!existingRelation) {
+                metadata.relations.push({
+                    target: this.entityType,
+                    propertyName,
+                    relatedEntity: () => relatedEntityType,
+                    relationType: RelationType.ManyToOne
+                });
+            }
+        }
+
+        return new RelationshipBuilder<T, TRelated>(
+            this.entityType,
+            propertyName,
+            relatedEntityType,
+            RelationType.ManyToOne
+        );
+    }
+
+    /**
+     * Configures a many-to-many relationship
+     */
+    hasManyToMany<TRelated>(
+        navigationProperty: (entity: T) => TRelated[],
+        relatedEntityType: new () => TRelated,
+        options?: { joinTable?: string; leftKey?: string; rightKey?: string }
+    ): RelationshipBuilder<T, TRelated> {
+        const propertyName = extractPropertyName(navigationProperty);
+
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const existingRelation = metadata.relations.find(r => r.propertyName === propertyName);
+            if (!existingRelation) {
+                const leftEntity = this.entityType.name.toLowerCase();
+                const rightEntity = relatedEntityType.name.toLowerCase();
+
+                metadata.relations.push({
+                    target: this.entityType,
+                    propertyName,
+                    relatedEntity: () => relatedEntityType,
+                    relationType: RelationType.ManyToMany,
+                    joinTable: options?.joinTable || `${leftEntity}_${rightEntity}`,
+                    joinColumn: options?.leftKey || `${leftEntity}Id`,
+                    inverseJoinColumn: options?.rightKey || `${rightEntity}Id`
+                });
+            }
+        }
+
+        return new RelationshipBuilder<T, TRelated>(
+            this.entityType,
+            propertyName,
+            relatedEntityType,
+            RelationType.ManyToMany
+        );
+    }
+}
+
+/**
+ * Main builder for configuring the database model
+ */
+export class ModelBuilder {
+    /**
+     * Configures an entity type
+     */
+    entity<T>(entityType: new () => T): EntityTypeBuilder<T> {
+        // Ensure entity is registered in metadata storage
+        const metadata = MetadataStorage.get().getEntity(entityType);
+        if (!metadata) {
+            // Register basic entity metadata if not already registered
+            MetadataStorage.get().addEntity(entityType, entityType.name.toLowerCase());
+        }
+        return new EntityTypeBuilder<T>(entityType);
+    }
+}
+
+/**
+ * Helper function to extract property name from a selector function
+ */
+function extractPropertyName<T>(selector: (entity: T) => any): string {
+    const funcStr = selector.toString();
+
+    // Match: u => u.propertyName or (u) => u.propertyName
+    const arrowMatch = funcStr.match(/(?:.*?=>.*?\.)(\w+)/);
+    if (arrowMatch) {
+        return arrowMatch[1];
+    }
+
+    // Match: function(u) { return u.propertyName; }
+    const functionMatch = funcStr.match(/return\s+\w+\.(\w+)/);
+    if (functionMatch) {
+        return functionMatch[1];
+    }
+
+    throw new Error(`Cannot extract property name from selector: ${funcStr}`);
+}
