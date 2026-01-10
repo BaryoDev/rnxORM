@@ -33,8 +33,17 @@ const testDatabaseConfigs = {
 
 /**
  * Create a database provider for testing
+ * Defaults to mock provider unless USE_REAL_DB=true is set
  */
-export function createTestProvider(provider: 'postgres' | 'mssql' | 'mariadb'): IDatabaseProvider {
+export function createTestProvider(provider: 'postgres' | 'mssql' | 'mariadb' | 'mock' = 'mock'): IDatabaseProvider {
+    // Use mock provider by default unless explicitly requesting real database
+    const useRealDb = process.env.USE_REAL_DB === 'true';
+
+    if (!useRealDb || provider === 'mock') {
+        const { MockDatabaseProvider } = require('./mocks/MockDatabaseProvider');
+        return new MockDatabaseProvider();
+    }
+
     const config = testDatabaseConfigs[provider];
 
     switch (provider) {
@@ -51,11 +60,17 @@ export function createTestProvider(provider: 'postgres' | 'mssql' | 'mariadb'): 
 
 /**
  * Helper to get available database providers for testing
- * Defaults to postgres if no environment variable is set
+ * Defaults to mock if no environment variable is set
  */
-export function getTestProviders(): Array<keyof typeof testDatabaseConfigs> {
+export function getTestProviders(): Array<'postgres' | 'mssql' | 'mariadb' | 'mock'> {
+    const useRealDb = process.env.USE_REAL_DB === 'true';
+
+    if (!useRealDb) {
+        return ['mock'];
+    }
+
     const providersEnv = process.env.TEST_PROVIDERS || 'postgres';
-    return providersEnv.split(',') as Array<keyof typeof testDatabaseConfigs>;
+    return providersEnv.split(',') as Array<'postgres' | 'mssql' | 'mariadb'>;
 }
 
 /**

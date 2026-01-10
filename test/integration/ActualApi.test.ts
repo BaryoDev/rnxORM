@@ -43,6 +43,7 @@ describe('Actual API Integration Tests', () => {
 
             beforeEach(async () => {
                 await db.query(`DELETE FROM api_test_users`);
+                db.changeTracker.clear(); // Clear change tracker between tests
             });
 
             it('should insert and retrieve a single entity', async () => {

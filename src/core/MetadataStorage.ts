@@ -146,6 +146,15 @@ export class MetadataStorage {
             type: options.type || "text", // Default type, will be inferred later if possible
             isPrimaryKey: options.isPrimaryKey || false,
             isNullable: options.isNullable || false,
+            isAutoIncrement: options.isAutoIncrement,
+            defaultValue: options.defaultValue,
+            isComputed: options.isComputed,
+            computedColumnSql: options.computedColumnSql,
+            isShadowProperty: options.isShadowProperty,
+            hasConversion: options.hasConversion,
+            convertToDb: options.convertToDb,
+            convertFromDb: options.convertFromDb,
+            isConcurrencyToken: options.isConcurrencyToken,
         });
     }
 

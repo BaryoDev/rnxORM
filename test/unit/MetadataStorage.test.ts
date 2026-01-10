@@ -238,7 +238,8 @@ describe('MetadataStorage', () => {
             });
 
             const metadata = storage.getEntity(TestEntity);
-            const index = metadata?.indexes.find(i => i.columns.includes('email'));
+            // Find the index with only 'email' column (not the one with ['name', 'email'])
+            const index = metadata?.indexes.find(i => i.columns.length === 1 && i.columns[0] === 'email');
             expect(index?.unique).toBe(true);
         });
     });

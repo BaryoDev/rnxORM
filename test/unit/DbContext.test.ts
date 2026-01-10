@@ -16,7 +16,7 @@ describe('DbContext', () => {
     let db: DbContext;
 
     beforeEach(() => {
-        const provider = createTestProvider('postgres');
+        const provider = createTestProvider('mock');
         db = new DbContext(provider);
     });
 
