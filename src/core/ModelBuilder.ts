@@ -78,6 +78,42 @@ export class PropertyBuilder<T, TProp> {
         }
         return this;
     }
+
+    /**
+     * Sets a default value for the column
+     * @param value Default value (can be a constant or SQL expression)
+     * @example
+     * property(u => u.createdAt).hasDefaultValue('CURRENT_TIMESTAMP')
+     * property(u => u.isActive).hasDefaultValue(true)
+     */
+    hasDefaultValue(value: any): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.defaultValue = value;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Marks the column as computed with SQL expression
+     * @param sql SQL expression for computed column
+     * @example
+     * property(u => u.fullName).hasComputedColumnSql("CONCAT(first_name, ' ', last_name)")
+     */
+    hasComputedColumnSql(sql: string): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.isComputed = true;
+                column.computedColumnSql = sql;
+            }
+        }
+        return this;
+    }
 }
 
 /**
@@ -382,6 +418,24 @@ export class EntityTypeBuilder<T> {
             relatedEntityType,
             RelationType.ManyToMany
         );
+    }
+
+    /**
+     * Seeds the database with initial data for this entity
+     * @param data Array of entity instances to seed
+     * @example
+     * modelBuilder.entity(User)
+     *     .hasData([
+     *         { id: 1, name: 'Admin', email: 'admin@example.com' },
+     *         { id: 2, name: 'User', email: 'user@example.com' }
+     *     ]);
+     */
+    hasData(data: Partial<T>[]): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            metadata.seedData = data;
+        }
+        return this;
     }
 }
 

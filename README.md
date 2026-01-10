@@ -159,6 +159,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 
 - **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL
 - **Change Tracking & SaveChanges()**: EF Core-style automatic change detection and batch persistence
+- **Data Seeding**: Seed initial data via `hasData()` in ModelBuilder
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
 - **Eager Loading**: `.include()` to load related entities
@@ -169,6 +170,8 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
 - **Repository Pattern**: `DbSet<T>` with integrated change tracking
+- **Default Values**: Set column defaults via `hasDefaultValue()`
+- **Computed Columns**: Database-calculated columns via `hasComputedColumnSql()`
 - **Query Optimization**: `.asNoTracking()` for read-only queries
 - **Primary Key Lookup**: `.find(id)` for quick entity retrieval
 - **Transactions**: Automatic transaction wrapping for `saveChanges()`
@@ -701,6 +704,146 @@ modelBuilder.entity(User)
   .hasIndex(u => u.email, { unique: true, name: 'idx_user_email' })
   .hasCompositeIndex([u => u.lastName, u => u.firstName], { name: 'idx_user_name' })
   .hasUnique(u => u.username, { name: 'uq_user_username' });
+```
+
+## Data Seeding
+
+rnxORM supports seeding initial data into your database using the Fluent API. Seed data is inserted during `ensureCreated()` and is idempotent (won't duplicate existing records).
+
+### Defining Seed Data
+
+Use `hasData()` in your `onModelCreating()` method:
+
+```typescript
+import { DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
+
+export class AppDbContext extends DbContext {
+    constructor() {
+        super(new PostgreSQLProvider({ /* config */ }));
+    }
+
+    protected onModelCreating(modelBuilder: ModelBuilder): void {
+        // Seed users
+        modelBuilder.entity(User)
+            .hasData([
+                { id: 1, name: 'Admin', email: 'admin@example.com', role: 'admin' },
+                { id: 2, name: 'User', email: 'user@example.com', role: 'user' },
+                { id: 3, name: 'Guest', email: 'guest@example.com', role: 'guest' }
+            ]);
+
+        // Seed categories
+        modelBuilder.entity(Category)
+            .hasData([
+                { id: 1, name: 'Electronics', slug: 'electronics' },
+                { id: 2, name: 'Books', slug: 'books' },
+                { id: 3, name: 'Clothing', slug: 'clothing' }
+            ]);
+    }
+}
+```
+
+### Seeding Behavior
+
+- **Idempotent**: Seed data is only inserted if it doesn't already exist (checked by primary key)
+- **Automatic**: Runs during `ensureCreated()` after schema creation
+- **Partial Entities**: Only properties included in seed data are inserted
+- **Logged**: Each seeded record is logged to console
+
+```typescript
+const db = new AppDbContext();
+await db.connect();
+await db.ensureCreated(); // Seeds data automatically
+
+// Output:
+// Creating tables...
+// ...
+// Seeding data...
+//   Seeded users: {"id":1,"name":"Admin","email":"admin@example.com","role":"admin"}
+//   Seeded users: {"id":2,"name":"User","email":"user@example.com","role":"user"}
+//   Seeded categories: {"id":1,"name":"Electronics","slug":"electronics"}
+// Database schema is up to date!
+```
+
+### Best Practices
+
+1. **Always specify primary keys** in seed data for idempotency
+2. **Use for reference data**: Categories, roles, default users, configuration
+3. **Keep seed data small**: Large datasets should use migrations or separate scripts
+4. **Version control**: Seed data is code, commit it with your model changes
+
+## Default Values & Computed Columns
+
+### Default Values
+
+Set default values for columns using the Fluent API:
+
+```typescript
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    modelBuilder.entity(User)
+        .property(u => u.createdAt)
+            .hasDefaultValue('CURRENT_TIMESTAMP')
+        .property(u => u.isActive)
+            .hasDefaultValue(true)
+        .property(u => u.status)
+            .hasDefaultValue('pending');
+}
+```
+
+**Supported Default Values:**
+- **Constants**: `true`, `false`, `0`, `'pending'`
+- **SQL Expressions**: `'CURRENT_TIMESTAMP'`, `'NOW()'`, `'UUID()'`
+- **Numbers and Strings**: Any valid SQL literal
+
+### Computed Columns
+
+Define computed columns that are calculated by the database:
+
+```typescript
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    modelBuilder.entity(User)
+        // Computed full name from first and last name
+        .property(u => u.fullName)
+            .hasComputedColumnSql("CONCAT(first_name, ' ', last_name)")
+
+        // Computed age from birthdate
+        .property(u => u.age)
+            .hasComputedColumnSql("EXTRACT(YEAR FROM AGE(CURRENT_DATE, birth_date))");
+
+    modelBuilder.entity(Order)
+        // Computed total from quantity and price
+        .property(o => o.total)
+            .hasComputedColumnSql("quantity * unit_price");
+}
+```
+
+**Important Notes:**
+- Computed columns are **read-only**
+- Values are **calculated by the database** (not in TypeScript)
+- SQL expressions are **database-specific** (PostgreSQL examples above)
+- Computed columns are **not included in INSERT/UPDATE** statements
+
+### Combining Features
+
+```typescript
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    modelBuilder.entity(Product)
+        .toTable('products')
+        .property(p => p.createdAt)
+            .hasColumnType('timestamp')
+            .hasDefaultValue('CURRENT_TIMESTAMP')
+            .isRequired()
+        .property(p => p.updatedAt)
+            .hasColumnType('timestamp')
+            .hasDefaultValue('CURRENT_TIMESTAMP')
+        .property(p => p.isActive)
+            .hasDefaultValue(true)
+        .property(p => p.displayName)
+            .hasComputedColumnSql("UPPER(name)")
+        .hasData([
+            { id: 1, name: 'Laptop', price: 999.99 },
+            { id: 2, name: 'Mouse', price: 29.99 }
+        ]);
+}
 ```
 
 ## Query Optimization

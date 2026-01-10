@@ -6,6 +6,10 @@ export interface ColumnMetadata {
     type: string;
     isPrimaryKey: boolean;
     isNullable: boolean;
+    isAutoIncrement?: boolean;
+    defaultValue?: any; // Default value for column
+    isComputed?: boolean; // Is this a computed column?
+    computedColumnSql?: string; // SQL for computed column
 }
 
 export enum RelationType {
@@ -69,6 +73,7 @@ export interface EntityMetadata {
     relations: RelationMetadata[];
     indexes: IndexMetadata[];
     uniqueConstraints: UniqueConstraintMetadata[];
+    seedData?: any[]; // Initial data for seeding
 }
 
 export class MetadataStorage {

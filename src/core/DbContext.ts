@@ -395,6 +395,50 @@ export class DbContext {
             }
         }
 
+        // Phase 7: Seed Data
+        console.log('Seeding data...');
+        for (const entity of entities) {
+            if (entity.seedData && entity.seedData.length > 0) {
+                const tableName = entity.tableName;
+                const pkColumn = entity.columns.find(c => c.isPrimaryKey);
+
+                if (!pkColumn) {
+                    console.warn(`Skipping seed for ${entity.tableName}: No primary key found`);
+                    continue;
+                }
+
+                // Check if data already exists
+                for (const seedItem of entity.seedData) {
+                    const pkValue = (seedItem as any)[pkColumn.propertyName];
+
+                    if (pkValue !== undefined) {
+                        // Check if record exists
+                        const placeholder = this.provider.getParameterPlaceholder(1);
+                        const checkSql = `SELECT COUNT(*) as count FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
+                        const result = await this.query(checkSql, [pkValue]);
+                        const exists = parseInt(result.rows[0].count) > 0;
+
+                        if (!exists) {
+                            // Insert seed data
+                            const columns = entity.columns.filter(c =>
+                                (seedItem as any)[c.propertyName] !== undefined
+                            );
+
+                            const columnNames = columns.map(c => c.columnName);
+                            const values = columns.map(c => (seedItem as any)[c.propertyName]);
+                            const placeholders = values.map((_: any, i: number) =>
+                                this.provider.getParameterPlaceholder(i + 1)
+                            );
+
+                            const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+                            await this.query(insertSql, values);
+                            console.log(`  Seeded ${tableName}: ${JSON.stringify(seedItem)}`);
+                        }
+                    }
+                }
+            }
+        }
+
         console.log('Database schema is up to date!');
     }
 
