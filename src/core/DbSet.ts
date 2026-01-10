@@ -155,6 +155,82 @@ export class DbSet<T> {
         return parseInt(res.rows[0].count);
     }
 
+    /**
+     * Sum a numeric property across all entities
+     * @param selector Property selector function
+     * @example await users.sum(u => u.salary)
+     */
+    async sum(selector: (entity: T) => number): Promise<number> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const res = await this.context.query(`SELECT SUM(${column.columnName}) as total FROM ${this.tableName}`);
+        return parseFloat(res.rows[0].total) || 0;
+    }
+
+    /**
+     * Calculate average of a numeric property
+     * @param selector Property selector function
+     * @example await users.average(u => u.age)
+     */
+    async average(selector: (entity: T) => number): Promise<number> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const res = await this.context.query(`SELECT AVG(${column.columnName}) as avg FROM ${this.tableName}`);
+        return parseFloat(res.rows[0].avg) || 0;
+    }
+
+    /**
+     * Find minimum value of a property
+     * @param selector Property selector function
+     * @example await users.min(u => u.age)
+     */
+    async min(selector: (entity: T) => any): Promise<any> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const res = await this.context.query(`SELECT MIN(${column.columnName}) as min FROM ${this.tableName}`);
+        return res.rows[0].min;
+    }
+
+    /**
+     * Find maximum value of a property
+     * @param selector Property selector function
+     * @example await users.max(u => u.createdAt)
+     */
+    async max(selector: (entity: T) => any): Promise<any> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const res = await this.context.query(`SELECT MAX(${column.columnName}) as max FROM ${this.tableName}`);
+        return res.rows[0].max;
+    }
+
+    /**
+     * Project entities to a different shape
+     * @param selector Projection function
+     * @example await users.select(u => ({ name: u.name, email: u.email }))
+     */
+    select<TResult>(selector: (entity: T) => TResult): SelectQueryBuilder<T, TResult> {
+        return new SelectQueryBuilder(this.entityType, this.context, this.tableName, selector);
+    }
+
+    /**
+     * Remove duplicate entities
+     */
+    distinct(): QueryBuilder<T> {
+        return new QueryBuilder(this.entityType, this.context, this.tableName).distinct();
+    }
+
     private mapRowToEntity(row: any, freeze: boolean = false): T {
         const entity = new this.entityType();
         const metadata = MetadataStorage.get().getEntity(this.entityType);
@@ -192,6 +268,7 @@ export class QueryBuilder<T> {
     private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
     private skipCount?: number;
     private takeCount?: number;
+    private isDistinct: boolean = false;
 
     constructor(
         private entityType: new () => T,
@@ -297,7 +374,14 @@ export class QueryBuilder<T> {
         }
 
         const provider = this.context.getProvider();
-        const sql = provider.generateSelectSql(this.tableName, whereClause);
+
+        // Add DISTINCT if needed
+        let selectClause = "SELECT *";
+        if (this.isDistinct) {
+            selectClause = "SELECT DISTINCT *";
+        }
+
+        const sql = `${selectClause} FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
         const res = await this.context.query(sql, this.params);
 
         // Map rows to entities
@@ -337,6 +421,139 @@ export class QueryBuilder<T> {
     async any(): Promise<boolean> {
         const count = await this.count();
         return count > 0;
+    }
+
+    /**
+     * Check if all results match a condition (executed in memory)
+     * @param predicate Condition to check
+     */
+    async all(predicate: (entity: T) => boolean): Promise<boolean> {
+        const results = await this.toList();
+        return results.every(predicate);
+    }
+
+    /**
+     * Get a single result (throws if zero or multiple results)
+     */
+    async single(): Promise<T> {
+        const results = await this.take(2).toList();
+        if (results.length === 0) {
+            throw new Error('Sequence contains no elements');
+        }
+        if (results.length > 1) {
+            throw new Error('Sequence contains more than one element');
+        }
+        return results[0];
+    }
+
+    /**
+     * Get a single result or null (throws if multiple results)
+     */
+    async singleOrDefault(): Promise<T | null> {
+        const results = await this.take(2).toList();
+        if (results.length > 1) {
+            throw new Error('Sequence contains more than one element');
+        }
+        return results.length > 0 ? results[0] : null;
+    }
+
+    /**
+     * Get the first result or throw
+     */
+    async firstOrThrow(): Promise<T> {
+        const result = await this.first();
+        if (!result) {
+            throw new Error('Sequence contains no elements');
+        }
+        return result;
+    }
+
+    /**
+     * Sum a numeric property across filtered results
+     * @param selector Property selector function
+     */
+    async sum(selector: (entity: T) => number): Promise<number> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const sql = `SELECT SUM(${column.columnName}) as total FROM ${this.tableName} ${whereClause}`;
+        const res = await this.context.query(sql, this.params);
+        return parseFloat(res.rows[0].total) || 0;
+    }
+
+    /**
+     * Calculate average of a numeric property across filtered results
+     * @param selector Property selector function
+     */
+    async average(selector: (entity: T) => number): Promise<number> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const sql = `SELECT AVG(${column.columnName}) as avg FROM ${this.tableName} ${whereClause}`;
+        const res = await this.context.query(sql, this.params);
+        return parseFloat(res.rows[0].avg) || 0;
+    }
+
+    /**
+     * Find minimum value of a property across filtered results
+     * @param selector Property selector function
+     */
+    async min(selector: (entity: T) => any): Promise<any> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const sql = `SELECT MIN(${column.columnName}) as min FROM ${this.tableName} ${whereClause}`;
+        const res = await this.context.query(sql, this.params);
+        return res.rows[0].min;
+    }
+
+    /**
+     * Find maximum value of a property across filtered results
+     * @param selector Property selector function
+     */
+    async max(selector: (entity: T) => any): Promise<any> {
+        const propertyName = extractPropertyName(selector);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const column = metadata?.columns.find(c => c.propertyName === propertyName);
+        if (!column) throw new Error(`Property ${propertyName} not found`);
+
+        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const sql = `SELECT MAX(${column.columnName}) as max FROM ${this.tableName} ${whereClause}`;
+        const res = await this.context.query(sql, this.params);
+        return res.rows[0].max;
+    }
+
+    /**
+     * Project entities to a different shape
+     * @param selector Projection function
+     */
+    select<TResult>(selector: (entity: T) => TResult): SelectQueryBuilder<T, TResult> {
+        const builder = new SelectQueryBuilder(this.entityType, this.context, this.tableName, selector);
+        // Copy current query state
+        builder['conditions'] = [...this.conditions];
+        builder['params'] = [...this.params];
+        builder['orderByColumns'] = [...this.orderByColumns];
+        builder['skipCount'] = this.skipCount;
+        builder['takeCount'] = this.takeCount;
+        builder['isDistinct'] = this.isDistinct;
+        return builder;
+    }
+
+    /**
+     * Remove duplicate entities
+     */
+    distinct(): this {
+        this.isDistinct = true;
+        return this;
     }
 
     private async loadIncludes(entities: T[]): Promise<void> {
@@ -530,4 +747,204 @@ function extractPropertyName(fn: (entity: any) => any): string {
         return match[1];
     }
     throw new Error(`Unable to extract property name from function: ${fnStr}`);
+}
+
+/**
+ * Query builder for SELECT projections
+ * Allows selecting specific properties or transforming results
+ */
+export class SelectQueryBuilder<T, TResult> {
+    private conditions: string[] = [];
+    private params: any[] = [];
+    private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
+    private skipCount?: number;
+    private takeCount?: number;
+    private isDistinct: boolean = false;
+
+    constructor(
+        private entityType: new () => T,
+        private context: DbContext,
+        private tableName: string,
+        private selector: (entity: T) => TResult
+    ) {}
+
+    /**
+     * Add a WHERE condition
+     */
+    where(column: string, operator: string, value: any): this {
+        const provider = this.context.getProvider();
+        const placeholder = provider.getParameterPlaceholder(this.params.length + 1);
+        this.conditions.push(`${column} ${operator} ${placeholder}`);
+        this.params.push(value);
+        return this;
+    }
+
+    /**
+     * Order results by column ascending
+     */
+    orderBy(column: string): this {
+        this.orderByColumns.push({ column, direction: 'ASC' });
+        return this;
+    }
+
+    /**
+     * Order results by column descending
+     */
+    orderByDescending(column: string): this {
+        this.orderByColumns.push({ column, direction: 'DESC' });
+        return this;
+    }
+
+    /**
+     * Skip N results
+     */
+    skip(count: number): this {
+        this.skipCount = count;
+        return this;
+    }
+
+    /**
+     * Take N results
+     */
+    take(count: number): this {
+        this.takeCount = count;
+        return this;
+    }
+
+    /**
+     * Remove duplicates
+     */
+    distinct(): this {
+        this.isDistinct = true;
+        return this;
+    }
+
+    /**
+     * Execute query and return projected results
+     */
+    async toList(): Promise<TResult[]> {
+        // First, get the entities
+        let whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+
+        // Add ORDER BY clause
+        if (this.orderByColumns.length > 0) {
+            const orderByClause = this.orderByColumns
+                .map(o => `${o.column} ${o.direction}`)
+                .join(', ');
+            whereClause += (whereClause ? ' ' : '') + `ORDER BY ${orderByClause}`;
+        }
+
+        // Add LIMIT/OFFSET
+        if (this.takeCount !== undefined) {
+            whereClause += ` LIMIT ${this.takeCount}`;
+        }
+        if (this.skipCount !== undefined) {
+            whereClause += ` OFFSET ${this.skipCount}`;
+        }
+
+        // Check if we can optimize with SQL projection
+        const projectedColumns = this.extractProjectedColumns();
+
+        let sql: string;
+        if (projectedColumns && projectedColumns.length > 0) {
+            // Use SQL projection for simple property selections
+            const distinctKeyword = this.isDistinct ? 'DISTINCT ' : '';
+            const columnList = projectedColumns.join(', ');
+            sql = `SELECT ${distinctKeyword}${columnList} FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
+        } else {
+            // Fall back to selecting all columns and projecting in memory
+            const distinctKeyword = this.isDistinct ? 'DISTINCT ' : '';
+            sql = `SELECT ${distinctKeyword}* FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
+        }
+
+        const res = await this.context.query(sql, this.params);
+
+        // Apply selector to each row
+        if (projectedColumns && projectedColumns.length > 0) {
+            // Direct column projection - just return the rows
+            return res.rows as TResult[];
+        } else {
+            // Map rows to entities first, then apply selector
+            const entities = res.rows.map((row: any) =>
+                DbSet.mapRowToEntity(this.entityType, row, false)
+            );
+            return entities.map(e => this.selector(e));
+        }
+    }
+
+    /**
+     * Get first result
+     */
+    async first(): Promise<TResult | null> {
+        const results = await this.take(1).toList();
+        return results.length > 0 ? results[0] : null;
+    }
+
+    /**
+     * Count results (doesn't apply projection)
+     */
+    async count(): Promise<number> {
+        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
+        const res = await this.context.query(sql, this.params);
+        return parseInt(res.rows[0].count);
+    }
+
+    /**
+     * Try to extract projected column names from the selector for SQL optimization
+     * Returns null if the selector is too complex for SQL projection
+     */
+    private extractProjectedColumns(): string[] | null {
+        try {
+            const selectorStr = this.selector.toString();
+
+            // Try to match simple object literal projections like: u => ({ name: u.name, age: u.age })
+            const objectLiteralMatch = selectorStr.match(/\{\s*([^}]+)\s*\}/);
+            if (objectLiteralMatch) {
+                const properties = objectLiteralMatch[1];
+
+                // Extract property names
+                const propertyMatches = properties.matchAll(/(\w+)\s*:\s*\w+\.(\w+)/g);
+                const columns: string[] = [];
+
+                for (const match of propertyMatches) {
+                    const alias = match[1];
+                    const propertyName = match[2];
+
+                    const metadata = MetadataStorage.get().getEntity(this.entityType);
+                    const column = metadata?.columns.find(c => c.propertyName === propertyName);
+
+                    if (column) {
+                        // Use "columnName AS alias" format
+                        columns.push(`${column.columnName} AS ${alias}`);
+                    } else {
+                        // Can't optimize - unknown property
+                        return null;
+                    }
+                }
+
+                if (columns.length > 0) {
+                    return columns;
+                }
+            }
+
+            // Try to match single property projection like: u => u.name
+            const singlePropertyMatch = selectorStr.match(/=>\s*\w+\.(\w+)\s*$/);
+            if (singlePropertyMatch) {
+                const propertyName = singlePropertyMatch[1];
+                const metadata = MetadataStorage.get().getEntity(this.entityType);
+                const column = metadata?.columns.find(c => c.propertyName === propertyName);
+
+                if (column) {
+                    return [column.columnName];
+                }
+            }
+
+            // Can't optimize - use in-memory projection
+            return null;
+        } catch {
+            // Error parsing selector - use in-memory projection
+            return null;
+        }
+    }
 }
