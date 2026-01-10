@@ -3,6 +3,7 @@ import { PostgreSQLProvider } from '../src/providers/PostgreSQLProvider';
 import { MSSQLProvider } from '../src/providers/MSSQLProvider';
 import { MariaDBProvider } from '../src/providers/MariaDBProvider';
 import { IDatabaseProvider } from '../src/providers/IDatabaseProvider';
+import { MockDatabaseProvider } from './mocks/MockDatabaseProvider';
 
 /**
  * Test database configurations for PostgreSQL, SQL Server, and MariaDB
@@ -40,7 +41,6 @@ export function createTestProvider(provider: 'postgres' | 'mssql' | 'mariadb' | 
     const useRealDb = process.env.USE_REAL_DB === 'true';
 
     if (!useRealDb || provider === 'mock') {
-        const { MockDatabaseProvider } = require('./mocks/MockDatabaseProvider');
         return new MockDatabaseProvider();
     }
 

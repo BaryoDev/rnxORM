@@ -1,11 +1,14 @@
 import { MetadataStorage, RelationType, CascadeOption } from "./MetadataStorage";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Constructor<T = any> = new (...args: any[]) => T;
+
 /**
  * Builder for configuring entity properties
  */
 export class PropertyBuilder<T, TProp> {
     constructor(
-        private entityType: Function,
+        private entityType: Constructor<T>,
         private propertyName: string
     ) {}
 
@@ -165,9 +168,9 @@ export class PropertyBuilder<T, TProp> {
  */
 export class RelationshipBuilder<T, TRelated> {
     constructor(
-        private entityType: Function,
+        private entityType: Constructor<T>,
         private propertyName: string,
-        private relatedEntityType: Function,
+        private relatedEntityType: Constructor<TRelated>,
         private relationType: RelationType
     ) {}
 

@@ -62,8 +62,9 @@ export interface ManyToOneOptions extends RelationOptions {
     foreignKey?: string; // Custom foreign key column name
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface OneToManyOptions extends RelationOptions {
-    // No additional options needed
+    // No additional options needed - using interface for type consistency
 }
 
 export interface OneToOneOptions extends RelationOptions {
