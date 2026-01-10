@@ -1,9 +1,12 @@
 {
   "name": "rnxorm",
-  "version": "1.1.4",
-  "description": "A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core",
+  "version": "2.0.0",
+  "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core. v2.0.0 introduces breaking changes - see README for migration guide.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "rnxorm": "dist/migrations/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
@@ -16,6 +19,9 @@
     "orm",
     "typescript",
     "postgresql",
+    "mssql",
+    "mariadb",
+    "mysql",
     "database",
     "entity-framework"
   ],
@@ -32,11 +38,14 @@
   },
   "dependencies": {
     "dotenv": "^17.2.3",
+    "mariadb": "^3.3.2",
+    "mssql": "^11.0.1",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
+    "@types/mssql": "^9.1.5",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.15.6",
     "@typescript-eslint/eslint-plugin": "^8.48.1",

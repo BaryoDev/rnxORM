@@ -1,85 +1,471 @@
-import { Pool, PoolClient, PoolConfig } from "pg";
 import { DbSet } from "./DbSet";
+import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
+import { RelationType, MetadataStorage } from "./MetadataStorage";
+import { ModelBuilder } from "./ModelBuilder";
+import { ChangeTracker } from "./ChangeTracker";
+import { EntityEntry, EntityState } from "./EntityEntry";
 
 /**
  * Represents a session with the database and can be used to query and save instances of your entities.
  */
 export class DbContext {
-    private pool: Pool;
-    private client: PoolClient | null = null;
+    protected provider: IDatabaseProvider;
+    private _changeTracker: ChangeTracker;
 
-    constructor(config: PoolConfig) {
-        this.pool = new Pool(config);
+    constructor(provider: IDatabaseProvider) {
+        this.provider = provider;
+        this._changeTracker = new ChangeTracker();
+
+        // Configure the model using Fluent API
+        const modelBuilder = new ModelBuilder();
+        this.onModelCreating(modelBuilder);
+    }
+
+    /**
+     * Gets the change tracker for this context
+     */
+    get changeTracker(): ChangeTracker {
+        return this._changeTracker;
+    }
+
+    /**
+     * Override this method to configure the model using the Fluent API.
+     * This is called automatically when the DbContext is constructed.
+     * @param modelBuilder The builder used to configure entities
+     * @example
+     * protected onModelCreating(modelBuilder: ModelBuilder): void {
+     *     modelBuilder.entity(User)
+     *         .toTable('users')
+     *         .hasKey(u => u.id)
+     *         .property(u => u.email).isRequired().hasMaxLength(255);
+     * }
+     */
+    protected onModelCreating(modelBuilder: ModelBuilder): void {
+        // Override this method in derived classes to configure entities
     }
 
     /**
      * Connects to the database.
      */
     async connect(): Promise<void> {
-        this.client = await this.pool.connect();
+        await this.provider.connect();
     }
 
     async disconnect(): Promise<void> {
-        if (this.client) {
-            this.client.release();
-            this.client = null;
-        }
-        await this.pool.end();
+        await this.provider.disconnect();
     }
 
-    async query(text: string, params?: any[]): Promise<any> {
-        if (!this.client) {
-            // Auto-connect if not connected, or just use pool.query for stateless queries
-            return this.pool.query(text, params);
-        }
-        return this.client.query(text, params);
+    async query(text: string, params?: any[]): Promise<QueryResult> {
+        return await this.provider.query(text, params);
     }
 
-    // Placeholder for transaction management
+    /**
+     * Executes raw SQL against the database and returns the number of rows affected
+     * Use this for UPDATE, DELETE, or other non-query operations
+     * @param sql Raw SQL statement
+     * @param parameters Optional parameters for the query
+     * @returns Number of rows affected
+     * @example
+     * const rowsAffected = await db.executeSqlRaw(
+     *     'UPDATE users SET status = $1 WHERE created_at < $2',
+     *     ['inactive', '2020-01-01']
+     * );
+     */
+    async executeSqlRaw(sql: string, parameters?: any[]): Promise<number> {
+        const result = await this.provider.query(sql, parameters);
+        return result.rowCount;
+    }
+
+    // Transaction management
     async beginTransaction() {
-        if (!this.client) await this.connect();
-        await this.client?.query('BEGIN');
+        await this.provider.beginTransaction();
     }
 
     async commitTransaction() {
-        await this.client?.query('COMMIT');
+        await this.provider.commitTransaction();
     }
 
     async rollbackTransaction() {
-        await this.client?.query('ROLLBACK');
+        await this.provider.rollbackTransaction();
+    }
+
+    /**
+     * Saves all changes made in this context to the database.
+     * This method will automatically detect changes made to tracked entities.
+     * @returns The number of state entries written to the database
+     */
+    async saveChanges(): Promise<number> {
+        // Detect changes if auto-detect is enabled
+        if (this._changeTracker.autoDetectChangesEnabled) {
+            this._changeTracker.detectChanges();
+        }
+
+        const changedEntries = this._changeTracker.getChangedEntries();
+
+        if (changedEntries.length === 0) {
+            return 0;
+        }
+
+        let savedCount = 0;
+
+        try {
+            // Begin transaction
+            await this.beginTransaction();
+
+            // Process all changes
+            for (const entry of changedEntries) {
+                const entity = entry.entity;
+                const entityType = entity.constructor;
+                const metadata = MetadataStorage.get().getEntity(entityType);
+
+                if (!metadata) {
+                    console.warn(`No metadata found for entity ${entityType.name}`);
+                    continue;
+                }
+
+                const tableName = metadata.tableName;
+                const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
+
+                if (!pkColumn) {
+                    console.warn(`No primary key found for entity ${entityType.name}`);
+                    continue;
+                }
+
+                switch (entry.state) {
+                    case EntityState.Added:
+                        await this.insertEntity(entity, metadata, tableName);
+                        savedCount++;
+                        break;
+
+                    case EntityState.Modified:
+                        await this.updateEntity(entity, entry, metadata, tableName, pkColumn);
+                        savedCount++;
+                        break;
+
+                    case EntityState.Deleted:
+                        await this.deleteEntity(entity, metadata, tableName, pkColumn);
+                        savedCount++;
+                        break;
+                }
+            }
+
+            // Commit transaction
+            await this.commitTransaction();
+
+            // Accept all changes
+            this._changeTracker.acceptAllChanges();
+
+            return savedCount;
+        } catch (error) {
+            // Rollback on error
+            await this.rollbackTransaction();
+            throw error;
+        }
+    }
+
+    /**
+     * Insert a new entity
+     */
+    private async insertEntity(entity: any, metadata: any, tableName: string): Promise<void> {
+        const columns = metadata.columns.filter((c: any) => {
+            // Skip shadow properties
+            if (c.isShadowProperty) return true;
+
+            const value = entity[c.propertyName];
+            // Skip auto-increment primary keys with undefined/null values
+            return !(c.isPrimaryKey && c.isAutoIncrement && (value === undefined || value === null));
+        });
+
+        const columnNames = columns.map((c: any) => c.columnName);
+        const values = columns.map((c: any) => {
+            let value = c.isShadowProperty ? c.defaultValue : entity[c.propertyName];
+
+            // Apply value conversion from entity to database
+            if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
+                value = c.convertToDb(value);
+            }
+
+            return value;
+        });
+
+        const placeholders = values.map((_: any, i: number) => this.provider.getParameterPlaceholder(i + 1));
+
+        const sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+
+        const result = await this.provider.query(sql, values);
+
+        // Set auto-increment ID if applicable
+        const pkColumn = metadata.columns.find((c: any) => c.isPrimaryKey && c.isAutoIncrement);
+        if (pkColumn && result.insertId !== undefined) {
+            entity[pkColumn.propertyName] = result.insertId;
+        }
+    }
+
+    /**
+     * Update an existing entity
+     */
+    private async updateEntity(entity: any, entry: EntityEntry<any>, metadata: any, tableName: string, pkColumn: any): Promise<void> {
+        const modifiedProperties = entry.getModifiedProperties();
+
+        if (modifiedProperties.length === 0) {
+            return; // Nothing to update
+        }
+
+        const setClause: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
+
+        // Find concurrency token columns
+        const concurrencyTokens = metadata.columns.filter((c: any) => c.isConcurrencyToken);
+
+        for (const propName of modifiedProperties) {
+            const column = metadata.columns.find((c: any) => c.propertyName === propName);
+            if (column && !column.isPrimaryKey && !column.isConcurrencyToken) {
+                setClause.push(`${column.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
+
+                let value = entity[propName];
+
+                // Apply value conversion from entity to database
+                if (column.hasConversion && column.convertToDb && value !== undefined && value !== null) {
+                    value = column.convertToDb(value);
+                }
+
+                values.push(value);
+            }
+        }
+
+        // Auto-increment concurrency tokens
+        for (const token of concurrencyTokens) {
+            const currentValue = entity[token.propertyName];
+            const newValue = typeof currentValue === 'number' ? currentValue + 1 : 1;
+            setClause.push(`${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
+            values.push(newValue);
+            // Update the entity with new token value
+            entity[token.propertyName] = newValue;
+        }
+
+        if (setClause.length === 0) {
+            return; // No non-PK columns to update
+        }
+
+        let pkValue = entity[pkColumn.propertyName];
+
+        // Apply value conversion to primary key if needed
+        if (pkColumn.hasConversion && pkColumn.convertToDb && pkValue !== undefined && pkValue !== null) {
+            pkValue = pkColumn.convertToDb(pkValue);
+        }
+
+        values.push(pkValue);
+
+        // Build WHERE clause with PK
+        let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
+
+        // Add concurrency token checks to WHERE clause
+        for (const token of concurrencyTokens) {
+            const originalValue = entry.originalValues[token.propertyName];
+            whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
+            values.push(originalValue);
+        }
+
+        const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${whereClause}`;
+
+        const result = await this.provider.query(sql, values);
+
+        // Check if update affected any rows (concurrency check)
+        if (result.rowCount === 0) {
+            const entityName = metadata.target.name;
+            const pkValue = entity[pkColumn.propertyName];
+            let errorMessage = `Concurrency violation detected for ${entityName} (${pkColumn.propertyName}=${pkValue}): The entity has been modified or deleted by another user.`;
+
+            if (concurrencyTokens.length > 0) {
+                const tokenInfo = concurrencyTokens.map((token: any) => {
+                    const current = entity[token.propertyName];
+                    const original = entry.originalValues[token.propertyName];
+                    return `${token.propertyName}: expected=${original}, current=${current}`;
+                }).join(', ');
+                errorMessage += ` Concurrency tokens: ${tokenInfo}`;
+            }
+
+            throw new Error(errorMessage);
+        }
+    }
+
+    /**
+     * Delete an entity
+     */
+    private async deleteEntity(entity: any, metadata: any, tableName: string, pkColumn: any): Promise<void> {
+        let pkValue = entity[pkColumn.propertyName];
+
+        // Apply value conversion to primary key if needed
+        if (pkColumn.hasConversion && pkColumn.convertToDb && pkValue !== undefined && pkValue !== null) {
+            pkValue = pkColumn.convertToDb(pkValue);
+        }
+
+        const placeholder = this.provider.getParameterPlaceholder(1);
+
+        const sql = `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
+
+        await this.provider.query(sql, [pkValue]);
+    }
+
+    /**
+     * Attach an entity to the context with the specified state
+     */
+    attach<T>(entity: T, state: EntityState = EntityState.Unchanged): EntityEntry<T> {
+        return this._changeTracker.track(entity, state);
+    }
+
+    /**
+     * Get the entry for an entity, or create one if it doesn't exist
+     */
+    entry<T>(entity: T): EntityEntry<T> {
+        let entry = this._changeTracker.entry(entity);
+
+        if (!entry) {
+            entry = this._changeTracker.track(entity, EntityState.Detached);
+        }
+
+        return entry;
     }
 
     async ensureCreated(): Promise<void> {
         const { MetadataStorage } = await import("./MetadataStorage");
         const entities = MetadataStorage.get().getEntities();
 
+        // Phase 1: Create all tables first (without foreign keys)
+        console.log('Creating tables...');
         for (const entity of entities) {
-            const columns = entity.columns.map((col) => {
-                let colDef = `${col.columnName} ${col.type.toUpperCase()}`;
-                if (col.isPrimaryKey) {
-                    colDef += " PRIMARY KEY";
-                    // If it's an integer PK, make it SERIAL for auto-increment
-                    if (col.type === "integer") {
-                        colDef = `${col.columnName} SERIAL PRIMARY KEY`;
+            // Skip keyless entities (they're typically views or query types)
+            if (entity.isKeyless) {
+                console.log(`Skipping keyless entity: ${entity.tableName}`);
+                continue;
+            }
+
+            const createTableSql = this.provider.generateCreateTableSql(entity);
+            await this.query(createTableSql);
+        }
+
+        // Phase 2: Create join tables for Many-to-Many relationships
+        console.log('Creating join tables for many-to-many relationships...');
+        const createdJoinTables = new Set<string>();
+
+        for (const entity of entities) {
+            for (const relation of entity.relations) {
+                if (relation.relationType === RelationType.ManyToMany && relation.joinTable) {
+                    // Only create each join table once
+                    if (!createdJoinTables.has(relation.joinTable)) {
+                        const relatedEntity = relation.relatedEntity();
+                        const relatedMetadata = MetadataStorage.get().getEntity(relatedEntity);
+
+                        if (relatedMetadata && relation.joinColumn && relation.inverseJoinColumn) {
+                            const joinTableSql = this.provider.generateCreateJoinTableSql(
+                                relation.joinTable,
+                                relation.joinColumn,
+                                relation.inverseJoinColumn,
+                                entity.tableName,
+                                relatedMetadata.tableName,
+                                relation.onDelete
+                            );
+
+                            await this.query(joinTableSql);
+                            createdJoinTables.add(relation.joinTable);
+                        }
                     }
                 }
-                if (!col.isNullable && !col.isPrimaryKey) {
-                    colDef += " NOT NULL";
+            }
+        }
+
+        // Phase 3: Add foreign key constraints for ManyToOne and OneToOne relationships
+        console.log('Creating foreign key constraints...');
+        for (const entity of entities) {
+            for (const relation of entity.relations) {
+                if ((relation.relationType === RelationType.ManyToOne || relation.relationType === RelationType.OneToOne) && relation.foreignKeyColumn) {
+                    const relatedEntity = relation.relatedEntity();
+                    const relatedMetadata = MetadataStorage.get().getEntity(relatedEntity);
+
+                    if (relatedMetadata) {
+                        const pkColumn = relatedMetadata.columns.find(c => c.isPrimaryKey);
+                        if (pkColumn) {
+                            try {
+                                const fkSql = this.provider.generateAddForeignKeySql(
+                                    entity.tableName,
+                                    relation.foreignKeyColumn,
+                                    relatedMetadata.tableName,
+                                    pkColumn.columnName,
+                                    relation.onDelete,
+                                    relation.onUpdate
+                                );
+
+                                await this.query(fkSql);
+                            } catch (error: any) {
+                                // Foreign key constraint might already exist
+                                if (!error.message.includes('already exists')) {
+                                    console.warn(`Warning: Could not create foreign key constraint: ${error.message}`);
+                                }
+                            }
+                        }
+                    }
                 }
-                return colDef;
-            });
+            }
+        }
 
-            const createTableSql = `CREATE TABLE IF NOT EXISTS ${entity.tableName} (${columns.join(", ")});`;
-            await this.query(createTableSql);
+        // Phase 4: Create indexes
+        console.log('Creating indexes...');
+        for (const entity of entities) {
+            for (const index of entity.indexes) {
+                const indexName = index.name || `idx_${entity.tableName}_${index.columns.join('_')}`;
+                try {
+                    const indexSql = this.provider.generateCreateIndexSql(
+                        entity.tableName,
+                        indexName,
+                        index.columns,
+                        index.unique
+                    );
 
-            // Schema Evolution: Check for missing columns and type mismatches
-            const existingColumnsRes = await this.query(`
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = $1;
-            `, [entity.tableName]);
+                    await this.query(indexSql);
+                } catch (error: any) {
+                    // Index might already exist
+                    if (!error.message.includes('already exists')) {
+                        console.warn(`Warning: Could not create index: ${error.message}`);
+                    }
+                }
+            }
+        }
 
-            const existingColumns = new Map(existingColumnsRes.rows.map((r: any) => [r.column_name.toLowerCase(), r.data_type.toLowerCase()]));
+        // Phase 5: Create unique constraints
+        console.log('Creating unique constraints...');
+        for (const entity of entities) {
+            for (const constraint of entity.uniqueConstraints) {
+                const constraintName = constraint.name || `uq_${entity.tableName}_${constraint.columns.join('_')}`;
+                try {
+                    const constraintSql = this.provider.generateCreateUniqueConstraintSql(
+                        entity.tableName,
+                        constraintName,
+                        constraint.columns
+                    );
+
+                    await this.query(constraintSql);
+                } catch (error: any) {
+                    // Constraint might already exist
+                    if (!error.message.includes('already exists')) {
+                        console.warn(`Warning: Could not create unique constraint: ${error.message}`);
+                    }
+                }
+            }
+        }
+
+        // Phase 6: Schema Evolution - Check for missing columns and type mismatches
+        console.log('Checking for schema evolution...');
+        for (const entity of entities) {
+            const schemaQuery = this.provider.getSchemaColumnsQuery(entity.tableName);
+            const existingColumnsRes = await this.query(schemaQuery.sql, schemaQuery.params);
+
+            const existingColumns = new Map(
+                existingColumnsRes.rows.map((r: any) => [
+                    r.column_name.toLowerCase(),
+                    r.data_type.toLowerCase()
+                ])
+            );
 
             for (const col of entity.columns) {
                 const colName = col.columnName.toLowerCase();
@@ -87,42 +473,90 @@ export class DbContext {
 
                 if (!existingType) {
                     console.log(`Detected missing column '${col.columnName}' in table '${entity.tableName}'. Adding it...`);
-                    let colDef = `${col.type.toUpperCase()}`;
-                    const alterTableSql = `ALTER TABLE ${entity.tableName} ADD COLUMN ${col.columnName} ${colDef}`;
+                    const alterTableSql = this.provider.generateAddColumnSql(entity.tableName, col);
                     await this.query(alterTableSql);
                 } else {
-                    // Check for type mismatch
-                    // Simple normalization for comparison
-                    const targetType = col.type.toLowerCase();
-                    let isMismatch = false;
-
-                    // Basic mapping check
-                    if (targetType === 'integer' && existingType !== 'integer') isMismatch = true;
-                    else if (targetType === 'text' && existingType !== 'text') isMismatch = true;
-                    else if (targetType === 'boolean' && existingType !== 'boolean') isMismatch = true;
-                    // For custom types like varchar(50), existingType is 'character varying'
-                    // We won't be too strict on length changes for now, just base type
-                    else if (targetType.startsWith('varchar') && existingType !== 'character varying') isMismatch = true;
-                    else if (targetType === 'timestamp' && !(existingType as string).includes('timestamp')) isMismatch = true;
-
-                    if (isMismatch) {
-                        console.warn(`WARNING: Type mismatch detected for column '${col.columnName}'. DB: '${existingType}', Entity: '${targetType}'. Attempting migration...`);
+                    // Check for type mismatch using provider
+                    if (this.provider.isTypeMismatch(col.type, existingType)) {
+                        console.warn(`WARNING: Type mismatch detected for column '${col.columnName}'. DB: '${existingType}', Entity: '${col.type}'. Attempting migration...`);
                         try {
-                            // Attempt to alter column type with implicit casting
-                            const alterColumnSql = `ALTER TABLE ${entity.tableName} ALTER COLUMN ${col.columnName} TYPE ${col.type} USING ${col.columnName}::${col.type}`;
+                            const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
                             await this.query(alterColumnSql);
                             console.log(`SUCCESS: Migrated column '${col.columnName}' to '${col.type}'.`);
                         } catch (error: any) {
-                            console.error(`ERROR: Failed to migrate column '${col.columnName}' from '${existingType}' to '${targetType}'. Data might be incompatible.`);
+                            console.error(`ERROR: Failed to migrate column '${col.columnName}' from '${existingType}' to '${col.type}'. Data might be incompatible.`);
                             console.error(`Details: ${error.message}`);
                         }
                     }
                 }
             }
         }
+
+        // Phase 7: Seed Data
+        console.log('Seeding data...');
+        for (const entity of entities) {
+            if (entity.seedData && entity.seedData.length > 0) {
+                const tableName = entity.tableName;
+                const pkColumn = entity.columns.find(c => c.isPrimaryKey);
+
+                if (!pkColumn) {
+                    console.warn(`Skipping seed for ${entity.tableName}: No primary key found`);
+                    continue;
+                }
+
+                // Check if data already exists
+                for (const seedItem of entity.seedData) {
+                    const pkValue = (seedItem as any)[pkColumn.propertyName];
+
+                    if (pkValue !== undefined) {
+                        // Check if record exists
+                        const placeholder = this.provider.getParameterPlaceholder(1);
+                        const checkSql = `SELECT COUNT(*) as count FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
+                        const result = await this.query(checkSql, [pkValue]);
+                        const exists = parseInt(result.rows[0].count) > 0;
+
+                        if (!exists) {
+                            // Insert seed data
+                            const columns = entity.columns.filter(c =>
+                                (seedItem as any)[c.propertyName] !== undefined || c.isShadowProperty
+                            );
+
+                            const columnNames = columns.map(c => c.columnName);
+                            const values = columns.map(c => {
+                                let value = c.isShadowProperty ? c.defaultValue : (seedItem as any)[c.propertyName];
+
+                                // Apply value conversion from entity to database
+                                if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
+                                    value = c.convertToDb(value);
+                                }
+
+                                return value;
+                            });
+                            const placeholders = values.map((_: any, i: number) =>
+                                this.provider.getParameterPlaceholder(i + 1)
+                            );
+
+                            const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+                            await this.query(insertSql, values);
+                            console.log(`  Seeded ${tableName}: ${JSON.stringify(seedItem)}`);
+                        }
+                    }
+                }
+            }
+        }
+
+        console.log('Database schema is up to date!');
     }
 
     set<T>(entityType: new () => T): DbSet<T> {
         return new DbSet(entityType, this);
+    }
+
+    /**
+     * Gets the database provider instance
+     * @internal
+     */
+    getProvider(): IDatabaseProvider {
+        return this.provider;
     }
 }
