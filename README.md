@@ -104,7 +104,9 @@ const db = new DbContext(new MariaDBProvider({
 }));
 ```
 
-### 3. Basic CRUD Operations
+### 3. Basic CRUD Operations with Change Tracking
+
+rnxORM automatically tracks changes to entities loaded from the database. Use `saveChanges()` to persist all changes at once:
 
 ```typescript
 import { User } from "./User";
@@ -117,28 +119,29 @@ async function main() {
 
   const users = db.set(User);
 
-  // Add
+  // Add new entity
   const user = new User();
   user.name = "Alice";
   user.age = 25;
-  await users.add(user);
+  users.add(user); // Mark as Added
 
-  // Query
+  // Save all changes (insert happens here)
+  await db.saveChanges();
+
+  // Query - entities are automatically tracked
   const allUsers = await users.toList();
-  const adults = await users.where("age", ">", 18).toList();
-  console.log(adults);
+  const alice = await users.where("name", "=", "Alice").first();
 
-  // Update
-  if (adults.length > 0) {
-    const alice = adults[0];
-    alice.age = 26;
-    await users.update(alice);
+  // Update - just modify the entity
+  if (alice) {
+    alice.age = 26; // Change is automatically detected
+    await db.saveChanges(); // Update happens here
   }
 
   // Remove
-  const toDelete = await users.where("name", "=", "Alice").toList();
-  if (toDelete.length > 0) {
-    await users.remove(toDelete[0]);
+  if (alice) {
+    users.remove(alice); // Mark as Deleted
+    await db.saveChanges(); // Delete happens here
   }
 
   await db.disconnect();
@@ -155,19 +158,20 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 ## Features
 
 - **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL
+- **Change Tracking & SaveChanges()**: EF Core-style automatic change detection and batch persistence
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
 - **Eager Loading**: `.include()` to load related entities
 - **Schema Scaffolding**: Automatically create tables, foreign keys, indexes, and constraints
 - **Migrations**: Version-controlled database schema changes with rollback support
-- **CRUD Operations**: `add`, `update`, `remove`, `toList`
+- **CRUD Operations**: `add`, `update`, `remove` with automatic tracking
 - **Fluent Query API**: `.where().orderBy().skip().take()`
 - **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
-- **Repository Pattern**: `DbSet<T>`
+- **Repository Pattern**: `DbSet<T>` with integrated change tracking
 - **Query Optimization**: `.asNoTracking()` for read-only queries
 - **Primary Key Lookup**: `.find(id)` for quick entity retrieval
-- **Transactions**: `beginTransaction()`, `commitTransaction()`, `rollbackTransaction()`
+- **Transactions**: Automatic transaction wrapping for `saveChanges()`
 - **Schema Evolution**: Auto-detect and migrate schema changes
 - **CLI Tools**: Generate migration files with `rnxorm` command
 
@@ -211,6 +215,168 @@ The `.where(column, operator, value)` method supports standard SQL operators:
 // Examples
 users.where("age", ">=", 21);
 users.where("name", "ILIKE", "%doe%");
+```
+
+## Change Tracking & SaveChanges()
+
+rnxORM implements EF Core-style change tracking, automatically detecting modifications to entities and persisting all changes with a single `saveChanges()` call.
+
+### How It Works
+
+1. **Entities loaded from the database are automatically tracked**
+2. **Modifications to tracked entities are detected**
+3. **Call `saveChanges()` to persist all changes in a single transaction**
+
+### Entity States
+
+Each tracked entity has one of these states:
+
+- **Added**: New entity, will be inserted
+- **Unchanged**: Loaded from database, no changes
+- **Modified**: Loaded from database, has changes
+- **Deleted**: Marked for deletion
+- **Detached**: Not being tracked
+
+### Basic Usage
+
+```typescript
+// Load an entity (automatically tracked)
+const user = await users.find(1);
+
+// Modify it (change is detected automatically)
+user.name = "Updated Name";
+user.age = 30;
+
+// Save all changes
+await db.saveChanges(); // Generates UPDATE statement
+```
+
+### Adding Entities
+
+```typescript
+const newUser = new User();
+newUser.name = "Alice";
+newUser.email = "alice@example.com";
+
+users.add(newUser); // Mark as Added
+await db.saveChanges(); // INSERT happens here
+
+// Auto-increment ID is set after save
+console.log(newUser.id); // e.g., 42
+```
+
+### Updating Entities
+
+```typescript
+// Method 1: Load and modify
+const user = await users.find(1);
+user.age = 31;
+await db.saveChanges();
+
+// Method 2: Manually mark as modified
+const user = new User();
+user.id = 1;
+user.name = "Alice";
+user.age = 31;
+
+users.update(user); // Mark as Modified
+await db.saveChanges();
+```
+
+### Deleting Entities
+
+```typescript
+const user = await users.find(1);
+users.remove(user); // Mark as Deleted
+await db.saveChanges(); // DELETE happens here
+```
+
+### Multiple Changes in One Transaction
+
+```typescript
+// Add new user
+const newUser = new User();
+newUser.name = "Bob";
+users.add(newUser);
+
+// Update existing user
+const alice = await users.where("name", "=", "Alice").first();
+if (alice) {
+    alice.age = 26;
+}
+
+// Delete another user
+const charlie = await users.find(3);
+if (charlie) {
+    users.remove(charlie);
+}
+
+// All changes happen in a single transaction
+const changesCount = await db.saveChanges();
+console.log(`Saved ${changesCount} changes`);
+```
+
+### Manual Change Detection
+
+```typescript
+// Auto-detection is enabled by default
+db.changeTracker.autoDetectChangesEnabled = true;
+
+// Disable auto-detection for performance
+db.changeTracker.autoDetectChangesEnabled = false;
+
+const user = await users.find(1);
+user.age = 30;
+
+// Manually detect changes
+db.changeTracker.detectChanges();
+
+await db.saveChanges();
+```
+
+### Attach & Entry
+
+```typescript
+// Attach an entity without loading from database
+const user = new User();
+user.id = 1;
+user.name = "Alice";
+
+db.attach(user, EntityState.Unchanged);
+
+// Get entry for an entity
+const entry = db.entry(user);
+console.log(entry.state); // EntityState.Unchanged
+
+// Manually change state
+entry.state = EntityState.Modified;
+await db.saveChanges();
+```
+
+### Change Tracker Statistics
+
+```typescript
+const stats = db.changeTracker.getStatistics();
+console.log(`Total tracked: ${stats.total}`);
+console.log(`Added: ${stats.added}`);
+console.log(`Modified: ${stats.modified}`);
+console.log(`Deleted: ${stats.deleted}`);
+console.log(`Unchanged: ${stats.unchanged}`);
+```
+
+### No-Tracking Queries
+
+For read-only scenarios, use `asNoTracking()` to skip change tracking:
+
+```typescript
+// Entities are not tracked (better performance)
+const users = await db.set(User)
+    .asNoTracking()
+    .toList();
+
+// Modifications won't be saved
+users[0].age = 100;
+await db.saveChanges(); // Nothing happens
 ```
 
 ## Relationships

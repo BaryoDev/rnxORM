@@ -1,19 +1,31 @@
 import { DbSet } from "./DbSet";
 import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
-import { RelationType } from "./MetadataStorage";
+import { RelationType, MetadataStorage } from "./MetadataStorage";
 import { ModelBuilder } from "./ModelBuilder";
+import { ChangeTracker } from "./ChangeTracker";
+import { EntityEntry, EntityState } from "./EntityEntry";
 
 /**
  * Represents a session with the database and can be used to query and save instances of your entities.
  */
 export class DbContext {
     protected provider: IDatabaseProvider;
+    private _changeTracker: ChangeTracker;
 
     constructor(provider: IDatabaseProvider) {
         this.provider = provider;
+        this._changeTracker = new ChangeTracker();
+
         // Configure the model using Fluent API
         const modelBuilder = new ModelBuilder();
         this.onModelCreating(modelBuilder);
+    }
+
+    /**
+     * Gets the change tracker for this context
+     */
+    get changeTracker(): ChangeTracker {
+        return this._changeTracker;
     }
 
     /**
@@ -58,6 +70,171 @@ export class DbContext {
 
     async rollbackTransaction() {
         await this.provider.rollbackTransaction();
+    }
+
+    /**
+     * Saves all changes made in this context to the database.
+     * This method will automatically detect changes made to tracked entities.
+     * @returns The number of state entries written to the database
+     */
+    async saveChanges(): Promise<number> {
+        // Detect changes if auto-detect is enabled
+        if (this._changeTracker.autoDetectChangesEnabled) {
+            this._changeTracker.detectChanges();
+        }
+
+        const changedEntries = this._changeTracker.getChangedEntries();
+
+        if (changedEntries.length === 0) {
+            return 0;
+        }
+
+        let savedCount = 0;
+
+        try {
+            // Begin transaction
+            await this.beginTransaction();
+
+            // Process all changes
+            for (const entry of changedEntries) {
+                const entity = entry.entity;
+                const entityType = entity.constructor;
+                const metadata = MetadataStorage.get().getEntity(entityType);
+
+                if (!metadata) {
+                    console.warn(`No metadata found for entity ${entityType.name}`);
+                    continue;
+                }
+
+                const tableName = metadata.tableName;
+                const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
+
+                if (!pkColumn) {
+                    console.warn(`No primary key found for entity ${entityType.name}`);
+                    continue;
+                }
+
+                switch (entry.state) {
+                    case EntityState.Added:
+                        await this.insertEntity(entity, metadata, tableName);
+                        savedCount++;
+                        break;
+
+                    case EntityState.Modified:
+                        await this.updateEntity(entity, entry, metadata, tableName, pkColumn);
+                        savedCount++;
+                        break;
+
+                    case EntityState.Deleted:
+                        await this.deleteEntity(entity, metadata, tableName, pkColumn);
+                        savedCount++;
+                        break;
+                }
+            }
+
+            // Commit transaction
+            await this.commitTransaction();
+
+            // Accept all changes
+            this._changeTracker.acceptAllChanges();
+
+            return savedCount;
+        } catch (error) {
+            // Rollback on error
+            await this.rollbackTransaction();
+            throw error;
+        }
+    }
+
+    /**
+     * Insert a new entity
+     */
+    private async insertEntity(entity: any, metadata: any, tableName: string): Promise<void> {
+        const columns = metadata.columns.filter((c: any) => {
+            const value = entity[c.propertyName];
+            // Skip auto-increment primary keys with undefined/null values
+            return !(c.isPrimaryKey && c.isAutoIncrement && (value === undefined || value === null));
+        });
+
+        const columnNames = columns.map((c: any) => c.columnName);
+        const values = columns.map((c: any) => entity[c.propertyName]);
+
+        const placeholders = values.map((_: any, i: number) => this.provider.getParameterPlaceholder(i + 1));
+
+        const sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+
+        const result = await this.provider.query(sql, values);
+
+        // Set auto-increment ID if applicable
+        const pkColumn = metadata.columns.find((c: any) => c.isPrimaryKey && c.isAutoIncrement);
+        if (pkColumn && result.insertId !== undefined) {
+            entity[pkColumn.propertyName] = result.insertId;
+        }
+    }
+
+    /**
+     * Update an existing entity
+     */
+    private async updateEntity(entity: any, entry: EntityEntry<any>, metadata: any, tableName: string, pkColumn: any): Promise<void> {
+        const modifiedProperties = entry.getModifiedProperties();
+
+        if (modifiedProperties.length === 0) {
+            return; // Nothing to update
+        }
+
+        const setClause: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
+
+        for (const propName of modifiedProperties) {
+            const column = metadata.columns.find((c: any) => c.propertyName === propName);
+            if (column && !column.isPrimaryKey) {
+                setClause.push(`${column.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
+                values.push(entity[propName]);
+            }
+        }
+
+        if (setClause.length === 0) {
+            return; // No non-PK columns to update
+        }
+
+        values.push(entity[pkColumn.propertyName]);
+
+        const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex)}`;
+
+        await this.provider.query(sql, values);
+    }
+
+    /**
+     * Delete an entity
+     */
+    private async deleteEntity(entity: any, metadata: any, tableName: string, pkColumn: any): Promise<void> {
+        const pkValue = entity[pkColumn.propertyName];
+        const placeholder = this.provider.getParameterPlaceholder(1);
+
+        const sql = `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
+
+        await this.provider.query(sql, [pkValue]);
+    }
+
+    /**
+     * Attach an entity to the context with the specified state
+     */
+    attach<T>(entity: T, state: EntityState = EntityState.Unchanged): EntityEntry<T> {
+        return this._changeTracker.track(entity, state);
+    }
+
+    /**
+     * Get the entry for an entity, or create one if it doesn't exist
+     */
+    entry<T>(entity: T): EntityEntry<T> {
+        let entry = this._changeTracker.entry(entity);
+
+        if (!entry) {
+            entry = this._changeTracker.track(entity, EntityState.Detached);
+        }
+
+        return entry;
     }
 
     async ensureCreated(): Promise<void> {

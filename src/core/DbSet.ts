@@ -1,5 +1,6 @@
 import { DbContext } from "./DbContext";
 import { MetadataStorage, RelationType } from "./MetadataStorage";
+import { EntityState } from "./EntityEntry";
 
 /**
  * Represents a collection of entities in the database.
@@ -18,25 +19,35 @@ export class DbSet<T> {
         this.columns = metadata.columns.map(c => c.columnName);
     }
 
-    async add(entity: T): Promise<void> {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        if (!metadata) return;
+    /**
+     * Add an entity to the context in the Added state.
+     * Call context.saveChanges() to insert it into the database.
+     */
+    add(entity: T): void {
+        this.context.changeTracker.track(entity, EntityState.Added);
+    }
 
-        const provider = this.context.getProvider();
+    /**
+     * Update an entity in the context in the Modified state.
+     * Call context.saveChanges() to update it in the database.
+     */
+    update(entity: T): void {
+        this.context.changeTracker.track(entity, EntityState.Modified);
+    }
 
-        // Exclude serial/auto-increment PK
-        const columns = metadata.columns.filter(c => !c.isPrimaryKey || c.type !== 'integer');
-        const params = columns.map(c => (entity as any)[c.propertyName]);
-
-        const sql = provider.generateInsertSql(this.tableName, columns);
-        await this.context.query(sql, params);
+    /**
+     * Remove an entity from the context in the Deleted state.
+     * Call context.saveChanges() to delete it from the database.
+     */
+    remove(entity: T): void {
+        this.context.changeTracker.track(entity, EntityState.Deleted);
     }
 
     async toList(): Promise<T[]> {
         const provider = this.context.getProvider();
         const sql = provider.generateSelectSql(this.tableName);
         const res = await this.context.query(sql);
-        return res.rows.map((row: any) => this.mapRowToEntity(row));
+        return res.rows.map((row: any) => this.mapRowToEntity(row, true));
     }
 
     // Simple Fluent API for WHERE
@@ -112,39 +123,7 @@ export class DbSet<T> {
         const res = await this.context.query(sql, [id]);
 
         if (res.rows.length === 0) return null;
-        return this.mapRowToEntity(res.rows[0]);
-    }
-
-    async update(entity: T): Promise<void> {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        if (!metadata) return;
-
-        const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
-        if (!pkColumn) throw new Error("Primary key not defined");
-
-        const provider = this.context.getProvider();
-        const columns = metadata.columns.filter(c => !c.isPrimaryKey);
-        const params = columns.map(c => (entity as any)[c.propertyName]);
-
-        const pkValue = (entity as any)[pkColumn.propertyName];
-        params.push(pkValue);
-
-        const sql = provider.generateUpdateSql(this.tableName, columns, pkColumn);
-        await this.context.query(sql, params);
-    }
-
-    async remove(entity: T): Promise<void> {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        if (!metadata) return;
-
-        const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
-        if (!pkColumn) throw new Error("Primary key not defined");
-
-        const provider = this.context.getProvider();
-        const pkValue = (entity as any)[pkColumn.propertyName];
-
-        const sql = provider.generateDeleteSql(this.tableName, pkColumn);
-        await this.context.query(sql, [pkValue]);
+        return this.mapRowToEntity(res.rows[0], true); // Track the entity
     }
 
     /**
@@ -241,26 +220,45 @@ export class DbSet<T> {
         return new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
     }
 
-    private mapRowToEntity(row: any, freeze: boolean = false): T {
+    private mapRowToEntity(row: any, track: boolean = false): T {
         const entity = new this.entityType();
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         metadata?.columns.forEach(col => {
             (entity as any)[col.propertyName] = row[col.columnName];
         });
-        return freeze ? Object.freeze(entity) : entity;
+
+        // Track the entity if requested
+        if (track) {
+            const originalValues = { ...entity };
+            this.context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+        }
+
+        return entity;
     }
 
     /**
      * Shared helper to map database rows to entities
      * @internal
      */
-    static mapRowToEntity<T>(entityType: new () => T, row: any, freeze: boolean = false): T {
+    static mapRowToEntity<T>(
+        entityType: new () => T,
+        row: any,
+        noTracking: boolean = false,
+        context?: DbContext
+    ): T {
         const entity = new entityType();
         const metadata = MetadataStorage.get().getEntity(entityType);
         metadata?.columns.forEach(col => {
             (entity as any)[col.propertyName] = row[col.columnName];
         });
-        return freeze ? Object.freeze(entity) : entity;
+
+        // Track the entity if tracking is enabled and context is provided
+        if (!noTracking && context) {
+            const originalValues = { ...entity };
+            context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+        }
+
+        return entity;
     }
 }
 
@@ -396,7 +394,7 @@ export class QueryBuilder<T> {
 
         // Map rows to entities
         const entities = res.rows.map((row: any) =>
-            DbSet.mapRowToEntity(this.entityType, row, this.noTracking)
+            DbSet.mapRowToEntity(this.entityType, row, this.noTracking, this.context)
         );
 
         // Load includes (eager loading)

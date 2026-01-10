@@ -21,6 +21,7 @@ export interface DatabaseConfig {
 export interface QueryResult {
     rows: any[];
     rowCount: number;
+    insertId?: number; // For auto-increment primary keys
 }
 
 /**
