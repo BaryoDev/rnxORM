@@ -273,7 +273,20 @@ export class DbContext {
 
         // Check if update affected any rows (concurrency check)
         if (result.rowCount === 0) {
-            throw new Error(`Concurrency violation: The entity has been modified or deleted by another user.`);
+            const entityName = metadata.target.name;
+            const pkValue = entity[pkColumn.propertyName];
+            let errorMessage = `Concurrency violation detected for ${entityName} (${pkColumn.propertyName}=${pkValue}): The entity has been modified or deleted by another user.`;
+
+            if (concurrencyTokens.length > 0) {
+                const tokenInfo = concurrencyTokens.map((token: any) => {
+                    const current = entity[token.propertyName];
+                    const original = entry.originalValues[token.propertyName];
+                    return `${token.propertyName}: expected=${original}, current=${current}`;
+                }).join(', ');
+                errorMessage += ` Concurrency tokens: ${tokenInfo}`;
+            }
+
+            throw new Error(errorMessage);
         }
     }
 

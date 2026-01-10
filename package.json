@@ -1,7 +1,7 @@
 {
   "name": "rnxorm",
   "version": "2.0.0",
-  "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core",
+  "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core. v2.0.0 introduces breaking changes - see README for migration guide.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
