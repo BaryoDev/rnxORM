@@ -14,6 +14,7 @@ export interface ColumnMetadata {
     hasConversion?: boolean; // Does this column have value conversion?
     convertToDb?: (value: any) => any; // Convert from entity to database
     convertFromDb?: (value: any) => any; // Convert from database to entity
+    isConcurrencyToken?: boolean; // Is this a concurrency token for optimistic locking?
 }
 
 export enum RelationType {
@@ -21,6 +22,8 @@ export enum RelationType {
     OneToMany = "one-to-many",
     ManyToOne = "many-to-one",
     ManyToMany = "many-to-many",
+    OwnsOne = "owns-one",
+    OwnsMany = "owns-many",
 }
 
 export enum CascadeOption {
@@ -69,6 +72,13 @@ export interface UniqueConstraintMetadata {
     name?: string; // Custom constraint name
 }
 
+export interface OwnedEntityMetadata {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    ownedType: Function; // The owned entity type
+    propertyName: string; // Property on owner entity
+    columnPrefix?: string; // Prefix for owned entity columns in owner table
+}
+
 export interface EntityMetadata {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     target: Function;
@@ -77,6 +87,7 @@ export interface EntityMetadata {
     relations: RelationMetadata[];
     indexes: IndexMetadata[];
     uniqueConstraints: UniqueConstraintMetadata[];
+    ownedEntities?: OwnedEntityMetadata[]; // Owned entity types
     seedData?: any[]; // Initial data for seeding
     queryFilter?: (entity: any) => boolean; // Global query filter (e.g., soft delete)
     isKeyless?: boolean; // Is this a keyless entity type (for views, query types)

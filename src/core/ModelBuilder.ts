@@ -141,6 +141,23 @@ export class PropertyBuilder<T, TProp> {
         }
         return this;
     }
+
+    /**
+     * Marks this property as a concurrency token for optimistic locking
+     * The property will be checked during updates to ensure no concurrent modifications
+     * @example
+     * property(u => u.rowVersion).isConcurrencyToken()
+     */
+    isConcurrencyToken(): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata) {
+            const column = metadata.columns.find(c => c.propertyName === this.propertyName);
+            if (column) {
+                column.isConcurrencyToken = true;
+            }
+        }
+        return this;
+    }
 }
 
 /**
@@ -539,6 +556,70 @@ export class EntityTypeBuilder<T> {
                 });
             }
         }
+        return this;
+    }
+
+    /**
+     * Configures a one-to-one owned entity type
+     * Owned entities don't have their own table - they are stored inline with the owner
+     * @param navigationProperty Property selector for the owned entity
+     * @param ownedEntityType The owned entity type
+     * @param options Configuration options
+     * @example
+     * modelBuilder.entity(Order)
+     *     .ownsOne(o => o.shippingAddress, Address, { columnPrefix: 'Shipping' });
+     */
+    ownsOne<TOwned>(
+        navigationProperty: (entity: T) => TOwned,
+        ownedEntityType: new () => TOwned,
+        options?: {
+            columnPrefix?: string;
+        }
+    ): this {
+        const propertyName = extractPropertyName(navigationProperty);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+
+        if (metadata) {
+            if (!metadata.ownedEntities) {
+                metadata.ownedEntities = [];
+            }
+
+            metadata.ownedEntities.push({
+                ownedType: ownedEntityType,
+                propertyName,
+                columnPrefix: options?.columnPrefix || propertyName
+            });
+        }
+
+        return this;
+    }
+
+    /**
+     * Configures a one-to-many owned entity type collection
+     * Owned entity collections are stored in a separate table linked to the owner
+     * @param navigationProperty Property selector for the owned entity collection
+     * @param ownedEntityType The owned entity type
+     * @example
+     * modelBuilder.entity(Order)
+     *     .ownsMany(o => o.orderItems, OrderItem);
+     */
+    ownsMany<TOwned>(
+        navigationProperty: (entity: T) => TOwned[],
+        ownedEntityType: new () => TOwned
+    ): this {
+        const propertyName = extractPropertyName(navigationProperty);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+
+        if (metadata) {
+            // For OwnsMany, create a relation similar to OneToMany
+            metadata.relations.push({
+                target: this.entityType,
+                propertyName,
+                relatedEntity: () => ownedEntityType,
+                relationType: RelationType.OwnsMany
+            });
+        }
+
         return this;
     }
 }

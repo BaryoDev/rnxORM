@@ -163,6 +163,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
 - **Eager Loading**: `.include()` to load related entities
+- **Explicit Loading**: Load related entities on-demand via `reference()` and `collection()`
 - **Schema Scaffolding**: Automatically create tables, foreign keys, indexes, and constraints
 - **Migrations**: Version-controlled database schema changes with rollback support
 - **CRUD Operations**: `add`, `update`, `remove` with automatic tracking
@@ -171,6 +172,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
 - **Raw SQL Queries**: Execute custom SQL via `fromSqlRaw()` and `executeSqlRaw()`
 - **Keyless Entity Types**: Query database views and ad-hoc queries via `hasNoKey()`
+- **Owned Entity Types**: Value objects embedded in parent entities via `ownsOne()` and `ownsMany()`
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
 - **Repository Pattern**: `DbSet<T>` with integrated change tracking
 - **Default Values**: Set column defaults via `hasDefaultValue()`
@@ -178,6 +180,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **Global Query Filters**: Automatic filtering for soft deletes, multi-tenancy via `hasQueryFilter()`
 - **Value Converters**: Transform values between entity and database representations via `hasConversion()`
 - **Shadow Properties**: Database-only columns without entity properties via `shadowProperty()`
+- **Concurrency Tokens**: Optimistic concurrency control via `isConcurrencyToken()`
 - **Query Optimization**: `.asNoTracking()` for read-only queries
 - **Primary Key Lookup**: `.find(id)` for quick entity retrieval
 - **Transactions**: Automatic transaction wrapping for `saveChanges()`
@@ -1481,6 +1484,323 @@ const stats = await db.set(OrderStatistics)
 - **Change Tracking**: Keyless entities are not tracked by default
 - **Views**: Perfect for mapping to database views that aggregate data
 - **Performance**: No overhead from primary key constraints or identity checks
+
+## Owned Entity Types
+
+Owned entity types are entities that don't have their own identity and are always accessed through their owner entity. They're perfect for value objects like addresses, money, or other complex types that belong to a parent entity.
+
+### OwnsOne - Single Owned Entity
+
+Use `ownsOne()` to configure a single owned entity that is stored inline in the owner's table:
+
+```typescript
+// Owned entity type (value object)
+export class Address {
+    street!: string;
+    city!: string;
+    state!: string;
+    zipCode!: string;
+}
+
+@Entity("orders")
+export class Order {
+    @PrimaryKey() id!: number;
+    @Column() customerName!: string;
+
+    // This will be stored inline in the orders table
+    shippingAddress!: Address;
+    billingAddress!: Address;
+}
+
+// Configure owned entities
+export class AppDbContext extends DbContext {
+    protected onModelCreating(modelBuilder: ModelBuilder): void {
+        modelBuilder.entity(Order)
+            .ownsOne(o => o.shippingAddress, Address, { columnPrefix: 'Shipping' })
+            .ownsOne(o => o.billingAddress, Address, { columnPrefix: 'Billing' });
+    }
+}
+
+// Database schema result:
+// CREATE TABLE orders (
+//     id INTEGER PRIMARY KEY,
+//     customer_name TEXT,
+//     ShippingStreet TEXT,
+//     ShippingCity TEXT,
+//     ShippingState TEXT,
+//     ShippingZipCode TEXT,
+//     BillingStreet TEXT,
+//     BillingCity TEXT,
+//     BillingState TEXT,
+//     BillingZipCode TEXT
+// );
+```
+
+### OwnsMany - Owned Entity Collection
+
+Use `ownsMany()` for collections of owned entities stored in a separate table:
+
+```typescript
+export class OrderItem {
+    productName!: string;
+    quantity!: number;
+    price!: number;
+}
+
+@Entity("orders")
+export class Order {
+    @PrimaryKey() id!: number;
+    @Column() customerName!: string;
+
+    // Owned collection stored in separate table
+    items!: OrderItem[];
+}
+
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    modelBuilder.entity(Order)
+        .ownsMany(o => o.items, OrderItem);
+}
+```
+
+### Working with Owned Entities
+
+```typescript
+// Create order with owned entities
+const order = new Order();
+order.customerName = 'John Doe';
+order.shippingAddress = {
+    street: '123 Main St',
+    city: 'Springfield',
+    state: 'IL',
+    zipCode: '62701'
+};
+order.billingAddress = {
+    street: '456 Oak Ave',
+    city: 'Chicago',
+    state: 'IL',
+    zipCode: '60601'
+};
+
+orders.add(order);
+await db.saveChanges();
+
+// Query returns fully populated owned entities
+const loadedOrder = await orders.find(1);
+console.log(loadedOrder.shippingAddress.city); // 'Springfield'
+```
+
+### When to Use Owned Entities
+
+✅ **Use owned entities for:**
+- Value objects without identity (Address, Money, DateRange, etc.)
+- Complex types that always belong to a parent
+- Data that should never be shared between entities
+- Avoiding extra tables for simple related data
+
+❌ **Don't use owned entities for:**
+- Entities that have their own identity
+- Data that might be shared across multiple parents
+- Entities that need independent queries
+
+## Explicit Loading
+
+Explicit loading allows you to load related entities on-demand after the initial query, giving you fine-grained control over when related data is fetched.
+
+### Loading Reference Navigation Properties
+
+Load a single related entity using `reference()`:
+
+```typescript
+// Load order without related entities
+const order = await orders.find(1);
+
+// Later, explicitly load the customer
+const orderEntry = db.entry(order);
+await orderEntry.reference(o => o.customer).load();
+
+// Now customer is loaded
+console.log(order.customer.name);
+```
+
+### Loading Collection Navigation Properties
+
+Load a collection of related entities using `collection()`:
+
+```typescript
+// Load user without orders
+const user = await users.find(1);
+
+// Later, explicitly load the orders collection
+const userEntry = db.entry(user);
+await userEntry.collection(u => u.orders).load();
+
+// Now orders are loaded
+console.log(`User has ${user.orders.length} orders`);
+```
+
+### Check if Loaded
+
+Check whether a navigation property is already loaded:
+
+```typescript
+const userEntry = db.entry(user);
+const ordersLoader = userEntry.collection(u => u.orders);
+
+if (!ordersLoader.isLoaded()) {
+    await ordersLoader.load();
+}
+```
+
+### Explicit Loading vs Eager Loading
+
+**Eager Loading (Include):**
+```typescript
+// Loads everything upfront
+const users = await db.set(User)
+    .include(u => u.orders)
+    .include(u => u.profile)
+    .toList();
+```
+
+**Explicit Loading:**
+```typescript
+// Load selectively based on business logic
+const users = await db.set(User).toList();
+
+for (const user of users) {
+    if (user.isActive) {
+        // Only load orders for active users
+        await db.entry(user).collection(u => u.orders).load();
+    }
+}
+```
+
+### When to Use Explicit Loading
+
+✅ **Use explicit loading when:**
+- You need conditional loading based on business logic
+- Loading related data for only some entities
+- Optimizing queries by loading data on-demand
+- Avoiding N+1 queries while maintaining control
+
+🔄 **Compare with:**
+- **Eager Loading**: Load everything upfront (use `.include()`)
+- **Lazy Loading**: Automatic on-access loading (not yet implemented in rnxORM)
+
+## Concurrency Tokens
+
+Concurrency tokens enable optimistic concurrency control, preventing lost updates when multiple users modify the same entity simultaneously.
+
+### Configuring Concurrency Tokens
+
+Mark a property as a concurrency token using `isConcurrencyToken()`:
+
+```typescript
+@Entity("products")
+export class Product {
+    @PrimaryKey() id!: number;
+    @Column() name!: string;
+    @Column() price!: number;
+    @Column() quantity!: number;
+    @Column() rowVersion!: number; // Concurrency token
+}
+
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    modelBuilder.entity(Product)
+        .property(p => p.rowVersion)
+        .hasDefaultValue(1)
+        .isConcurrencyToken();
+}
+```
+
+### How It Works
+
+When you update an entity with a concurrency token:
+
+1. **Load entity**: rowVersion = 5
+2. **Modify entity**: Change price, rowVersion still 5
+3. **Save changes**:
+   - UPDATE products SET price = $1, rowVersion = 6 WHERE id = $2 AND rowVersion = 5
+   - If another user already updated (rowVersion ≠ 5), update fails
+   - Token automatically incremented to 6 on success
+
+### Handling Concurrency Conflicts
+
+```typescript
+try {
+    const product = await products.find(1);
+    product.price = 99.99;
+    await db.saveChanges();
+    // Success - product.rowVersion is now incremented
+} catch (error) {
+    if (error.message.includes('Concurrency violation')) {
+        // Another user modified the entity
+        console.log('Product was modified by another user');
+
+        // Reload to get latest version
+        const freshProduct = await products.find(1);
+        // Retry or merge changes
+    }
+}
+```
+
+### Timestamp-Based Concurrency
+
+Use database timestamps for automatic concurrency control:
+
+```typescript
+protected onModelCreating(modelBuilder: ModelBuilder): void {
+    modelBuilder.entity(Order)
+        .shadowProperty('last_modified', 'timestamp', {
+            defaultValue: 'CURRENT_TIMESTAMP'
+        })
+        .property(o => o.lastModified)
+        .hasColumnName('last_modified')
+        .isConcurrencyToken();
+}
+```
+
+### Best Practices
+
+✅ **Use concurrency tokens when:**
+- Multiple users can edit the same data
+- Preventing lost updates is critical
+- Implementing optimistic locking
+- Building collaborative applications
+
+**Common Token Types:**
+- **Integer counter**: Simple, auto-incrementing (rowVersion = 1, 2, 3...)
+- **Timestamp**: Database-managed modification time
+- **GUID**: Unique identifier generated on each update
+
+**Handling Conflicts:**
+1. **Client Wins**: Overwrite with user's changes (dangerous)
+2. **Store Wins**: Reload and discard user changes
+3. **Merge**: Combine both versions (most complex, most flexible)
+
+```typescript
+// Example: Store Wins strategy
+async function updateWithRetry(product: Product, changes: Partial<Product>) {
+    let retries = 3;
+    while (retries > 0) {
+        try {
+            Object.assign(product, changes);
+            await db.saveChanges();
+            return; // Success
+        } catch (error) {
+            if (error.message.includes('Concurrency violation')) {
+                // Reload and retry
+                const fresh = await products.find(product.id);
+                Object.assign(product, fresh);
+                retries--;
+            } else {
+                throw error;
+            }
+        }
+    }
+    throw new Error('Failed to update after multiple retries');
+}
+```
 
 ## Query Optimization
 

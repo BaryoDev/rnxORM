@@ -215,9 +215,12 @@ export class DbContext {
         const values: any[] = [];
         let paramIndex = 1;
 
+        // Find concurrency token columns
+        const concurrencyTokens = metadata.columns.filter((c: any) => c.isConcurrencyToken);
+
         for (const propName of modifiedProperties) {
             const column = metadata.columns.find((c: any) => c.propertyName === propName);
-            if (column && !column.isPrimaryKey) {
+            if (column && !column.isPrimaryKey && !column.isConcurrencyToken) {
                 setClause.push(`${column.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
 
                 let value = entity[propName];
@@ -229,6 +232,16 @@ export class DbContext {
 
                 values.push(value);
             }
+        }
+
+        // Auto-increment concurrency tokens
+        for (const token of concurrencyTokens) {
+            const currentValue = entity[token.propertyName];
+            const newValue = typeof currentValue === 'number' ? currentValue + 1 : 1;
+            setClause.push(`${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
+            values.push(newValue);
+            // Update the entity with new token value
+            entity[token.propertyName] = newValue;
         }
 
         if (setClause.length === 0) {
@@ -244,9 +257,24 @@ export class DbContext {
 
         values.push(pkValue);
 
-        const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex)}`;
+        // Build WHERE clause with PK
+        let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
 
-        await this.provider.query(sql, values);
+        // Add concurrency token checks to WHERE clause
+        for (const token of concurrencyTokens) {
+            const originalValue = entry.originalValues[token.propertyName];
+            whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
+            values.push(originalValue);
+        }
+
+        const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${whereClause}`;
+
+        const result = await this.provider.query(sql, values);
+
+        // Check if update affected any rows (concurrency check)
+        if (result.rowCount === 0) {
+            throw new Error(`Concurrency violation: The entity has been modified or deleted by another user.`);
+        }
     }
 
     /**
