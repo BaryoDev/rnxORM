@@ -1,11 +1,12 @@
 import * as mariadb from "mariadb";
-import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
+import { DatabaseConfig, IDatabaseProvider, QueryResult, PoolStats } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 
 /**
  * MariaDB database provider implementation
  */
 export class MariaDBProvider implements IDatabaseProvider {
+    type: 'mariadb' = 'mariadb';
     private pool: mariadb.Pool;
     private connection: mariadb.PoolConnection | null = null;
     private inTransaction: boolean = false;
@@ -20,6 +21,18 @@ export class MariaDBProvider implements IDatabaseProvider {
             connectionLimit: config.max || 10,
             idleTimeout: config.idleTimeoutMillis || 30000,
         });
+    }
+
+    /**
+     * Get connection pool statistics
+     */
+    getPoolStats(): PoolStats | null {
+        return {
+            total: this.pool.totalConnections(),
+            idle: this.pool.idleConnections(),
+            active: this.pool.activeConnections(),
+            waiting: 0 // MariaDB pool doesn't expose waiting count
+        };
     }
 
     async connect(): Promise<void> {

@@ -6,6 +6,7 @@ import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
  * Stores data in memory using Maps
  */
 export class MockDatabaseProvider implements IDatabaseProvider {
+    type: 'postgres' = 'postgres'; // Mock as postgres for compatibility
     private tables: Map<string, Map<any, any>> = new Map();
     private sequences: Map<string, number> = new Map();
     private connected: boolean = false;

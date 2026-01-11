@@ -1,11 +1,12 @@
 import * as mssql from "mssql";
-import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
+import { DatabaseConfig, IDatabaseProvider, QueryResult, PoolStats } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 
 /**
  * Microsoft SQL Server database provider implementation
  */
 export class MSSQLProvider implements IDatabaseProvider {
+    type: 'mssql' = 'mssql';
     private pool: mssql.ConnectionPool | null = null;
     private transaction: mssql.Transaction | null = null;
     private config: mssql.config;
@@ -26,6 +27,20 @@ export class MSSQLProvider implements IDatabaseProvider {
                 min: config.min || 0,
                 idleTimeoutMillis: config.idleTimeoutMillis || 30000,
             },
+        };
+    }
+
+    /**
+     * Get connection pool statistics
+     */
+    getPoolStats(): PoolStats | null {
+        if (!this.pool) return null;
+
+        return {
+            total: this.pool.size,
+            idle: this.pool.available,
+            active: this.pool.size - this.pool.available,
+            waiting: this.pool.pending
         };
     }
 

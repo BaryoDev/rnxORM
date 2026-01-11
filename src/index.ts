@@ -7,3 +7,4 @@ export * from "./core/EntityEntry";
 export * from "./core/ChangeTracker";
 export * from "./providers";
 export * from "./migrations";
+export * from "./utils/logger";

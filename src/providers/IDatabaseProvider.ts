@@ -25,10 +25,40 @@ export interface QueryResult {
 }
 
 /**
+ * Connection pool statistics
+ */
+export interface PoolStats {
+    /**
+     * Total number of connections in the pool
+     */
+    total: number;
+
+    /**
+     * Number of idle connections
+     */
+    idle: number;
+
+    /**
+     * Number of active connections
+     */
+    active: number;
+
+    /**
+     * Number of clients waiting for a connection
+     */
+    waiting: number;
+}
+
+/**
  * Interface for database providers
  * Abstracts database-specific SQL generation and operations
  */
 export interface IDatabaseProvider {
+    /**
+     * Provider type identifier
+     */
+    type: 'postgres' | 'mssql' | 'mariadb' | 'sqlite';
+
     /**
      * Connect to the database
      */
@@ -166,4 +196,10 @@ export interface IDatabaseProvider {
         referencedTable2: string,
         onDelete?: string
     ): string;
+
+    /**
+     * Get connection pool statistics (optional)
+     * Returns null if the provider doesn't use connection pooling
+     */
+    getPoolStats?(): PoolStats | null;
 }

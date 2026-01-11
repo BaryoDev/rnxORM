@@ -4,6 +4,42 @@ import { RelationType, MetadataStorage } from "./MetadataStorage";
 import { ModelBuilder } from "./ModelBuilder";
 import { ChangeTracker } from "./ChangeTracker";
 import { EntityEntry, EntityState } from "./EntityEntry";
+import { Logger, createLogger, ConsoleLogger } from "../utils/logger";
+
+/**
+ * Options for configuring the DbContext
+ */
+export interface DbContextOptions {
+    /**
+     * Custom logger instance. If not provided, a default logger will be created.
+     */
+    logger?: Logger;
+
+    /**
+     * Connection retry configuration
+     */
+    retry?: {
+        /**
+         * Maximum number of connection retry attempts (default: 3)
+         */
+        maxRetries?: number;
+
+        /**
+         * Initial delay in milliseconds before first retry (default: 1000)
+         */
+        initialDelay?: number;
+
+        /**
+         * Multiplier for exponential backoff (default: 2)
+         */
+        backoffMultiplier?: number;
+    };
+
+    /**
+     * Graceful shutdown timeout in milliseconds (default: 30000)
+     */
+    shutdownTimeout?: number;
+}
 
 /**
  * Represents a session with the database and can be used to query and save instances of your entities.
@@ -11,10 +47,15 @@ import { EntityEntry, EntityState } from "./EntityEntry";
 export class DbContext {
     protected provider: IDatabaseProvider;
     private _changeTracker: ChangeTracker;
+    protected logger: Logger;
+    private options: DbContextOptions;
+    private isShuttingDown: boolean = false;
 
-    constructor(provider: IDatabaseProvider) {
+    constructor(provider: IDatabaseProvider, options?: DbContextOptions) {
         this.provider = provider;
         this._changeTracker = new ChangeTracker();
+        this.options = options || {};
+        this.logger = options?.logger || (process.env.NODE_ENV === 'production' ? createLogger() : new ConsoleLogger());
 
         // Configure the model using Fluent API
         const modelBuilder = new ModelBuilder();
@@ -45,14 +86,123 @@ export class DbContext {
     }
 
     /**
-     * Connects to the database.
+     * Connects to the database with automatic retry logic.
      */
     async connect(): Promise<void> {
-        await this.provider.connect();
+        const maxRetries = this.options.retry?.maxRetries ?? 3;
+        const initialDelay = this.options.retry?.initialDelay ?? 1000;
+        const backoffMultiplier = this.options.retry?.backoffMultiplier ?? 2;
+
+        let attempt = 0;
+        while (attempt < maxRetries) {
+            try {
+                await this.provider.connect();
+                this.logger.info('Database connected successfully', {
+                    provider: this.provider.type,
+                    attempt: attempt + 1
+                });
+                return;
+            } catch (error) {
+                attempt++;
+                const isLastAttempt = attempt >= maxRetries;
+
+                if (isLastAttempt) {
+                    this.logger.error('Failed to connect after max retries', error as Error, {
+                        provider: this.provider.type,
+                        maxRetries,
+                        attempts: attempt
+                    });
+                    throw error;
+                }
+
+                const delay = initialDelay * Math.pow(backoffMultiplier, attempt - 1);
+                this.logger.warn(`Connection failed, retrying...`, {
+                    provider: this.provider.type,
+                    attempt,
+                    maxRetries,
+                    nextRetryIn: `${delay}ms`,
+                    error: (error as Error).message
+                });
+
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
     }
 
+    /**
+     * Disconnects from the database.
+     */
     async disconnect(): Promise<void> {
-        await this.provider.disconnect();
+        try {
+            await this.provider.disconnect();
+            this.logger.info('Database disconnected successfully');
+        } catch (error) {
+            this.logger.error('Error during disconnect', error as Error);
+            throw error;
+        }
+    }
+
+    /**
+     * Performs a graceful shutdown of the database context.
+     * Saves pending changes and disconnects from the database.
+     * @param timeout Maximum time to wait for shutdown in milliseconds (default: 30000)
+     */
+    async gracefulShutdown(timeout?: number): Promise<void> {
+        if (this.isShuttingDown) {
+            this.logger.warn('Shutdown already in progress');
+            return;
+        }
+
+        this.isShuttingDown = true;
+        const shutdownTimeout = timeout ?? this.options.shutdownTimeout ?? 30000;
+
+        this.logger.info('Starting graceful shutdown', { timeout: shutdownTimeout });
+
+        const shutdownPromise = (async () => {
+            try {
+                // Get pending changes count
+                const stats = this._changeTracker.getStatistics();
+                const hasPendingChanges = stats.added > 0 || stats.modified > 0 || stats.deleted > 0;
+
+                if (hasPendingChanges) {
+                    this.logger.warn('Saving pending changes before shutdown', { stats });
+                    await this.saveChanges();
+                }
+
+                // Disconnect from database
+                await this.disconnect();
+
+                this.logger.info('Graceful shutdown completed successfully');
+            } catch (error) {
+                this.logger.error('Error during graceful shutdown', error as Error);
+                throw error;
+            } finally {
+                this.isShuttingDown = false;
+            }
+        })();
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Shutdown timeout exceeded (${shutdownTimeout}ms)`)), shutdownTimeout)
+        );
+
+        try {
+            await Promise.race([shutdownPromise, timeoutPromise]);
+        } catch (error) {
+            this.isShuttingDown = false;
+            this.logger.error('Graceful shutdown failed', error as Error, { timeout: shutdownTimeout });
+            throw error;
+        }
+    }
+
+    /**
+     * Get connection pool statistics (if available)
+     * @returns Pool statistics or null if not supported by the provider
+     */
+    getPoolStats() {
+        if (this.provider.getPoolStats) {
+            return this.provider.getPoolStats();
+        }
+        return null;
     }
 
     async query(text: string, params?: any[]): Promise<QueryResult> {
@@ -101,10 +251,14 @@ export class DbContext {
         }
 
         const changedEntries = this._changeTracker.getChangedEntries();
+        const stats = this._changeTracker.getStatistics();
 
         if (changedEntries.length === 0) {
+            this.logger.debug('No changes to save');
             return 0;
         }
+
+        this.logger.debug('Saving changes to database', { stats });
 
         let savedCount = 0;
 
@@ -119,7 +273,7 @@ export class DbContext {
                 const metadata = MetadataStorage.get().getEntity(entityType);
 
                 if (!metadata) {
-                    console.warn(`No metadata found for entity ${entityType.name}`);
+                    this.logger.warn(`No metadata found for entity ${entityType.name}`);
                     continue;
                 }
 
@@ -127,7 +281,7 @@ export class DbContext {
                 const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
 
                 if (!pkColumn) {
-                    console.warn(`No primary key found for entity ${entityType.name}`);
+                    this.logger.warn(`No primary key found for entity ${entityType.name}`);
                     continue;
                 }
 
@@ -155,10 +309,23 @@ export class DbContext {
             // Accept all changes
             this._changeTracker.acceptAllChanges();
 
+            this.logger.info('Changes saved successfully', {
+                inserted: stats.added,
+                updated: stats.modified,
+                deleted: stats.deleted,
+                total: savedCount
+            });
+
             return savedCount;
         } catch (error) {
             // Rollback on error
             await this.rollbackTransaction();
+
+            this.logger.error('Failed to save changes, transaction rolled back', error as Error, {
+                stats,
+                changedEntries: changedEntries.length
+            });
+
             throw error;
         }
     }
@@ -333,11 +500,11 @@ export class DbContext {
         const entities = MetadataStorage.get().getEntities();
 
         // Phase 1: Create all tables first (without foreign keys)
-        console.log('Creating tables...');
+        this.logger.info('Creating tables...');
         for (const entity of entities) {
             // Skip keyless entities (they're typically views or query types)
             if (entity.isKeyless) {
-                console.log(`Skipping keyless entity: ${entity.tableName}`);
+                this.logger.debug(`Skipping keyless entity: ${entity.tableName}`);
                 continue;
             }
 
@@ -346,7 +513,7 @@ export class DbContext {
         }
 
         // Phase 2: Create join tables for Many-to-Many relationships
-        console.log('Creating join tables for many-to-many relationships...');
+        this.logger.info('Creating join tables for many-to-many relationships...');
         const createdJoinTables = new Set<string>();
 
         for (const entity of entities) {
@@ -376,7 +543,7 @@ export class DbContext {
         }
 
         // Phase 3: Add foreign key constraints for ManyToOne and OneToOne relationships
-        console.log('Creating foreign key constraints...');
+        this.logger.info('Creating foreign key constraints...');
         for (const entity of entities) {
             for (const relation of entity.relations) {
                 if ((relation.relationType === RelationType.ManyToOne || relation.relationType === RelationType.OneToOne) && relation.foreignKeyColumn) {
@@ -400,7 +567,10 @@ export class DbContext {
                             } catch (error: any) {
                                 // Foreign key constraint might already exist
                                 if (!error.message.includes('already exists')) {
-                                    console.warn(`Warning: Could not create foreign key constraint: ${error.message}`);
+                                    this.logger.warn(`Could not create foreign key constraint`, {
+                                        error: error.message,
+                                        relation: relation.propertyName
+                                    });
                                 }
                             }
                         }
@@ -410,7 +580,7 @@ export class DbContext {
         }
 
         // Phase 4: Create indexes
-        console.log('Creating indexes...');
+        this.logger.info('Creating indexes...');
         for (const entity of entities) {
             for (const index of entity.indexes) {
                 const indexName = index.name || `idx_${entity.tableName}_${index.columns.join('_')}`;
@@ -426,14 +596,18 @@ export class DbContext {
                 } catch (error: any) {
                     // Index might already exist
                     if (!error.message.includes('already exists')) {
-                        console.warn(`Warning: Could not create index: ${error.message}`);
+                        this.logger.warn(`Could not create index`, {
+                            error: error.message,
+                            table: entity.tableName,
+                            index: indexName
+                        });
                     }
                 }
             }
         }
 
         // Phase 5: Create unique constraints
-        console.log('Creating unique constraints...');
+        this.logger.info('Creating unique constraints...');
         for (const entity of entities) {
             for (const constraint of entity.uniqueConstraints) {
                 const constraintName = constraint.name || `uq_${entity.tableName}_${constraint.columns.join('_')}`;
@@ -448,14 +622,18 @@ export class DbContext {
                 } catch (error: any) {
                     // Constraint might already exist
                     if (!error.message.includes('already exists')) {
-                        console.warn(`Warning: Could not create unique constraint: ${error.message}`);
+                        this.logger.warn(`Could not create unique constraint`, {
+                            error: error.message,
+                            table: entity.tableName,
+                            constraint: constraintName
+                        });
                     }
                 }
             }
         }
 
         // Phase 6: Schema Evolution - Check for missing columns and type mismatches
-        console.log('Checking for schema evolution...');
+        this.logger.info('Checking for schema evolution...');
         for (const entity of entities) {
             const schemaQuery = this.provider.getSchemaColumnsQuery(entity.tableName);
             const existingColumnsRes = await this.query(schemaQuery.sql, schemaQuery.params);
@@ -472,20 +650,33 @@ export class DbContext {
                 const existingType = existingColumns.get(colName);
 
                 if (!existingType) {
-                    console.log(`Detected missing column '${col.columnName}' in table '${entity.tableName}'. Adding it...`);
+                    this.logger.info(`Detected missing column, adding it...`, {
+                        column: col.columnName,
+                        table: entity.tableName
+                    });
                     const alterTableSql = this.provider.generateAddColumnSql(entity.tableName, col);
                     await this.query(alterTableSql);
                 } else {
                     // Check for type mismatch using provider
                     if (this.provider.isTypeMismatch(col.type, existingType)) {
-                        console.warn(`WARNING: Type mismatch detected for column '${col.columnName}'. DB: '${existingType}', Entity: '${col.type}'. Attempting migration...`);
+                        this.logger.warn(`Type mismatch detected, attempting migration...`, {
+                            column: col.columnName,
+                            dbType: existingType,
+                            entityType: col.type
+                        });
                         try {
                             const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
                             await this.query(alterColumnSql);
-                            console.log(`SUCCESS: Migrated column '${col.columnName}' to '${col.type}'.`);
+                            this.logger.info(`Successfully migrated column type`, {
+                                column: col.columnName,
+                                newType: col.type
+                            });
                         } catch (error: any) {
-                            console.error(`ERROR: Failed to migrate column '${col.columnName}' from '${existingType}' to '${col.type}'. Data might be incompatible.`);
-                            console.error(`Details: ${error.message}`);
+                            this.logger.error(`Failed to migrate column type, data might be incompatible`, error as Error, {
+                                column: col.columnName,
+                                fromType: existingType,
+                                toType: col.type
+                            });
                         }
                     }
                 }
@@ -493,14 +684,16 @@ export class DbContext {
         }
 
         // Phase 7: Seed Data
-        console.log('Seeding data...');
+        this.logger.info('Seeding data...');
         for (const entity of entities) {
             if (entity.seedData && entity.seedData.length > 0) {
                 const tableName = entity.tableName;
                 const pkColumn = entity.columns.find(c => c.isPrimaryKey);
 
                 if (!pkColumn) {
-                    console.warn(`Skipping seed for ${entity.tableName}: No primary key found`);
+                    this.logger.warn(`Skipping seed, no primary key found`, {
+                        table: entity.tableName
+                    });
                     continue;
                 }
 
@@ -536,16 +729,19 @@ export class DbContext {
                                 this.provider.getParameterPlaceholder(i + 1)
                             );
 
-                            const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+                            const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')})VALUES (${placeholders.join(', ')})`;
                             await this.query(insertSql, values);
-                            console.log(`  Seeded ${tableName}: ${JSON.stringify(seedItem)}`);
+                            this.logger.debug(`Seeded data`, {
+                                table: tableName,
+                                data: seedItem
+                            });
                         }
                     }
                 }
             }
         }
 
-        console.log('Database schema is up to date!');
+        this.logger.info('Database schema is up to date!');
     }
 
     set<T>(entityType: new () => T): DbSet<T> {

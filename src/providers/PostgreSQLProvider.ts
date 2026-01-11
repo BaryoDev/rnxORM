@@ -1,11 +1,12 @@
 import { Pool, PoolClient } from "pg";
-import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
+import { DatabaseConfig, IDatabaseProvider, QueryResult, PoolStats } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 
 /**
  * PostgreSQL database provider implementation
  */
 export class PostgreSQLProvider implements IDatabaseProvider {
+    type: 'postgres' = 'postgres';
     private pool: Pool;
     private client: PoolClient | null = null;
 
@@ -20,6 +21,18 @@ export class PostgreSQLProvider implements IDatabaseProvider {
             min: config.min,
             idleTimeoutMillis: config.idleTimeoutMillis,
         });
+    }
+
+    /**
+     * Get connection pool statistics
+     */
+    getPoolStats(): PoolStats | null {
+        return {
+            total: this.pool.totalCount,
+            idle: this.pool.idleCount,
+            active: this.pool.totalCount - this.pool.idleCount,
+            waiting: this.pool.waitingCount
+        };
     }
 
     async connect(): Promise<void> {
