@@ -10,6 +10,10 @@ export class MSSQLProvider implements IDatabaseProvider {
     private transaction: mssql.Transaction | null = null;
     private config: mssql.config;
 
+    getDialect(): string {
+        return 'mssql';
+    }
+
     constructor(config: DatabaseConfig) {
         this.config = {
             server: config.host,
@@ -167,7 +171,8 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     getParameterPlaceholder(index: number): string {
-        return `@p${index}`;
+        // Convert from 1-based caller convention to 0-based MSSQL binding
+        return `@p${index - 1}`;
     }
 
     getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] } {
@@ -222,7 +227,7 @@ export class MSSQLProvider implements IDatabaseProvider {
         onDelete?: string,
         onUpdate?: string
     ): string {
-        const constraintName = `FK_${tableName}_${columnName}`;
+        const constraintName = `fk_${tableName}_${columnName}`;
         let sql = `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${columnName}) REFERENCES ${referencedTable}(${referencedColumn})`;
 
         if (onDelete) {
@@ -261,7 +266,9 @@ export class MSSQLProvider implements IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string
+        onDelete?: string,
+        referencedColumn1: string = 'id',
+        referencedColumn2: string = 'id'
     ): string {
         const cascadeClause = onDelete ? ` ON DELETE ${onDelete}` : ' ON DELETE CASCADE';
 
@@ -270,8 +277,8 @@ export class MSSQLProvider implements IDatabaseProvider {
                     ${column1} INT NOT NULL,
                     ${column2} INT NOT NULL,
                     PRIMARY KEY (${column1}, ${column2}),
-                    FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(id)${cascadeClause},
-                    FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(id)${cascadeClause}
+                    FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(${referencedColumn1})${cascadeClause},
+                    FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(${referencedColumn2})${cascadeClause}
                 )`;
     }
 }

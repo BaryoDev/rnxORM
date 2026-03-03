@@ -16,6 +16,10 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         // Config not needed for mock
     }
 
+    getDialect(): string {
+        return 'mock';
+    }
+
     async connect(): Promise<void> {
         this.connected = true;
     }
@@ -183,10 +187,11 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string
+        onDelete?: string,
+        referencedColumn1: string = 'id',
+        referencedColumn2: string = 'id'
     ): string {
-        let sql = `CREATE TABLE ${joinTableName} (${column1} INTEGER, ${column2} INTEGER, PRIMARY KEY (${column1}, ${column2}))`;
-        return sql;
+        return `CREATE TABLE ${joinTableName} (${column1} INTEGER, ${column2} INTEGER, PRIMARY KEY (${column1}, ${column2}))`;
     }
 
     generateInsertSql(tableName: string, columns: ColumnMetadata[]): string {

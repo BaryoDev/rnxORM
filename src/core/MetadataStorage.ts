@@ -108,7 +108,6 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addEntity(target: Function, tableName: string) {
-        console.log(`MetadataStorage: Adding entity ${target.name} -> ${tableName}`);
         let entity = this.entities.find((e) => e.target === target);
         if (entity) {
             entity.tableName = tableName;
@@ -137,6 +136,24 @@ export class MetadataStorage {
                 uniqueConstraints: [],
             };
             this.entities.push(entity);
+        }
+
+        // Guard against duplicate column registration
+        const columnName = options.columnName || propertyName;
+        const existing = entity.columns.find(c => c.propertyName === propertyName || c.columnName === columnName);
+        if (existing) {
+            // Update existing column metadata instead of duplicating
+            Object.assign(existing, {
+                ...options,
+                target,
+                propertyName,
+                columnName,
+                type: options.type || existing.type,
+                isPrimaryKey: options.isPrimaryKey ?? existing.isPrimaryKey,
+                isNullable: options.isNullable ?? existing.isNullable,
+                isAutoIncrement: options.isAutoIncrement ?? existing.isAutoIncrement,
+            });
+            return;
         }
 
         entity.columns.push({
@@ -214,12 +231,17 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     getEntity(target: Function): EntityMetadata | undefined {
-        const entity = this.entities.find((e) => e.target === target);
-        console.log(`MetadataStorage: Getting entity ${target.name} -> ${entity ? 'Found' : 'Not Found'}`);
-        return entity;
+        return this.entities.find((e) => e.target === target);
     }
 
     getEntities(): EntityMetadata[] {
         return this.entities;
+    }
+
+    /**
+     * Reset the metadata storage. Useful for test isolation.
+     */
+    static reset(): void {
+        MetadataStorage.instance = new MetadataStorage();
     }
 }

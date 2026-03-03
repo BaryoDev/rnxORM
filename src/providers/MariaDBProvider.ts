@@ -10,6 +10,10 @@ export class MariaDBProvider implements IDatabaseProvider {
     private connection: mariadb.PoolConnection | null = null;
     private inTransaction: boolean = false;
 
+    getDialect(): string {
+        return 'mariadb';
+    }
+
     constructor(config: DatabaseConfig) {
         this.pool = mariadb.createPool({
             host: config.host,
@@ -246,7 +250,9 @@ export class MariaDBProvider implements IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string
+        onDelete?: string,
+        referencedColumn1: string = 'id',
+        referencedColumn2: string = 'id'
     ): string {
         const cascadeClause = onDelete ? ` ON DELETE ${onDelete}` : ' ON DELETE CASCADE';
 
@@ -254,8 +260,8 @@ export class MariaDBProvider implements IDatabaseProvider {
             ${column1} INT NOT NULL,
             ${column2} INT NOT NULL,
             PRIMARY KEY (${column1}, ${column2}),
-            FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(id)${cascadeClause},
-            FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(id)${cascadeClause}
+            FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(${referencedColumn1})${cascadeClause},
+            FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(${referencedColumn2})${cascadeClause}
         )`;
     }
 }

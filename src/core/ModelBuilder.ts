@@ -1,4 +1,5 @@
 import { MetadataStorage, RelationType, CascadeOption } from "./MetadataStorage";
+import { extractPropertyName } from "./utils";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Constructor<T = any> = new (...args: any[]) => T;
@@ -357,12 +358,18 @@ export class EntityTypeBuilder<T> {
         const propertyNames = selectors.map(s => extractPropertyName(s));
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
-            metadata.indexes.push({
-                target: this.entityType,
-                columns: propertyNames,
-                unique: options?.unique || false,
-                name: options?.name
-            });
+            const existingIndex = metadata.indexes.find(idx =>
+                idx.columns.length === propertyNames.length &&
+                idx.columns.every((c, i) => c === propertyNames[i])
+            );
+            if (!existingIndex) {
+                metadata.indexes.push({
+                    target: this.entityType,
+                    columns: propertyNames,
+                    unique: options?.unique || false,
+                    name: options?.name
+                });
+            }
         }
         return this;
     }
@@ -645,23 +652,3 @@ export class ModelBuilder {
     }
 }
 
-/**
- * Helper function to extract property name from a selector function
- */
-function extractPropertyName<T>(selector: (entity: T) => any): string {
-    const funcStr = selector.toString();
-
-    // Match: u => u.propertyName or (u) => u.propertyName
-    const arrowMatch = funcStr.match(/(?:.*?=>.*?\.)(\w+)/);
-    if (arrowMatch) {
-        return arrowMatch[1];
-    }
-
-    // Match: function(u) { return u.propertyName; }
-    const functionMatch = funcStr.match(/return\s+\w+\.(\w+)/);
-    if (functionMatch) {
-        return functionMatch[1];
-    }
-
-    throw new Error(`Cannot extract property name from selector: ${funcStr}`);
-}

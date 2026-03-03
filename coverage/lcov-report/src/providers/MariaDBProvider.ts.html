@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">2.22% </span>
+                <span class="strong">2.19% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>2/90</span>
+                <span class='fraction'>2/91</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/69</span>
+                <span class='fraction'>0/71</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/29</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">2.46% </span>
+                <span class="strong">2.43% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>2/81</span>
+                <span class='fraction'>2/82</span>
             </div>
         
             
@@ -324,7 +324,13 @@
 <a name='L259'></a><a href='#L259'>259</a>
 <a name='L260'></a><a href='#L260'>260</a>
 <a name='L261'></a><a href='#L261'>261</a>
-<a name='L262'></a><a href='#L262'>262</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
+<a name='L262'></a><a href='#L262'>262</a>
+<a name='L263'></a><a href='#L263'>263</a>
+<a name='L264'></a><a href='#L264'>264</a>
+<a name='L265'></a><a href='#L265'>265</a>
+<a name='L266'></a><a href='#L266'>266</a>
+<a name='L267'></a><a href='#L267'>267</a>
+<a name='L268'></a><a href='#L268'>268</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -341,6 +347,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -349,6 +358,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -564,6 +574,8 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -596,6 +608,10 @@ export class MariaDBProvider implements IDatabaseProvider {
     private pool: mariadb.Pool;
     private <span class="cstat-no" title="statement not covered" >connection: mariadb.PoolConnection | null = null;</span>
     private <span class="cstat-no" title="statement not covered" >inTransaction: boolean = false;</span>
+&nbsp;
+<span class="fstat-no" title="function not covered" >    getDialect(</span>): string {
+<span class="cstat-no" title="statement not covered" >        return 'mariadb';</span>
+    }
 &nbsp;
 <span class="fstat-no" title="function not covered" >    constructor(c</span>onfig: DatabaseConfig) {
 <span class="cstat-no" title="statement not covered" >        this.pool = mariadb.createPool({</span>
@@ -833,7 +849,9 @@ export class MariaDBProvider implements IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string
+        onDelete?: string,
+        referencedColumn1: string = <span class="branch-0 cbranch-no" title="branch not covered" >'id',</span>
+        referencedColumn2: string = <span class="branch-0 cbranch-no" title="branch not covered" >'id'</span>
     ): string {
         const cascadeClause = <span class="cstat-no" title="statement not covered" >onDelete ? ` ON DELETE ${onDelete}` : ' ON DELETE CASCADE';</span>
 &nbsp;
@@ -841,8 +859,8 @@ export class MariaDBProvider implements IDatabaseProvider {
             ${column1} INT NOT NULL,
             ${column2} INT NOT NULL,
             PRIMARY KEY (${column1}, ${column2}),
-            FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(id)${cascadeClause},
-            FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(id)${cascadeClause}
+            FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(${referencedColumn1})${cascadeClause},
+            FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(${referencedColumn2})${cascadeClause}
         )`;
     }
 }
@@ -853,7 +871,7 @@ export class MariaDBProvider implements IDatabaseProvider {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-01-10T11:46:42.777Z
+                at 2026-03-03T06:09:35.709Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -42,12 +42,12 @@ export class MigrationBuilder {
 
                 if (col.isAutoIncrement) {
                     // Provider-specific auto-increment syntax is handled in the type mapping
-                    const providerName = this.provider.constructor.name;
-                    if (providerName.includes('PostgreSQL')) {
+                    const dialect = this.provider.getDialect();
+                    if (dialect === 'postgresql') {
                         def = `${col.name} SERIAL PRIMARY KEY`;
-                    } else if (providerName.includes('MSSQL')) {
+                    } else if (dialect === 'mssql') {
                         def = `${col.name} INT IDENTITY(1,1) PRIMARY KEY`;
-                    } else if (providerName.includes('MariaDB')) {
+                    } else if (dialect === 'mariadb') {
                         def = `${col.name} INT AUTO_INCREMENT PRIMARY KEY`;
                     }
                 }
@@ -143,10 +143,10 @@ export class MigrationBuilder {
         options?: { nullable?: boolean; defaultValue?: any }
     ): this {
         this.operations.push(async () => {
-            const providerName = this.provider.constructor.name;
+            const dialect = this.provider.getDialect();
 
             // Different databases have different syntax for ALTER COLUMN
-            if (providerName.includes('PostgreSQL')) {
+            if (dialect === 'postgresql') {
                 await this.provider.query(
                     `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE ${newType}`
                 );
@@ -169,13 +169,13 @@ export class MigrationBuilder {
                         `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} SET DEFAULT ${defaultVal}`
                     );
                 }
-            } else if (providerName.includes('MSSQL')) {
+            } else if (dialect === 'mssql') {
                 let sql = `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${newType}`;
                 if (options?.nullable === false) {
                     sql += ' NOT NULL';
                 }
                 await this.provider.query(sql);
-            } else if (providerName.includes('MariaDB')) {
+            } else if (dialect === 'mariadb') {
                 let sql = `ALTER TABLE ${tableName} MODIFY COLUMN ${columnName} ${newType}`;
                 if (options?.nullable === false) {
                     sql += ' NOT NULL';
@@ -194,17 +194,17 @@ export class MigrationBuilder {
      */
     renameColumn(tableName: string, oldName: string, newName: string): this {
         this.operations.push(async () => {
-            const providerName = this.provider.constructor.name;
+            const dialect = this.provider.getDialect();
 
-            if (providerName.includes('PostgreSQL')) {
+            if (dialect === 'postgresql') {
                 await this.provider.query(
                     `ALTER TABLE ${tableName} RENAME COLUMN ${oldName} TO ${newName}`
                 );
-            } else if (providerName.includes('MSSQL')) {
+            } else if (dialect === 'mssql') {
                 await this.provider.query(
                     `EXEC sp_rename '${tableName}.${oldName}', '${newName}', 'COLUMN'`
                 );
-            } else if (providerName.includes('MariaDB')) {
+            } else if (dialect === 'mariadb') {
                 await this.provider.query(
                     `ALTER TABLE ${tableName} RENAME COLUMN ${oldName} TO ${newName}`
                 );
@@ -220,13 +220,13 @@ export class MigrationBuilder {
      */
     renameTable(oldName: string, newName: string): this {
         this.operations.push(async () => {
-            const providerName = this.provider.constructor.name;
+            const dialect = this.provider.getDialect();
 
-            if (providerName.includes('PostgreSQL')) {
+            if (dialect === 'postgresql') {
                 await this.provider.query(`ALTER TABLE ${oldName} RENAME TO ${newName}`);
-            } else if (providerName.includes('MSSQL')) {
+            } else if (dialect === 'mssql') {
                 await this.provider.query(`EXEC sp_rename '${oldName}', '${newName}'`);
-            } else if (providerName.includes('MariaDB')) {
+            } else if (dialect === 'mariadb') {
                 await this.provider.query(`RENAME TABLE ${oldName} TO ${newName}`);
             }
         });
@@ -263,13 +263,13 @@ export class MigrationBuilder {
      */
     dropIndex(tableName: string, indexName: string): this {
         this.operations.push(async () => {
-            const providerName = this.provider.constructor.name;
+            const dialect = this.provider.getDialect();
 
-            if (providerName.includes('PostgreSQL')) {
+            if (dialect === 'postgresql') {
                 await this.provider.query(`DROP INDEX IF EXISTS ${indexName}`);
-            } else if (providerName.includes('MSSQL')) {
+            } else if (dialect === 'mssql') {
                 await this.provider.query(`DROP INDEX ${indexName} ON ${tableName}`);
-            } else if (providerName.includes('MariaDB')) {
+            } else if (dialect === 'mariadb') {
                 await this.provider.query(`DROP INDEX ${indexName} ON ${tableName}`);
             }
         });

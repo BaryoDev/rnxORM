@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">2.19% </span>
+                <span class="strong">2.17% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>2/91</span>
+                <span class='fraction'>2/92</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/71</span>
+                <span class='fraction'>0/73</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/29</span>
+                <span class='fraction'>0/30</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">2.43% </span>
+                <span class="strong">2.4% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>2/82</span>
+                <span class='fraction'>2/83</span>
             </div>
         
             
@@ -340,7 +340,14 @@
 <a name='L275'></a><a href='#L275'>275</a>
 <a name='L276'></a><a href='#L276'>276</a>
 <a name='L277'></a><a href='#L277'>277</a>
-<a name='L278'></a><a href='#L278'>278</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
+<a name='L278'></a><a href='#L278'>278</a>
+<a name='L279'></a><a href='#L279'>279</a>
+<a name='L280'></a><a href='#L280'>280</a>
+<a name='L281'></a><a href='#L281'>281</a>
+<a name='L282'></a><a href='#L282'>282</a>
+<a name='L283'></a><a href='#L283'>283</a>
+<a name='L284'></a><a href='#L284'>284</a>
+<a name='L285'></a><a href='#L285'>285</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -357,6 +364,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -372,6 +382,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -506,6 +517,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -595,6 +607,8 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -628,6 +642,10 @@ export class MSSQLProvider implements IDatabaseProvider {
     private <span class="cstat-no" title="statement not covered" >pool: mssql.ConnectionPool | null = null;</span>
     private <span class="cstat-no" title="statement not covered" >transaction: mssql.Transaction | null = null;</span>
     private config: mssql.config;
+&nbsp;
+<span class="fstat-no" title="function not covered" >    getDialect(</span>): string {
+<span class="cstat-no" title="statement not covered" >        return 'mssql';</span>
+    }
 &nbsp;
 <span class="fstat-no" title="function not covered" >    constructor(c</span>onfig: DatabaseConfig) {
 <span class="cstat-no" title="statement not covered" >        this.config = {</span>
@@ -786,7 +804,8 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 &nbsp;
 <span class="fstat-no" title="function not covered" >    getParameterPlaceholder(</span>index: number): string {
-<span class="cstat-no" title="statement not covered" >        return `@p${index}`;</span>
+        // Convert from 1-based caller convention to 0-based MSSQL binding
+<span class="cstat-no" title="statement not covered" >        return `@p${index - 1}`;</span>
     }
 &nbsp;
 <span class="fstat-no" title="function not covered" >    getSchemaColumnsQuery(</span>tableName: string): { sql: string; params: any[] } {
@@ -841,7 +860,7 @@ export class MSSQLProvider implements IDatabaseProvider {
         onDelete?: string,
         onUpdate?: string
     ): string {
-        const constraintName = <span class="cstat-no" title="statement not covered" >`FK_${tableName}_${columnName}`;</span>
+        const constraintName = <span class="cstat-no" title="statement not covered" >`fk_${tableName}_${columnName}`;</span>
         let sql = <span class="cstat-no" title="statement not covered" >`ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${columnName}) REFERENCES ${referencedTable}(${referencedColumn})`;</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >        if (onDelete) {</span>
@@ -880,7 +899,9 @@ export class MSSQLProvider implements IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string
+        onDelete?: string,
+        referencedColumn1: string = <span class="branch-0 cbranch-no" title="branch not covered" >'id',</span>
+        referencedColumn2: string = <span class="branch-0 cbranch-no" title="branch not covered" >'id'</span>
     ): string {
         const cascadeClause = <span class="cstat-no" title="statement not covered" >onDelete ? ` ON DELETE ${onDelete}` : ' ON DELETE CASCADE';</span>
 &nbsp;
@@ -889,8 +910,8 @@ export class MSSQLProvider implements IDatabaseProvider {
                     ${column1} INT NOT NULL,
                     ${column2} INT NOT NULL,
                     PRIMARY KEY (${column1}, ${column2}),
-                    FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(id)${cascadeClause},
-                    FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(id)${cascadeClause}
+                    FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(${referencedColumn1})${cascadeClause},
+                    FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(${referencedColumn2})${cascadeClause}
                 )`;
     }
 }
@@ -901,7 +922,7 @@ export class MSSQLProvider implements IDatabaseProvider {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-01-10T11:46:42.777Z
+                at 2026-03-03T06:09:35.709Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

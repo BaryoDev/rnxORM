@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { MetadataStorage, RelationType, CascadeOption, RelationMetadata } from "../core/MetadataStorage";
+import { extractPropertyName } from "../core/utils";
 
 export function Entity(tableName?: string) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -42,7 +43,9 @@ export function PrimaryKey() {
         if (designType === String) type = "text";
 
         MetadataStorage.get().addColumn(target.constructor, propertyName, {
+            columnName: propertyName.toLowerCase(),
             isPrimaryKey: true,
+            isAutoIncrement: type === "integer",
             type
         });
     };
@@ -302,17 +305,6 @@ export function Unique() {
             columns: [propertyName.toLowerCase()],
         });
     };
-}
-
-// Helper function to extract property name from lambda expression
-function extractPropertyName(fn: (object: any) => any): string {
-    const fnStr = fn.toString();
-    // Match: user => user.posts or (user) => user.posts
-    const match = fnStr.match(/(?:=>|return)\s*\w+\.(\w+)/);
-    if (match && match[1]) {
-        return match[1];
-    }
-    throw new Error(`Unable to extract property name from function: ${fnStr}`);
 }
 
 // Re-export enums for convenience

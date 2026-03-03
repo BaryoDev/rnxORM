@@ -9,6 +9,10 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     private pool: Pool;
     private client: PoolClient | null = null;
 
+    getDialect(): string {
+        return 'postgresql';
+    }
+
     constructor(config: DatabaseConfig) {
         this.pool = new Pool({
             host: config.host,
@@ -51,11 +55,19 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     }
 
     async commitTransaction(): Promise<void> {
-        await this.client?.query('COMMIT');
+        if (this.client) {
+            await this.client.query('COMMIT');
+            this.client.release();
+            this.client = null;
+        }
     }
 
     async rollbackTransaction(): Promise<void> {
-        await this.client?.query('ROLLBACK');
+        if (this.client) {
+            await this.client.query('ROLLBACK');
+            this.client.release();
+            this.client = null;
+        }
     }
 
     mapType(tsType: string): string {
@@ -227,7 +239,9 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string
+        onDelete?: string,
+        referencedColumn1: string = 'id',
+        referencedColumn2: string = 'id'
     ): string {
         const cascadeClause = onDelete ? ` ON DELETE ${onDelete}` : ' ON DELETE CASCADE';
 
@@ -235,8 +249,8 @@ export class PostgreSQLProvider implements IDatabaseProvider {
             ${column1} INTEGER NOT NULL,
             ${column2} INTEGER NOT NULL,
             PRIMARY KEY (${column1}, ${column2}),
-            FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(id)${cascadeClause},
-            FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(id)${cascadeClause}
+            FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(${referencedColumn1})${cascadeClause},
+            FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(${referencedColumn2})${cascadeClause}
         )`;
     }
 }

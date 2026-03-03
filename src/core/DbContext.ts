@@ -333,11 +333,9 @@ export class DbContext {
         const entities = MetadataStorage.get().getEntities();
 
         // Phase 1: Create all tables first (without foreign keys)
-        console.log('Creating tables...');
         for (const entity of entities) {
             // Skip keyless entities (they're typically views or query types)
             if (entity.isKeyless) {
-                console.log(`Skipping keyless entity: ${entity.tableName}`);
                 continue;
             }
 
@@ -346,7 +344,6 @@ export class DbContext {
         }
 
         // Phase 2: Create join tables for Many-to-Many relationships
-        console.log('Creating join tables for many-to-many relationships...');
         const createdJoinTables = new Set<string>();
 
         for (const entity of entities) {
@@ -358,13 +355,19 @@ export class DbContext {
                         const relatedMetadata = MetadataStorage.get().getEntity(relatedEntity);
 
                         if (relatedMetadata && relation.joinColumn && relation.inverseJoinColumn) {
+                            // Look up actual PK column names instead of hardcoding 'id'
+                            const entityPk = entity.columns.find(c => c.isPrimaryKey);
+                            const relatedPk = relatedMetadata.columns.find(c => c.isPrimaryKey);
+
                             const joinTableSql = this.provider.generateCreateJoinTableSql(
                                 relation.joinTable,
                                 relation.joinColumn,
                                 relation.inverseJoinColumn,
                                 entity.tableName,
                                 relatedMetadata.tableName,
-                                relation.onDelete
+                                relation.onDelete,
+                                entityPk?.columnName,
+                                relatedPk?.columnName
                             );
 
                             await this.query(joinTableSql);
@@ -376,7 +379,6 @@ export class DbContext {
         }
 
         // Phase 3: Add foreign key constraints for ManyToOne and OneToOne relationships
-        console.log('Creating foreign key constraints...');
         for (const entity of entities) {
             for (const relation of entity.relations) {
                 if ((relation.relationType === RelationType.ManyToOne || relation.relationType === RelationType.OneToOne) && relation.foreignKeyColumn) {
@@ -410,7 +412,6 @@ export class DbContext {
         }
 
         // Phase 4: Create indexes
-        console.log('Creating indexes...');
         for (const entity of entities) {
             for (const index of entity.indexes) {
                 const indexName = index.name || `idx_${entity.tableName}_${index.columns.join('_')}`;
@@ -433,7 +434,6 @@ export class DbContext {
         }
 
         // Phase 5: Create unique constraints
-        console.log('Creating unique constraints...');
         for (const entity of entities) {
             for (const constraint of entity.uniqueConstraints) {
                 const constraintName = constraint.name || `uq_${entity.tableName}_${constraint.columns.join('_')}`;
@@ -455,7 +455,6 @@ export class DbContext {
         }
 
         // Phase 6: Schema Evolution - Check for missing columns and type mismatches
-        console.log('Checking for schema evolution...');
         for (const entity of entities) {
             const schemaQuery = this.provider.getSchemaColumnsQuery(entity.tableName);
             const existingColumnsRes = await this.query(schemaQuery.sql, schemaQuery.params);
@@ -472,20 +471,16 @@ export class DbContext {
                 const existingType = existingColumns.get(colName);
 
                 if (!existingType) {
-                    console.log(`Detected missing column '${col.columnName}' in table '${entity.tableName}'. Adding it...`);
                     const alterTableSql = this.provider.generateAddColumnSql(entity.tableName, col);
                     await this.query(alterTableSql);
                 } else {
                     // Check for type mismatch using provider
                     if (this.provider.isTypeMismatch(col.type, existingType)) {
-                        console.warn(`WARNING: Type mismatch detected for column '${col.columnName}'. DB: '${existingType}', Entity: '${col.type}'. Attempting migration...`);
                         try {
                             const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
                             await this.query(alterColumnSql);
-                            console.log(`SUCCESS: Migrated column '${col.columnName}' to '${col.type}'.`);
-                        } catch (error: any) {
-                            console.error(`ERROR: Failed to migrate column '${col.columnName}' from '${existingType}' to '${col.type}'. Data might be incompatible.`);
-                            console.error(`Details: ${error.message}`);
+                        } catch {
+                            // Type migration failed — data may be incompatible
                         }
                     }
                 }
@@ -493,14 +488,12 @@ export class DbContext {
         }
 
         // Phase 7: Seed Data
-        console.log('Seeding data...');
         for (const entity of entities) {
             if (entity.seedData && entity.seedData.length > 0) {
                 const tableName = entity.tableName;
                 const pkColumn = entity.columns.find(c => c.isPrimaryKey);
 
                 if (!pkColumn) {
-                    console.warn(`Skipping seed for ${entity.tableName}: No primary key found`);
                     continue;
                 }
 
@@ -538,14 +531,12 @@ export class DbContext {
 
                             const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
                             await this.query(insertSql, values);
-                            console.log(`  Seeded ${tableName}: ${JSON.stringify(seedItem)}`);
                         }
                     }
                 }
             }
         }
 
-        console.log('Database schema is up to date!');
     }
 
     set<T>(entityType: new () => T): DbSet<T> {

@@ -1,6 +1,7 @@
 import { DbContext } from "./DbContext";
 import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState } from "./EntityEntry";
+import { extractPropertyName } from "./utils";
 
 /**
  * Represents a collection of entities in the database.
@@ -441,6 +442,8 @@ export class QueryBuilder<T> {
     }
 
     async toList(): Promise<T[]> {
+        const provider = this.context.getProvider();
+        const dialect = provider.getDialect();
         let whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
 
         // Add ORDER BY clause
@@ -451,15 +454,28 @@ export class QueryBuilder<T> {
             whereClause += (whereClause ? ' ' : '') + `ORDER BY ${orderByClause}`;
         }
 
-        // Add LIMIT/OFFSET (database-specific)
-        if (this.takeCount !== undefined) {
-            whereClause += ` LIMIT ${this.takeCount}`;
+        // Add pagination (database-specific)
+        if (dialect === 'mssql') {
+            // MSSQL uses OFFSET/FETCH syntax (requires ORDER BY)
+            if (this.skipCount !== undefined || this.takeCount !== undefined) {
+                // MSSQL requires ORDER BY for OFFSET/FETCH
+                if (this.orderByColumns.length === 0) {
+                    whereClause += (whereClause ? ' ' : '') + 'ORDER BY (SELECT NULL)';
+                }
+                whereClause += ` OFFSET ${this.skipCount ?? 0} ROWS`;
+                if (this.takeCount !== undefined) {
+                    whereClause += ` FETCH NEXT ${this.takeCount} ROWS ONLY`;
+                }
+            }
+        } else {
+            // PostgreSQL/MariaDB use LIMIT/OFFSET
+            if (this.takeCount !== undefined) {
+                whereClause += ` LIMIT ${this.takeCount}`;
+            }
+            if (this.skipCount !== undefined) {
+                whereClause += ` OFFSET ${this.skipCount}`;
+            }
         }
-        if (this.skipCount !== undefined) {
-            whereClause += ` OFFSET ${this.skipCount}`;
-        }
-
-        const provider = this.context.getProvider();
 
         // Add DISTINCT if needed
         let selectClause = "SELECT *";
@@ -847,16 +863,6 @@ export class QueryBuilder<T> {
     }
 }
 
-// Helper function to extract property name from lambda
-function extractPropertyName(fn: (entity: any) => any): string {
-    const fnStr = fn.toString();
-    const match = fnStr.match(/(?:=>|return)\s*\w+\.(\w+)/);
-    if (match && match[1]) {
-        return match[1];
-    }
-    throw new Error(`Unable to extract property name from function: ${fnStr}`);
-}
-
 /**
  * Query builder for SELECT projections
  * Allows selecting specific properties or transforming results
@@ -931,6 +937,9 @@ export class SelectQueryBuilder<T, TResult> {
      * Execute query and return projected results
      */
     async toList(): Promise<TResult[]> {
+        const provider = this.context.getProvider();
+        const dialect = provider.getDialect();
+
         // First, get the entities
         let whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
 
@@ -942,12 +951,24 @@ export class SelectQueryBuilder<T, TResult> {
             whereClause += (whereClause ? ' ' : '') + `ORDER BY ${orderByClause}`;
         }
 
-        // Add LIMIT/OFFSET
-        if (this.takeCount !== undefined) {
-            whereClause += ` LIMIT ${this.takeCount}`;
-        }
-        if (this.skipCount !== undefined) {
-            whereClause += ` OFFSET ${this.skipCount}`;
+        // Add pagination (database-specific)
+        if (dialect === 'mssql') {
+            if (this.skipCount !== undefined || this.takeCount !== undefined) {
+                if (this.orderByColumns.length === 0) {
+                    whereClause += (whereClause ? ' ' : '') + 'ORDER BY (SELECT NULL)';
+                }
+                whereClause += ` OFFSET ${this.skipCount ?? 0} ROWS`;
+                if (this.takeCount !== undefined) {
+                    whereClause += ` FETCH NEXT ${this.takeCount} ROWS ONLY`;
+                }
+            }
+        } else {
+            if (this.takeCount !== undefined) {
+                whereClause += ` LIMIT ${this.takeCount}`;
+            }
+            if (this.skipCount !== undefined) {
+                whereClause += ` OFFSET ${this.skipCount}`;
+            }
         }
 
         // Check if we can optimize with SQL projection

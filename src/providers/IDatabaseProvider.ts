@@ -30,6 +30,12 @@ export interface QueryResult {
  */
 export interface IDatabaseProvider {
     /**
+     * Get the SQL dialect identifier for this provider.
+     * Used for provider-specific SQL generation (e.g., pagination, DDL).
+     */
+    getDialect(): string;
+
+    /**
      * Connect to the database
      */
     connect(): Promise<void>;
@@ -164,6 +170,8 @@ export interface IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string
+        onDelete?: string,
+        referencedColumn1?: string,
+        referencedColumn2?: string
     ): string;
 }
