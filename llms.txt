@@ -1,20 +1,46 @@
 # rnxORM
 
-A lightweight TypeScript ORM for PostgreSQL, inspired by Entity Framework Core.
+A lightweight TypeScript ORM for **PostgreSQL**, **SQL Server**, and **MariaDB/MySQL**, inspired by Entity Framework Core.
 
 ## Features
 
-- **Decorators**: `@Entity`, `@Column`, `@PrimaryKey` for defining models.
-- **DbContext**: Manages database connections and entity sets.
-- **DbSet**: Repository pattern implementation for CRUD operations.
-- **QueryBuilder**: Fluent API for building SQL queries safely.
-- **Schema Evolution**: Automatically creates tables and adds missing columns.
-- **Type Safety**: Full TypeScript support with type inference.
+- **Multi-Database**: PostgreSQL, SQL Server (MSSQL), MariaDB/MySQL via provider pattern
+- **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
+- **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
+- **Change Tracking & SaveChanges()**: EF Core-style automatic change detection
+- **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
+- **Eager Loading**: `.include()` to load related entities
+- **Data Seeding**: `hasData()` for initial data population
+- **Migrations**: Version-controlled schema changes with `MigrationBuilder` and `Migrator`
+- **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
+- **Raw SQL**: `fromSqlRaw()` and `executeSqlRaw()`
+- **Global Query Filters**: Automatic filtering for soft deletes, multi-tenancy
+- **Value Converters**: Transform values between entity and database representations
+- **Shadow Properties**: Database-only columns without entity properties
+- **Concurrency Tokens**: Optimistic concurrency control
+- **Owned Entity Types**: Value objects via `ownsOne()` and `ownsMany()`
+- **Keyless Entity Types**: Map database views via `hasNoKey()`
+- **Bulk Operations**: `addRange`, `updateRange`, `removeRange`
+- **Schema Evolution**: Auto-detect and migrate schema changes
+- **Query Optimization**: `.asNoTracking()` for read-only queries
+
+## Installation
+
+```bash
+# PostgreSQL
+npm install rnxorm pg reflect-metadata
+
+# SQL Server
+npm install rnxorm mssql reflect-metadata
+
+# MariaDB/MySQL
+npm install rnxorm mariadb reflect-metadata
+```
 
 ## Usage Example
 
 ```typescript
-import { Entity, Column, PrimaryKey, DbContext } from "rnxorm";
+import { Entity, Column, PrimaryKey, DbContext, PostgreSQLProvider } from "rnxorm";
 
 @Entity("users")
 class User {
@@ -23,47 +49,135 @@ class User {
   @Column() age!: number;
 }
 
-const db = new DbContext({
+const db = new DbContext(new PostgreSQLProvider({
   host: "localhost",
   port: 5432,
   user: "postgres",
   password: "password",
   database: "mydb",
-});
+}));
 
 async function main() {
   await db.connect();
   await db.ensureCreated();
 
   const users = db.set(User);
-  await users.add({ name: "Alice", age: 30 } as User);
-  
+
+  // Create
+  const user = new User();
+  user.name = "Alice";
+  user.age = 30;
+  users.add(user);
+  await db.saveChanges();
+
+  // Read
   const allUsers = await users.toList();
-  console.log(allUsers);
-  
+  const alice = await users.where("name", "=", "Alice").first();
+
+  // Update
+  if (alice) {
+    alice.age = 31;
+    await db.saveChanges();
+  }
+
+  // Delete
+  if (alice) {
+    users.remove(alice);
+    await db.saveChanges();
+  }
+
   await db.disconnect();
 }
 ```
 
+## Database Providers
+
+```typescript
+import { PostgreSQLProvider, MSSQLProvider, MariaDBProvider } from "rnxorm";
+
+// PostgreSQL
+new DbContext(new PostgreSQLProvider({ host, port, user, password, database }));
+
+// SQL Server
+new DbContext(new MSSQLProvider({ host, port, user, password, database }));
+
+// MariaDB/MySQL
+new DbContext(new MariaDBProvider({ host, port, user, password, database }));
+```
+
+Each provider implements `IDatabaseProvider` with a `getDialect()` method returning `'postgresql'`, `'mssql'`, or `'mariadb'`.
+
 ## API Reference
 
 ### DbContext
-- `connect()`: Connect to the database.
-- `disconnect()`: Disconnect from the database.
-- `ensureCreated()`: Ensure database schema exists and is up to date.
-- `set(Entity)`: Get a `DbSet` for the given entity.
+- `connect()` / `disconnect()`: Manage database connections
+- `ensureCreated()`: Create/update schema, indexes, foreign keys, seed data
+- `set(Entity)`: Get a `DbSet<T>` for the given entity class
+- `saveChanges()`: Persist all tracked changes in a single transaction
+- `attach(entity, state)`: Attach an external entity with a given state
+- `entry(entity)`: Get the `EntityEntry` for a tracked entity
+- `executeSqlRaw(sql, params)`: Execute raw SQL (UPDATE, DELETE, etc.)
 
 ### DbSet<T>
-- `add(entity)`: Add a new entity.
-- `update(entity)`: Update an existing entity.
-- `remove(entity)`: Remove an entity.
-- `find(id)`: Find an entity by primary key.
-- `toList()`: Get all entities.
-- `where(col, op, val)`: Filter entities.
-- `asNoTracking()`: Get read-only entities (faster).
+- `add(entity)` / `addRange(entities)`: Track entities for insertion
+- `update(entity)` / `updateRange(entities)`: Track entities for update
+- `remove(entity)` / `removeRange(entities)`: Track entities for deletion
+- `find(id)`: Find by primary key
+- `toList()`: Execute query and return all results
+- `first()` / `firstOrThrow()`: Get first result
+- `single()` / `singleOrDefault()`: Get exactly one result
+- `count()`: Count matching entities
+- `where(col, op, val)`: Filter entities
+- `orderBy(col)` / `orderByDescending(col)`: Sort results
+- `skip(n)` / `take(n)`: Pagination
+- `include(selector)`: Eager load related entities
+- `select(selector)`: Project to a different shape
+- `groupBy(selector)`: Group results
+- `distinct()`: Remove duplicates
+- `sum(selector)` / `average(selector)` / `min(selector)` / `max(selector)`: Aggregations
+- `asNoTracking()`: Return frozen read-only entities
+- `ignoreQueryFilters()`: Bypass global query filters
+- `fromSqlRaw(sql, params)`: Execute raw SQL mapped to entity type
 
-## Installation
+### ModelBuilder (Fluent API)
+- `entity(Class).toTable(name)`: Set table name
+- `.hasKey(selector)`: Set primary key
+- `.hasIndex(selector)` / `.hasCompositeIndex(selectors)`: Add indexes
+- `.hasUnique(selector)`: Add unique constraint
+- `.hasData(seedArray)`: Seed initial data
+- `.hasQueryFilter(predicate)`: Add global query filter
+- `.hasNoKey()`: Mark as keyless entity
+- `.ownsOne(selector, Type)` / `.ownsMany(selector, Type)`: Configure owned entities
+- `.shadowProperty(name, type, options)`: Add database-only column
+- `.property(selector)`: Configure a property
+  - `.isRequired()` / `.isOptional()`: Nullability
+  - `.hasMaxLength(n)`: Max string length
+  - `.hasColumnName(name)` / `.hasColumnType(type)`: Column mapping
+  - `.hasDefaultValue(val)`: Default value
+  - `.hasComputedColumnSql(sql)`: Computed column
+  - `.hasConversion(toDB, fromDB)`: Value converter
+  - `.isConcurrencyToken()`: Optimistic concurrency
 
-```bash
-npm install rnxorm pg reflect-metadata
-```
+### Relationships (Decorators)
+- `@ManyToOne(() => Type, inverse)`: Many-to-one relationship
+- `@OneToMany(() => Type, inverse)`: One-to-many relationship
+- `@ManyToMany(() => Type, inverse, { joinTable, joinColumn, inverseJoinColumn })`: Many-to-many
+- `@OneToOne(() => Type, inverse)`: One-to-one relationship
+
+### Migrations
+- `Migrator.addMigration(migration)` / `.addMigrations(array)`: Register migrations
+- `Migrator.migrate()`: Apply all pending migrations
+- `Migrator.revert()`: Revert last migration
+- `Migrator.revertTo(id)`: Revert to a specific migration
+- `Migrator.status()`: Show migration status
+- `MigrationBuilder`: Fluent API for schema operations
+  - `.createTable(name, columns)` / `.dropTable(name)`
+  - `.addColumn(table, name, type)` / `.dropColumn(table, name)`
+  - `.alterColumn(table, name, type)` / `.renameColumn(table, old, new)`
+  - `.createIndex(table, name, columns, unique)` / `.dropIndex(table, name)`
+  - `.addForeignKey(table, name, col, refTable, refCol, onDelete)`
+  - `.sql(rawSql, params)`: Execute raw SQL in migration
+
+### Testing
+- `MetadataStorage.reset()`: Clear all entity metadata for test isolation
+- `MockDatabaseProvider`: In-memory provider for unit testing (in test/mocks/)

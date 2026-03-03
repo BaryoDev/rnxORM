@@ -163,7 +163,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
 - **Eager Loading**: `.include()` to load related entities
-- **Explicit Loading**: Load related entities on-demand via `reference()` and `collection()`
+- **Explicit Loading** *(planned)*: Load related entities on-demand via `reference()` and `collection()`
 - **Schema Scaffolding**: Automatically create tables, foreign keys, indexes, and constraints
 - **Migrations**: Version-controlled database schema changes with rollback support
 - **CRUD Operations**: `add`, `update`, `remove` with automatic tracking
@@ -189,14 +189,14 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 
 ## Type Mapping
 
-rnxORM automatically maps TypeScript types to PostgreSQL types. You can override this using the `@Column({ type: '...' })` option.
+rnxORM automatically maps TypeScript types to database-specific types. You can override this using the `@Column({ type: '...' })` option.
 
-| TypeScript Type | Default PostgreSQL Type | Example Override |
-|----------------|-------------------------|------------------|
-| `string`       | `text`                  | `@Column({ type: 'varchar(50)' })` |
-| `number`       | `integer`               | `@Column({ type: 'decimal(10, 2)' })` |
-| `boolean`      | `boolean`               | - |
-| `Date`         | `timestamp`             | `@Column({ type: 'date' })` |
+| TypeScript Type | PostgreSQL | SQL Server | MariaDB/MySQL |
+|----------------|------------|------------|---------------|
+| `string`       | `text`     | `NVARCHAR(255)` | `TEXT`   |
+| `number`       | `integer`  | `INT`      | `INT`         |
+| `boolean`      | `boolean`  | `BIT`      | `TINYINT(1)`  |
+| `Date`         | `timestamp`| `DATETIME2`| `TIMESTAMP`   |
 
 ### Overriding Types
 
@@ -756,21 +756,12 @@ export class AppDbContext extends DbContext {
 - **Idempotent**: Seed data is only inserted if it doesn't already exist (checked by primary key)
 - **Automatic**: Runs during `ensureCreated()` after schema creation
 - **Partial Entities**: Only properties included in seed data are inserted
-- **Logged**: Each seeded record is logged to console
+- **Silent**: Seeding runs without producing console output, keeping logs clean
 
 ```typescript
 const db = new AppDbContext();
 await db.connect();
 await db.ensureCreated(); // Seeds data automatically
-
-// Output:
-// Creating tables...
-// ...
-// Seeding data...
-//   Seeded users: {"id":1,"name":"Admin","email":"admin@example.com","role":"admin"}
-//   Seeded users: {"id":2,"name":"User","email":"user@example.com","role":"user"}
-//   Seeded categories: {"id":1,"name":"Electronics","slug":"electronics"}
-// Database schema is up to date!
 ```
 
 ### Best Practices
@@ -1602,9 +1593,11 @@ console.log(loadedOrder.shippingAddress.city); // 'Springfield'
 - Data that might be shared across multiple parents
 - Entities that need independent queries
 
-## Explicit Loading
+## Explicit Loading *(Planned)*
 
-Explicit loading allows you to load related entities on-demand after the initial query, giving you fine-grained control over when related data is fetched.
+> **Note**: Explicit loading is planned for a future release. The API surface is defined but currently throws a "not implemented" error. Use eager loading (`.include()`) for now.
+
+Explicit loading will allow you to load related entities on-demand after the initial query, giving you fine-grained control over when related data is fetched.
 
 ### Loading Reference Navigation Properties
 
@@ -1881,9 +1874,8 @@ class User {
 If you change the type of a property (e.g., from `string` to `number`), rnxORM attempts to migrate the column type safely.
 
 1.  **Detection**: It checks if the database column type matches the TypeScript type.
-2.  **Warning**: It logs a warning if a mismatch is found.
-3.  **Auto-Fix**: It attempts to migrate the column using `ALTER COLUMN ... TYPE ... USING ...`.
-4.  **Safety**: If the existing data is incompatible with the new type (e.g., converting "abc" to integer), the migration **fails gracefully**. An error is logged, and the column is left unchanged to prevent data loss.
+2.  **Auto-Fix**: It attempts to migrate the column using `ALTER COLUMN ... TYPE ... USING ...`.
+3.  **Safety**: If the existing data is incompatible with the new type (e.g., converting "abc" to integer), the migration **fails gracefully** and the column is left unchanged to prevent data loss.
 
 ## Migrations
 
@@ -2127,6 +2119,35 @@ rnxORM automatically creates a `__MigrationHistory` table to track applied migra
 -   **Renaming Columns**: If you rename a property, rnxORM sees it as a "missing" column (the new name) and adds it. The old column remains in the database. It does **not** rename the existing column.
 -   **Deleting Columns**: If you remove a property from your class, the column remains in the database. rnxORM does **not** delete columns to prevent accidental data loss.
 -   **Data Migrations**: Complex data transformations during schema changes must be handled manually.
+
+## Custom Database Providers
+
+You can create a custom database provider by implementing the `IDatabaseProvider` interface. Every provider must implement `getDialect()` which returns a string identifier used internally for dialect-specific SQL generation (e.g., pagination, migrations).
+
+```typescript
+import { IDatabaseProvider } from "rnxorm";
+
+class SQLiteProvider implements IDatabaseProvider {
+    getDialect(): string {
+        return 'sqlite'; // Used for dialect-specific SQL branches
+    }
+    // ... implement remaining interface methods
+}
+```
+
+Built-in dialect identifiers: `'postgresql'`, `'mssql'`, `'mariadb'`.
+
+### Testing with MetadataStorage.reset()
+
+When writing tests, use `MetadataStorage.reset()` to clear all registered entity metadata between test cases, ensuring test isolation:
+
+```typescript
+import { MetadataStorage } from "rnxorm";
+
+beforeEach(() => {
+    MetadataStorage.reset();
+});
+```
 
 ## Repository
 

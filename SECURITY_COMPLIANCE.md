@@ -252,12 +252,12 @@ await db.saveChanges(); // ✅ User now invisible to queries
 | Global Query Filters | ✅ | ✅ | ✅ Match |
 | Value Converters | ✅ | ✅ | ✅ Match |
 | Owned Entities | ✅ | ✅ | ✅ Match |
-| Lazy Loading | ✅ | ⚠️ Partial | ⚠️ Gap |
+| Lazy Loading | ✅ | ⚠️ Planned | ⚠️ Gap |
 | Compiled Queries | ✅ | ❌ | ❌ Gap |
 | Interceptors | ✅ | ❌ | ❌ Gap |
-| Migration History | ✅ | ❌ | ❌ Gap |
+| Migration History | ✅ | ✅ | ✅ Match |
 
-**Overall**: ✅ **Matches 70% of EF Core features** (excellent for v2.0)
+**Overall**: ✅ **Matches 75% of EF Core features** (excellent for v2.0)
 
 ---
 
@@ -282,12 +282,12 @@ await db.saveChanges(); // ✅ User now invisible to queries
 |---------|--------|--------|--------|
 | Type Safety | ✅ | ✅ | ✅ Match |
 | SQL Injection Protection | ✅ | ✅ | ✅ Match |
-| Migrations | ✅ | ⚠️ Basic | ⚠️ Gap |
+| Migrations | ✅ | ✅ | ✅ Match |
 | Raw SQL Support | ✅ | ✅ | ✅ Match |
 | Multi-DB Support | ✅ | ✅ | ✅ Match |
 | Connection Pooling | ✅ | ✅ | ✅ Match |
 
-**Overall**: ✅ **Matches 80% of Prisma features**
+**Overall**: ✅ **Matches 85% of Prisma features**
 
 ---
 
