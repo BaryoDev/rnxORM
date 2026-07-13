@@ -10,3 +10,5 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .npm
+lint_output.txt
+test_output.txt

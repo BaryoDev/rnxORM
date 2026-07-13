@@ -4,25 +4,38 @@ A lightweight TypeScript ORM for **PostgreSQL**, **SQL Server**, and **MariaDB/M
 
 ## Features
 
+Implemented:
 - **Multi-Database**: PostgreSQL, SQL Server (MSSQL), MariaDB/MySQL via provider pattern
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
-- **Change Tracking & SaveChanges()**: EF Core-style automatic change detection
+- **Change Tracking & SaveChanges()**: EF Core-style automatic change detection, single transaction
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
-- **Eager Loading**: `.include()` to load related entities
-- **Data Seeding**: `hasData()` for initial data population
-- **Migrations**: Version-controlled schema changes with `MigrationBuilder` and `Migrator`
-- **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
-- **Raw SQL**: `fromSqlRaw()` and `executeSqlRaw()`
-- **Global Query Filters**: Automatic filtering for soft deletes, multi-tenancy
-- **Value Converters**: Transform values between entity and database representations
-- **Shadow Properties**: Database-only columns without entity properties
-- **Concurrency Tokens**: Optimistic concurrency control
-- **Owned Entity Types**: Value objects via `ownsOne()` and `ownsMany()`
-- **Keyless Entity Types**: Map database views via `hasNoKey()`
-- **Bulk Operations**: `addRange`, `updateRange`, `removeRange`
-- **Schema Evolution**: Auto-detect and migrate schema changes
-- **Query Optimization**: `.asNoTracking()` for read-only queries
+- **Eager Loading**: `.include()` — batched follow-up queries (WHERE pk IN (...)), NOT JOINs; single-level only
+- **Data Seeding**: `hasData()`, idempotent by primary key
+- **Migrations (library API)**: `MigrationBuilder` and `Migrator` with per-dialect SQL and history tracking
+- **Aggregations**: `sum`, `average`, `min`, `max`, `count` as real SQL aggregates
+- **Value Converters**: `hasConversion()` applied on read and write
+- **Concurrency Tokens**: Optimistic concurrency (token in UPDATE WHERE, auto-increment, conflict error)
+- **Bulk Operations**: `addRange`, `updateRange`, `removeRange` (per-row statements, one transaction)
+- **Schema Evolution**: `ensureCreated()` adds missing columns, best-effort type migration
+- **Query Optimization**: `.asNoTracking()` skips change tracking (entities are NOT frozen)
+
+Partial (works with limitations):
+- **LINQ-Style Projections**: `select`/`groupBy` lambdas are parsed via regex on source text; simple property/object-literal shapes translate to SQL, anything else falls back to in-memory evaluation of all rows
+- **Global Query Filters**: `hasQueryFilter()` predicates run in memory after fetching — never translated to SQL
+- **Raw SQL**: `fromSqlRaw()`/`executeSqlRaw()` — placeholders are provider-native ($1 postgres, @p0 mssql, ? mariadb), not translated
+- **Keyless Entity Types**: `hasNoKey()` queries views; read-only not enforced
+- **Shadow Properties**: columns created, but defaults are bound as literal parameter values — SQL expressions like CURRENT_TIMESTAMP do not work
+- **CLI**: only `migration:create` works; `migration:run`/`revert`/`status` are print-only stubs — use the Migrator API
+
+NOT implemented (API accepts config but has no runtime effect — do not rely on):
+- **Owned Entity Types** (`ownsOne()`/`ownsMany()`)
+- **Default Values** (`hasDefaultValue()` on regular columns)
+- **Computed Columns** (`hasComputedColumnSql()`)
+- **Explicit Loading** (`entry().reference()`/`collection()` throw)
+- **Lazy Loading**
+
+Testing: the test suite runs against an in-memory mock provider; real-database behavior of the three providers is not covered by CI.
 
 ## Installation
 
@@ -135,7 +148,7 @@ Each provider implements `IDatabaseProvider` with a `getDialect()` method return
 - `groupBy(selector)`: Group results
 - `distinct()`: Remove duplicates
 - `sum(selector)` / `average(selector)` / `min(selector)` / `max(selector)`: Aggregations
-- `asNoTracking()`: Return frozen read-only entities
+- `asNoTracking()`: Return untracked entities (mutable, but changes are not persisted)
 - `ignoreQueryFilters()`: Bypass global query filters
 - `fromSqlRaw(sql, params)`: Execute raw SQL mapped to entity type
 
@@ -147,14 +160,14 @@ Each provider implements `IDatabaseProvider` with a `getDialect()` method return
 - `.hasData(seedArray)`: Seed initial data
 - `.hasQueryFilter(predicate)`: Add global query filter
 - `.hasNoKey()`: Mark as keyless entity
-- `.ownsOne(selector, Type)` / `.ownsMany(selector, Type)`: Configure owned entities
+- `.ownsOne(selector, Type)` / `.ownsMany(selector, Type)`: Configure owned entities (planned — no runtime effect yet)
 - `.shadowProperty(name, type, options)`: Add database-only column
 - `.property(selector)`: Configure a property
   - `.isRequired()` / `.isOptional()`: Nullability
   - `.hasMaxLength(n)`: Max string length
   - `.hasColumnName(name)` / `.hasColumnType(type)`: Column mapping
-  - `.hasDefaultValue(val)`: Default value
-  - `.hasComputedColumnSql(sql)`: Computed column
+  - `.hasDefaultValue(val)`: Default value (planned — no runtime effect yet)
+  - `.hasComputedColumnSql(sql)`: Computed column (planned — no runtime effect yet)
   - `.hasConversion(toDB, fromDB)`: Value converter
   - `.isConcurrencyToken()`: Optimistic concurrency
 

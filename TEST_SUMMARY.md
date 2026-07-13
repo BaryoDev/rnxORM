@@ -1,92 +1,72 @@
 # rnxORM Test Suite Summary
 
-## 🎉 ALL 95 TESTS PASSING (100%)
+## Current state: 216 tests passing — mock by default, real databases via docker
 
-Comprehensive test suite that validates functionality, security, edge cases, and production readiness of rnxORM. **All tests pass without requiring actual databases** thanks to the in-memory mock provider.
-
-## Test Results
-
-### Unit Tests: **80/80 PASSED** ✅
-- ✅ ChangeTracker: 49 tests (100% code coverage)
-- ✅ EntityEntry: 22 tests (100% code coverage)
-- ✅ MetadataStorage: 20 tests (90% code coverage)
-- ✅ DbContext: 4 tests
-
-### Integration Tests: **15/15 PASSED** ✅
-- ✅ CRUD operations (insert, update, delete, query)
-- ✅ SQL injection protection
-- ✅ Unicode & emoji support
-- ✅ Edge case handling
-- ✅ Pagination and ordering
-- ✅ Bulk operations
-
-## Key Innovation: Mock Database Provider
-
-Created **MockDatabaseProvider** - a full-featured in-memory database that:
-- ✅ No external database needed for tests
-- ✅ Implements complete IDatabaseProvider interface
-- ✅ Supports INSERT, SELECT, UPDATE, DELETE, CREATE TABLE
-- ✅ Handles WHERE, ORDER BY, LIMIT/OFFSET
-- ✅ Parameterized queries (SQL injection protection)
-- ✅ Transaction support (BEGIN, COMMIT, ROLLBACK)
-
-## Running Tests
+The default `npm test` run uses the in-memory `MockDatabaseProvider` (fast, no
+infrastructure). The same suite can be run against **real PostgreSQL, MariaDB,
+and SQL Server** containers, and passes there too:
 
 ```bash
-# All tests (no database required!)
+# All tests against the in-memory mock (no database required)
 npm test
 
-# Test with real databases (optional)
-USE_REAL_DB=true TEST_PROVIDERS=postgres npm test
-USE_REAL_DB=true TEST_PROVIDERS=mssql,mariadb npm test
+# All tests against real databases
+docker compose -f docker-compose.test.yml up -d --wait
+npm run test:integration
+docker compose -f docker-compose.test.yml down -v
 ```
 
-## Security Validation ✅
+A GitHub Actions workflow (`.github/workflows/integration.yml`, manual trigger)
+runs the real-database suite in CI on demand.
 
-| Test | Input | Result |
-|------|-------|--------|
-| SQL Injection | `"'; DROP TABLE users; --"` | ✅ Stored as literal string |
-| Special Chars | `"O'Brien"`, `"quotes \"test\""` | ✅ Properly escaped |
-| Unicode/Emoji | `"你好世界 😀"` | ✅ Correct storage/retrieval |
-| Duplicate PK | Insert same ID twice | ✅ Error thrown, integrity maintained |
+## Test suites
 
-## Test Coverage
+| Suite | Tests | What it validates |
+|-------|-------|-------------------|
+| ChangeTracker | 49 | Entity state transitions, dirty detection (100% coverage) |
+| EntityEntry | 22 | Original values, modified-property detection (100% coverage) |
+| MetadataStorage | 20 | Decorator metadata registration |
+| DbContext | 4 | Context construction, DbSet access |
+| SqlGeneration | 28 | **Exact SQL strings per dialect**: pagination (LIMIT/OFFSET vs OFFSET/FETCH), placeholders ($n / @pN / ?), aggregates, INSERT id-retrieval (RETURNING / OUTPUT INSERTED / insertId), IDENTITY_INSERT wrapping, concurrency-token UPDATE, projections, GROUP BY/HAVING, raw SQL passthrough |
+| MigrationBuilder | ~40 | Per-dialect DDL: createTable, auto-increment syntax, defaults, alter/rename, indexes, foreign keys |
+| Migrator | ~34 | History table per dialect, migrate/revert/revertTo/status, transaction wrapping, rollback on error |
+| ModelBuilder | 12 | Fluent API metadata: toTable, hasKey, hasNoKey, indexes, constraints, property config, conversions, shadow properties, seeding, query filters (incl. end-to-end filter behavior on toList/find/where/ignoreQueryFilters) |
+| ConcurrencyToken | 2 | End-to-end optimistic concurrency: token increment on save, violation when a competing context saved first |
+| ActualApi (integration) | 15 | CRUD, pagination, ordering, bulk ops, SQL-injection safety, unicode — per provider when run with USE_REAL_DB |
+
+## Coverage (default mock run)
 
 ```
-ChangeTracker.ts    - 100% coverage ✅
-EntityEntry.ts      - 100% coverage ✅
-MetadataStorage.ts  -  90% coverage ✅
-MockDatabase.ts     -  76% coverage ✅
+ChangeTracker / EntityEntry   100%
+src/migrations                ~98%
+MetadataStorage               ~86%
+DbContext                     ~55%
+ModelBuilder                  ~52%   (relationship builders still uncovered)
+DbSet                         ~49%   (eager-loading include() paths still uncovered)
+Real providers                ~2% here — exercised by the real-DB run instead
 ```
 
-## Fixes Applied
+## What the real-database run has verified
 
-1. ✅ Fixed MetadataStorage.addColumn() - now stores all optional properties
-2. ✅ Created MockDatabaseProvider - enables testing without real databases
-3. ✅ Fixed test isolation - added change tracker clearing between tests
+- All 3 providers connect, create schema, and pass the full CRUD suite
+- Generated-key retrieval works (PostgreSQL RETURNING, MSSQL OUTPUT INSERTED, MariaDB insertId)
+- Explicit-ID inserts into identity columns work on MSSQL (SET IDENTITY_INSERT wrapping)
+- Per-dialect pagination executes on real engines
 
-## Production Readiness
+## Remaining gaps (honest list)
 
-### ✅ PRODUCTION READY
-- Change tracking and state management
-- Metadata storage and configuration
-- SQL injection protection
-- Unicode and special character handling
-- Edge case handling (null, empty, boundaries)
-- Concurrent query management
+- Eager loading (`.include()` for all four relationship types) has no dedicated tests
+- Relationship configuration via ModelBuilder (hasOne/hasMany/hasManyToMany) untested
+- Value converters, keyless entities, and shadow properties lack end-to-end tests
+- The real-DB integration job is manual (workflow_dispatch), not part of every CI run
+- The mock's SQL parsing supports multiple AND conditions but still no OR/LIKE/joins
 
-### Test Execution Speed
-- **All 95 tests in < 6 seconds**
-- No database setup required
-- Consistent results across environments
-- Perfect for CI/CD pipelines
+## Readiness assessment
 
-## Conclusion
-
-**rnxORM is production-ready** with:
-- 100% test pass rate (95/95 tests)
-- Zero infrastructure requirements
-- Comprehensive security validation
-- Excellent code coverage on core components
-
-Ready to deploy! 🚀
+- **Solid**: change tracking, transactions, concurrency tokens, migrations,
+  query/pagination SQL generation, seeding — tested at the SQL level and
+  against real engines.
+- **Implemented, tested lightly**: eager loading, value converters, keyless
+  entities (work in real-DB CRUD paths but lack dedicated tests).
+- **Not implemented** (see README feature status): owned entities, DDL default
+  values, computed columns, explicit loading, CLI migration:run/revert/status.

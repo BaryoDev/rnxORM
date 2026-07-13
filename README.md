@@ -157,35 +157,51 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 
 ## Features
 
-- **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL
+Feature status is marked honestly: ✅ implemented, ⚠️ partial (works with documented limitations), ❌ planned (API may exist but is not functional yet).
+
+### Implemented ✅
+
+- **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL providers
 - **Change Tracking & SaveChanges()**: EF Core-style automatic change detection and batch persistence
-- **Data Seeding**: Seed initial data via `hasData()` in ModelBuilder
+- **Transactions**: Automatic transaction wrapping for `saveChanges()`
+- **Concurrency Tokens**: Optimistic concurrency control via `isConcurrencyToken()` (token check in UPDATE WHERE clause, auto-increment on save, conflict detection)
+- **Data Seeding**: Idempotent seeding via `hasData()` in ModelBuilder
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
-- **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
-- **Eager Loading**: `.include()` to load related entities
-- **Explicit Loading** *(planned)*: Load related entities on-demand via `reference()` and `collection()`
-- **Schema Scaffolding**: Automatically create tables, foreign keys, indexes, and constraints
-- **Migrations**: Version-controlled database schema changes with rollback support
+- **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne` with foreign key and join table scaffolding
+- **Eager Loading**: `.include()` loads related entities via batched follow-up queries (`WHERE pk IN (...)`), not JOINs. Single-level only — no nested `thenInclude`
+- **Value Converters**: `hasConversion()` applied on both read and write paths
+- **Schema Scaffolding**: `ensureCreated()` creates tables, foreign keys, indexes, and constraints
+- **Schema Evolution**: `ensureCreated()` adds missing columns and attempts safe type migrations (best-effort; incompatible data leaves the column unchanged)
+- **Migrations (library API)**: `Migration`, `MigrationBuilder`, and `Migrator` with per-dialect SQL, `__MigrationHistory` tracking, and `migrate`/`revert`/`revertTo`/`status`
 - **CRUD Operations**: `add`, `update`, `remove` with automatic tracking
-- **Bulk Operations**: `addRange`, `updateRange`, `removeRange` for batch operations
-- **Fluent Query API**: `.where().orderBy().skip().take()`
-- **LINQ-Style Queries**: `sum`, `average`, `min`, `max`, `distinct`, `groupBy`, `select`
-- **Raw SQL Queries**: Execute custom SQL via `fromSqlRaw()` and `executeSqlRaw()`
-- **Keyless Entity Types**: Query database views and ad-hoc queries via `hasNoKey()`
-- **Owned Entity Types**: Value objects embedded in parent entities via `ownsOne()` and `ownsMany()`
+- **Bulk Operations**: `addRange`, `updateRange`, `removeRange` (persisted as per-row statements inside one transaction, not multi-row INSERTs)
+- **Fluent Query API**: `.where().orderBy().skip().take()` with correct per-dialect pagination (OFFSET/FETCH on SQL Server)
+- **Aggregations**: `sum`, `average`, `min`, `max`, `count` generated as real SQL aggregates
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
 - **Repository Pattern**: `DbSet<T>` with integrated change tracking
-- **Default Values**: Set column defaults via `hasDefaultValue()`
-- **Computed Columns**: Database-calculated columns via `hasComputedColumnSql()`
-- **Global Query Filters**: Automatic filtering for soft deletes, multi-tenancy via `hasQueryFilter()`
-- **Value Converters**: Transform values between entity and database representations via `hasConversion()`
-- **Shadow Properties**: Database-only columns without entity properties via `shadowProperty()`
-- **Concurrency Tokens**: Optimistic concurrency control via `isConcurrencyToken()`
-- **Query Optimization**: `.asNoTracking()` for read-only queries
-- **Primary Key Lookup**: `.find(id)` for quick entity retrieval
-- **Transactions**: Automatic transaction wrapping for `saveChanges()`
-- **Schema Evolution**: Auto-detect and migrate schema changes
-- **CLI Tools**: Generate migration files with `rnxorm` command
+- **Query Optimization**: `.asNoTracking()` skips change tracking for read-only queries
+- **Primary Key Lookup**: `.find(id)`
+
+### Partial ⚠️
+
+- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are parsed with regex-based string matching, not a real expression parser. Simple shapes like `u => ({ name: u.name })` and `g.count()` / `g.sum(u => u.prop)` translate to SQL; anything more complex silently falls back to fetching all rows and projecting in memory. See [LINQ-Style Query API](#linq-style-query-api)
+- **Global Query Filters**: `hasQueryFilter()` predicates run **in memory after rows are fetched** — they are never translated to SQL. Correct results, but no reduction in rows transferred. See [Global Query Filters](#global-query-filters)
+- **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects — write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB
+- **Keyless Entity Types**: `hasNoKey()` works for querying views; read-only behavior is not enforced (no error if you try to track one)
+- **Shadow Properties**: Columns are created and included in INSERTs, but defaults are sent as literal parameter values — SQL expressions like `CURRENT_TIMESTAMP` are **not** emitted as DDL `DEFAULT` clauses and will not evaluate. Use constant defaults only
+- **CLI Tools**: `npx rnxorm migration:create <name>` scaffolds migration files. `migration:run`/`migration:revert`/`migration:status` are **not implemented** — they only print instructions; use the `Migrator` API in a script instead
+
+### Planned ❌ (API exists but is not functional — do not rely on these)
+
+- **Explicit Loading**: `entry().reference()`/`collection()` throw "not implemented"
+- **Owned Entity Types**: `ownsOne()`/`ownsMany()` store configuration but nothing consumes it — no column flattening, no owned tables are created
+- **Default Values**: `hasDefaultValue()` on regular columns stores metadata but is never emitted to DDL or used in inserts
+- **Computed Columns**: `hasComputedColumnSql()` stores metadata but no `GENERATED ALWAYS AS` DDL is emitted
+- **Lazy Loading**: Not implemented
+
+### Testing status
+
+The test suite (95 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, and SQL-generation logic but not real database behavior. Real-database integration tests require `USE_REAL_DB=true` with live databases and are not part of CI yet. Treat the PostgreSQL/MSSQL/MariaDB providers as beta until then.
 
 ## Type Mapping
 
@@ -395,6 +411,8 @@ await db.saveChanges(); // Nothing happens
 
 rnxORM supports all major relationship types with automatic foreign key generation and eager loading.
 
+> **How eager loading works**: `.include()` issues batched follow-up queries (`SELECT ... WHERE fk IN (...)`) and stitches the related entities together in memory — it does not generate SQL JOINs. Only one level of include is supported (no nested `thenInclude`).
+
 ### One-to-Many / Many-to-One
 
 ```typescript
@@ -515,7 +533,9 @@ author!: User;
 
 ## LINQ-Style Query API
 
-rnxORM provides a comprehensive LINQ-style API for querying data.
+rnxORM provides a LINQ-style API for querying data.
+
+> **How lambda selectors are translated**: rnxORM does not have an expression-tree parser. Selectors like `u => u.age` or `u => ({ name: u.name })` are matched against the lambda's source text with regexes. Simple property accesses and object literals translate to SQL (`SELECT col AS alias`, `GROUP BY`, SQL aggregates); anything the parser doesn't recognize (computed values, template strings, method calls) makes the query **fall back to fetching all rows and evaluating the selector in memory**. Results stay correct, but check performance on large tables.
 
 ### Aggregations
 
@@ -771,7 +791,9 @@ await db.ensureCreated(); // Seeds data automatically
 3. **Keep seed data small**: Large datasets should use migrations or separate scripts
 4. **Version control**: Seed data is code, commit it with your model changes
 
-## Default Values & Computed Columns
+## Default Values & Computed Columns *(Planned)*
+
+> **Note**: These APIs currently only **store configuration metadata — they have no runtime effect yet**. `hasDefaultValue()` is not emitted as a `DEFAULT` clause in `CREATE TABLE` and is not used during inserts; `hasComputedColumnSql()` does not generate `GENERATED ALWAYS AS` columns. Full support is planned. If you need defaults or computed columns today, define them in a migration with raw SQL (`builder.sql(...)`) or via `MigrationBuilder.createTable`, which does support `defaultValue`.
 
 ### Default Values
 
@@ -877,16 +899,16 @@ Query filters are **automatically applied** to all queries:
 ```typescript
 // This query automatically filters out deleted users
 const users = await db.set(User).toList();
-// SQL: SELECT * FROM users WHERE NOT is_deleted
 
 // Filters apply to where clauses too
 const admins = await db.set(User).where('role', '=', 'admin').toList();
-// SQL: SELECT * FROM users WHERE role = 'admin' AND NOT is_deleted
 
 // Filters apply to find()
 const user = await db.set(User).find(1);
 // Returns null if user.id = 1 but user.isDeleted = true
 ```
+
+> **How it works (important)**: Query filters are applied **in memory** — the predicate runs as a JavaScript filter on the rows after they are fetched from the database. The generated SQL is *not* modified. Results are correct, but the database still returns filtered-out rows over the wire, so for large tables with many soft-deleted rows, add an explicit `.where()` condition as well. SQL translation of filter predicates is planned.
 
 ### Bypassing Query Filters
 
@@ -1122,16 +1144,17 @@ export class User {
 //     id INTEGER PRIMARY KEY,
 //     name TEXT,
 //     email TEXT,
-//     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-//     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+//     created_at TIMESTAMP,
+//     updated_at TIMESTAMP
 // );
 ```
 
-**Automatic Database Management:**
-- Shadow properties are **included in CREATE TABLE** statements
-- They're **included in INSERT** statements (using default values)
+**Current Behavior:**
+- Shadow properties are **included in CREATE TABLE** statements as plain columns
+- Their `defaultValue` is sent as a **literal parameter value in INSERT statements** — it is *not* emitted as a DDL `DEFAULT` clause
 - They're **excluded from entity mapping** (not set on TypeScript objects)
-- They're **managed entirely by the database**
+
+> **Limitation**: Because defaults are bound as parameter values, SQL expressions like `'CURRENT_TIMESTAMP'` or `'NOW()'` are inserted as literal strings and will fail or store the wrong value on real databases. Use **constant defaults only** (numbers, strings, booleans) with shadow properties for now. DDL `DEFAULT` clause support is planned.
 
 ### Use Cases
 
@@ -1255,7 +1278,9 @@ When you need to execute complex SQL that can't be expressed through the fluent 
 
 ### FromSqlRaw - Query Entities
 
-Execute raw SQL and map results to entity types:
+Execute raw SQL and map results to entity types.
+
+> **Placeholder syntax is provider-specific** — rnxORM does not translate placeholders in raw SQL. Use `$1, $2, ...` for PostgreSQL (as in the examples below), `@p0, @p1, ...` for SQL Server, and `?` for MariaDB/MySQL.
 
 ```typescript
 // Simple raw query
@@ -1476,7 +1501,9 @@ const stats = await db.set(OrderStatistics)
 - **Views**: Perfect for mapping to database views that aggregate data
 - **Performance**: No overhead from primary key constraints or identity checks
 
-## Owned Entity Types
+## Owned Entity Types *(Planned)*
+
+> **Note**: `ownsOne()` and `ownsMany()` currently only **store configuration metadata — they have no runtime effect yet**. No flattened columns are added to the owner's table, no separate table is created for owned collections, and owned objects are not persisted or hydrated. The documentation below describes the planned design. Until it ships, model value objects as regular columns (e.g. with a JSON value converter via `hasConversion()`).
 
 Owned entity types are entities that don't have their own identity and are always accessed through their owner entity. They're perfect for value objects like addresses, money, or other complex types that belong to a parent entity.
 
@@ -1799,14 +1826,16 @@ async function updateWithRetry(product: Product, changes: Partial<Product>) {
 
 ### AsNoTracking
 
-For read-only queries, use `asNoTracking()` to improve performance. Entities returned from no-tracking queries are frozen (immutable), which prevents accidental modifications and signals to the runtime that these objects won't be updated.
+For read-only queries, use `asNoTracking()` to improve performance. Entities returned from no-tracking queries are not registered in the change tracker, so modifying them has no effect on `saveChanges()`.
+
+> **Note**: No-tracking entities are ordinary mutable objects — they are *not* frozen. Modifications simply won't be persisted.
 
 ```typescript
-// Read-only query - entities are frozen for better performance
+// Read-only query - entities are not tracked
 const products = await productSet.asNoTracking().toList();
 
-// Attempting to modify will throw an error
-products[0].price = 999; // ❌ Error: Cannot assign to read only property
+// Modifying them is allowed but changes are NOT saved
+products[0].price = 999; // no error, but saveChanges() ignores this
 
 // Can be combined with where clauses
 const expensiveProducts = await productSet
@@ -1896,6 +1925,8 @@ Use the CLI to generate a new migration file:
 ```bash
 npx rnxorm migration:create add-users-table
 ```
+
+> **Note**: `migration:create` is the only functional CLI command. `migration:run`, `migration:revert`, and `migration:status` are not implemented — they only print instructions. To apply migrations, use the `Migrator` API in a script as shown in [Running Migrations](#running-migrations) below.
 
 This creates a timestamped migration file in the `migrations/` directory:
 
