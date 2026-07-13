@@ -1,7 +1,7 @@
 {
   "name": "rnxorm",
-  "version": "2.0.0",
-  "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core. v2.0.0 introduces breaking changes - see README for migration guide.",
+  "version": "2.1.0",
+  "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core. See CHANGELOG.md for release notes.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "jest",
+    "test:integration": "USE_REAL_DB=true TEST_PROVIDERS=postgres,mariadb,mssql POSTGRES_PORT=5433 MARIADB_PORT=3307 MSSQL_PORT=11433 jest",
     "lint": "eslint src test",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prepublishOnly": "npm run build"
@@ -30,6 +31,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "repository": {
