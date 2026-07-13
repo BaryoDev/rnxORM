@@ -409,15 +409,25 @@ export class MockDatabaseProvider implements IDatabaseProvider {
 
         const whereClause = whereMatch[1].trim();
 
-        // Handle simple conditions like "column = $1"
-        const simpleMatch = whereClause.match(/(\w+)\s*(=|!=|<>|>|<|>=|<=)\s*\$(\d+)/);
-        if (simpleMatch && params) {
-            const column = simpleMatch[1].toLowerCase();
-            const operator = simpleMatch[2];
-            const paramIndex = parseInt(simpleMatch[3]) - 1;
-            const value = params[paramIndex];
+        // Handle conditions like "column = $1", joined by AND
+        const conditions: { column: string; operator: string; value: any }[] = [];
+        for (const part of whereClause.split(/\s+AND\s+/i)) {
+            const simpleMatch = part.match(/(\w+)\s*(>=|<=|!=|<>|=|>|<)\s*\$(\d+)/);
+            if (simpleMatch && params) {
+                conditions.push({
+                    column: simpleMatch[1].toLowerCase(),
+                    operator: simpleMatch[2],
+                    value: params[parseInt(simpleMatch[3]) - 1],
+                });
+            }
+        }
 
-            return rows.filter(row => {
+        if (conditions.length === 0) {
+            return rows;
+        }
+
+        return rows.filter(row =>
+            conditions.every(({ column, operator, value }) => {
                 const rowValue = row[column];
                 switch (operator) {
                     case '=': return rowValue === value;
@@ -429,10 +439,8 @@ export class MockDatabaseProvider implements IDatabaseProvider {
                     case '<=': return rowValue <= value;
                     default: return true;
                 }
-            });
-        }
-
-        return rows;
+            })
+        );
     }
 
     private applyOrderBy(rows: any[], sql: string): any[] {

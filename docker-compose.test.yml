@@ -1,0 +1,52 @@
+# Local databases for real-DB integration tests.
+# Uses non-standard host ports (5433/3307/11433) to avoid clashing with
+# locally running databases; `npm run test:integration` sets the matching
+# POSTGRES_PORT/MARIADB_PORT/MSSQL_PORT env vars for test/test-config.ts.
+#
+#   docker compose -f docker-compose.test.yml up -d --wait
+#   npm run test:integration
+#   docker compose -f docker-compose.test.yml down -v
+#
+# Note: the mssql container creates the rnxorm_test database on first start
+# via the healthcheck's CREATE-if-missing query.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rnxorm_test
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rnxorm_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: password
+      MARIADB_DATABASE: rnxorm_test
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrong@Passw0rd"
+    ports:
+      - "11433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'YourStrong@Passw0rd' -Q \"IF DB_ID('rnxorm_test') IS NULL CREATE DATABASE rnxorm_test\" -b"]
+      interval: 3s
+      timeout: 10s
+      retries: 30
+      start_period: 20s

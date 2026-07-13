@@ -1,0 +1,74 @@
+name: Integration (real databases)
+
+# On-demand: run from the Actions tab. Spins up real PostgreSQL, MariaDB,
+# and SQL Server containers and runs the suite with USE_REAL_DB=true.
+on:
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rnxorm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rnxorm_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: password
+          MARIADB_DATABASE: rnxorm_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "YourStrong@Passw0rd"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'YourStrong@Passw0rd' -Q 'SELECT 1' -b"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Create SQL Server test database
+        run: >-
+          docker exec ${{ job.services.mssql.id }}
+          /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'YourStrong@Passw0rd'
+          -Q "IF DB_ID('rnxorm_test') IS NULL CREATE DATABASE rnxorm_test" -b
+
+      - name: Run tests against real databases
+        run: npm test
+        env:
+          USE_REAL_DB: "true"
+          TEST_PROVIDERS: postgres,mariadb,mssql
