@@ -36,7 +36,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/BaryoDev/rnxORM.git"
+    "url": "git+https://github.com/BaryoDev/rnxORM.git"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
