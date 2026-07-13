@@ -81,7 +81,14 @@ export class DbSet<T> {
         const provider = this.context.getProvider();
         const sql = provider.generateSelectSql(this.tableName);
         const res = await this.context.query(sql);
-        return res.rows.map((row: any) => this.mapRowToEntity(row, true));
+        const entities = res.rows.map((row: any) => this.mapRowToEntity(row, true));
+
+        // Apply global query filter (in-memory; use ignoreQueryFilters() via where()/orderBy() chains to bypass)
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (metadata?.queryFilter) {
+            return entities.filter(metadata.queryFilter);
+        }
+        return entities;
     }
 
     // Simple Fluent API for WHERE
@@ -104,7 +111,8 @@ export class DbSet<T> {
 
     /**
      * Returns a query builder with no-tracking enabled.
-     * Entities returned will be frozen (read-only) for better performance.
+     * Entities returned are not registered in the change tracker, so
+     * modifications to them are not persisted by saveChanges().
      * @returns QueryBuilder with no-tracking enabled
      */
     asNoTracking(): QueryBuilder<T> {
@@ -157,7 +165,13 @@ export class DbSet<T> {
         const res = await this.context.query(sql, [id]);
 
         if (res.rows.length === 0) return null;
-        return this.mapRowToEntity(res.rows[0], true); // Track the entity
+        const entity = this.mapRowToEntity(res.rows[0], true); // Track the entity
+
+        // Apply global query filter (in-memory)
+        if (metadata.queryFilter && !metadata.queryFilter(entity)) {
+            return null;
+        }
+        return entity;
     }
 
     /**
@@ -423,7 +437,8 @@ export class QueryBuilder<T> {
 
     /**
      * Enables no-tracking mode for this query.
-     * Entities will be frozen (read-only) for better performance.
+     * Entities are not registered in the change tracker, so modifications
+     * to them are not persisted by saveChanges().
      * @returns This query builder
      */
     asNoTracking(): this {
@@ -1371,12 +1386,25 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
             sql += ` ORDER BY ${orderBy}`;
         }
 
-        // LIMIT/OFFSET
-        if (this.takeCount !== undefined) {
-            sql += ` LIMIT ${this.takeCount}`;
-        }
-        if (this.skipCount !== undefined) {
-            sql += ` OFFSET ${this.skipCount}`;
+        // Pagination (database-specific)
+        if (this.context.getProvider().getDialect() === 'mssql') {
+            if (this.skipCount !== undefined || this.takeCount !== undefined) {
+                // MSSQL requires ORDER BY for OFFSET/FETCH
+                if (this.orderByColumns.length === 0) {
+                    sql += ` ORDER BY (SELECT NULL)`;
+                }
+                sql += ` OFFSET ${this.skipCount ?? 0} ROWS`;
+                if (this.takeCount !== undefined) {
+                    sql += ` FETCH NEXT ${this.takeCount} ROWS ONLY`;
+                }
+            }
+        } else {
+            if (this.takeCount !== undefined) {
+                sql += ` LIMIT ${this.takeCount}`;
+            }
+            if (this.skipCount !== undefined) {
+                sql += ` OFFSET ${this.skipCount}`;
+            }
         }
 
         // Execute query

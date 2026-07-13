@@ -190,13 +190,36 @@ export class DbContext {
 
         const placeholders = values.map((_: any, i: number) => this.provider.getParameterPlaceholder(i + 1));
 
-        const sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+        const pkColumn = metadata.columns.find((c: any) => c.isPrimaryKey && c.isAutoIncrement);
+        const needsGeneratedId = pkColumn && (entity[pkColumn.propertyName] === undefined || entity[pkColumn.propertyName] === null);
+        const dialect = this.provider.getDialect();
+
+        let sql: string;
+        if (needsGeneratedId && dialect === 'postgresql') {
+            sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING ${pkColumn.columnName}`;
+        } else if (needsGeneratedId && dialect === 'mssql') {
+            sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) OUTPUT INSERTED.${pkColumn.columnName} VALUES (${placeholders.join(', ')})`;
+        } else {
+            sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+            // SQL Server rejects explicit values for IDENTITY columns unless IDENTITY_INSERT is ON
+            if (pkColumn && !needsGeneratedId && dialect === 'mssql') {
+                sql = `SET IDENTITY_INSERT ${tableName} ON; ${sql}; SET IDENTITY_INSERT ${tableName} OFF`;
+            }
+        }
 
         const result = await this.provider.query(sql, values);
 
         // Set auto-increment ID if applicable
-        const pkColumn = metadata.columns.find((c: any) => c.isPrimaryKey && c.isAutoIncrement);
-        if (pkColumn && result.insertId !== undefined) {
+        if (needsGeneratedId) {
+            if (result.insertId !== undefined) {
+                entity[pkColumn.propertyName] = result.insertId;
+            } else if (result.rows?.length > 0) {
+                const returned = result.rows[0][pkColumn.columnName];
+                if (returned !== undefined && returned !== null) {
+                    entity[pkColumn.propertyName] = typeof returned === 'bigint' ? Number(returned) : returned;
+                }
+            }
+        } else if (pkColumn && result.insertId !== undefined) {
             entity[pkColumn.propertyName] = result.insertId;
         }
     }
@@ -529,7 +552,11 @@ export class DbContext {
                                 this.provider.getParameterPlaceholder(i + 1)
                             );
 
-                            const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+                            let insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
+                            // SQL Server rejects explicit values for IDENTITY columns unless IDENTITY_INSERT is ON
+                            if (pkColumn.isAutoIncrement && this.provider.getDialect() === 'mssql') {
+                                insertSql = `SET IDENTITY_INSERT ${tableName} ON; ${insertSql}; SET IDENTITY_INSERT ${tableName} OFF`;
+                            }
                             await this.query(insertSql, values);
                         }
                     }

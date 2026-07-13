@@ -51,6 +51,9 @@ export class MariaDBProvider implements IDatabaseProvider {
             return {
                 rows: rows,
                 rowCount: rowCount,
+                insertId: result.insertId !== undefined && result.insertId !== null
+                    ? Number(result.insertId)
+                    : undefined,
             };
         } finally {
             if (!this.connection) {
