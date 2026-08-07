@@ -181,15 +181,16 @@ Feature status is marked honestly: ✅ implemented, ⚠️ partial (works with d
 - **Repository Pattern**: `DbSet<T>` with integrated change tracking
 - **Query Optimization**: `.asNoTracking()` skips change tracking for read-only queries
 - **Primary Key Lookup**: `.find(id)`
+- **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })` conditions are **translated to SQL WHERE clauses** on every query path (`toList`, `find`, `where()` chains, aggregates, projections), so filtered rows never leave the database. Bypass per-query with `ignoreQueryFilters()`. See [Global Query Filters](#global-query-filters)
+- **Migration CLI**: `npx rnxorm migration:create|run|revert|status` — run/revert/status load a `rnxorm.config.js` exporting a `createMigrator()` factory. See [Migrations](#migrations)
 
 ### Partial ⚠️
 
 - **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are parsed with regex-based string matching, not a real expression parser. Simple shapes like `u => ({ name: u.name })` and `g.count()` / `g.sum(u => u.prop)` translate to SQL; anything more complex silently falls back to fetching all rows and projecting in memory. See [LINQ-Style Query API](#linq-style-query-api)
-- **Global Query Filters**: `hasQueryFilter()` predicates run **in memory after rows are fetched** — they are never translated to SQL. Correct results, but no reduction in rows transferred. See [Global Query Filters](#global-query-filters)
-- **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects — write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB
+- **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched** — it is never translated to SQL. Prefer the structured-condition form, which is. See [Global Query Filters](#global-query-filters)
+- **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects — write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB. Global query filters on raw SQL results are evaluated in memory
 - **Keyless Entity Types**: `hasNoKey()` works for querying views; read-only behavior is not enforced (no error if you try to track one)
 - **Shadow Properties**: Columns are created and included in INSERTs, but defaults are sent as literal parameter values — SQL expressions like `CURRENT_TIMESTAMP` are **not** emitted as DDL `DEFAULT` clauses and will not evaluate. Use constant defaults only
-- **CLI Tools**: `npx rnxorm migration:create <name>` scaffolds migration files. `migration:run`/`migration:revert`/`migration:status` are **not implemented** — they only print instructions; use the `Migrator` API in a script instead
 
 ### Planned ❌ (API exists but is not functional — do not rely on these)
 
@@ -201,7 +202,7 @@ Feature status is marked honestly: ✅ implemented, ⚠️ partial (works with d
 
 ### Testing status
 
-The test suite (95 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, and SQL-generation logic but not real database behavior. Real-database integration tests require `USE_REAL_DB=true` with live databases and are not part of CI yet. Treat the PostgreSQL/MSSQL/MariaDB providers as beta until then.
+The test suite (266 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
 
 ## Type Mapping
 
@@ -874,22 +875,39 @@ Global query filters automatically apply to all queries for an entity, making th
 
 ### Defining Query Filters
 
-Use `hasQueryFilter()` in your `onModelCreating()` method:
+Use `hasQueryFilter()` in your `onModelCreating()` method. The **structured
+form** is preferred — its conditions are translated to parameterized SQL
+`WHERE` clauses, so filtered rows never leave the database:
 
 ```typescript
 protected onModelCreating(modelBuilder: ModelBuilder): void {
-    // Soft delete filter - only return non-deleted entities
+    // Soft delete filter — becomes "WHERE isDeleted = $1" in SQL
     modelBuilder.entity(User)
-        .hasQueryFilter(u => !u.isDeleted);
+        .hasQueryFilter({ property: 'isDeleted', operator: '=', value: false });
 
-    // Multi-tenant filter - only return entities for current tenant
+    // Multi-tenant filter — pass a function to resolve the value at query time
     modelBuilder.entity(Document)
-        .hasQueryFilter(d => d.tenantId === this.currentTenantId);
+        .hasQueryFilter({ property: 'tenantId', operator: '=', value: () => this.currentTenantId });
 
-    // Combine multiple conditions
+    // Combine multiple conditions (joined with AND)
     modelBuilder.entity(Post)
-        .hasQueryFilter(p => p.isPublished && !p.isDeleted);
+        .hasQueryFilter([
+            { property: 'isPublished', operator: '=', value: true },
+            { property: 'isDeleted', operator: '=', value: false },
+        ]);
 }
+```
+
+`property` is the entity property name (mapped to its column, with value
+converters applied), and `operator` is any SQL comparison operator supported
+by your database (`=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, ...).
+
+The **predicate form** is still supported for arbitrary JavaScript logic, but
+runs **in memory after rows are fetched** — the SQL is not modified, so
+filtered-out rows still cross the wire:
+
+```typescript
+modelBuilder.entity(User).hasQueryFilter(u => !u.isDeleted);
 ```
 
 ### Automatic Filtering
@@ -897,18 +915,24 @@ protected onModelCreating(modelBuilder: ModelBuilder): void {
 Query filters are **automatically applied** to all queries:
 
 ```typescript
-// This query automatically filters out deleted users
+// SELECT * FROM users WHERE isDeleted = $1
 const users = await db.set(User).toList();
 
-// Filters apply to where clauses too
+// SELECT * FROM users WHERE role = $1 AND isDeleted = $2
 const admins = await db.set(User).where('role', '=', 'admin').toList();
 
-// Filters apply to find()
+// SELECT * FROM users WHERE id = $1 AND isDeleted = $2
 const user = await db.set(User).find(1);
 // Returns null if user.id = 1 but user.isDeleted = true
+
+// Aggregates and projections are filtered too
+const activeCount = await db.set(User).count();
 ```
 
-> **How it works (important)**: Query filters are applied **in memory** — the predicate runs as a JavaScript filter on the rows after they are fetched from the database. The generated SQL is *not* modified. Results are correct, but the database still returns filtered-out rows over the wire, so for large tables with many soft-deleted rows, add an explicit `.where()` condition as well. SQL translation of filter predicates is planned.
+> **Scope**: structured filters apply to `toList()`, `find()`, `where()`
+> chains, aggregates (`count`/`sum`/`average`/`min`/`max`), and `select()`
+> projections. `groupBy()` queries and raw SQL are not rewritten — raw SQL
+> results are filtered in memory instead.
 
 ### Bypassing Query Filters
 
@@ -926,10 +950,11 @@ const deletedUsers = await db.set(User)
     .where('isDeleted', '=', true)
     .toList();
 
-// Works with all query methods
+// To bypass filters for a primary-key lookup, use a where() chain
 const user = await db.set(User)
     .ignoreQueryFilters()
-    .find(1); // Returns user even if deleted
+    .where('id', '=', 1)
+    .first(); // Returns the user even if soft-deleted
 ```
 
 ### Use Cases
@@ -945,7 +970,7 @@ export class User {
 }
 
 modelBuilder.entity(User)
-    .hasQueryFilter(u => !u.isDeleted);
+    .hasQueryFilter({ property: 'isDeleted', operator: '=', value: false });
 
 // In your code:
 const user = await users.find(1);
@@ -966,10 +991,10 @@ export class AppDbContext extends DbContext {
 
     protected onModelCreating(modelBuilder: ModelBuilder): void {
         modelBuilder.entity(Order)
-            .hasQueryFilter(o => o.tenantId === this.tenantId);
+            .hasQueryFilter({ property: 'tenantId', operator: '=', value: () => this.tenantId });
 
         modelBuilder.entity(Customer)
-            .hasQueryFilter(c => c.tenantId === this.tenantId);
+            .hasQueryFilter({ property: 'tenantId', operator: '=', value: () => this.tenantId });
     }
 }
 
@@ -1926,7 +1951,9 @@ Use the CLI to generate a new migration file:
 npx rnxorm migration:create add-users-table
 ```
 
-> **Note**: `migration:create` is the only functional CLI command. `migration:run`, `migration:revert`, and `migration:status` are not implemented — they only print instructions. To apply migrations, use the `Migrator` API in a script as shown in [Running Migrations](#running-migrations) below.
+To apply migrations you can use the CLI with a config file (see
+[Running Migrations from the CLI](#running-migrations-from-the-cli)) or the
+`Migrator` API in a script (see [Running Migrations](#running-migrations)).
 
 This creates a timestamped migration file in the `migrations/` directory:
 
@@ -2023,9 +2050,51 @@ builder.sql('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
 builder.sql('UPDATE users SET status = $1 WHERE created_at < $2', ['inactive', new Date()]);
 ```
 
+### Running Migrations from the CLI
+
+`migration:run`, `migration:revert`, and `migration:status` load a config
+module — `rnxorm.config.js` in the working directory by default, or any path
+passed via `--config` — that exports a `createMigrator()` factory:
+
+```javascript
+// rnxorm.config.js
+const { DbContext, PostgreSQLProvider, Migrator } = require('rnxorm');
+const migrations = require('./dist/migrations');
+
+module.exports = {
+    async createMigrator() {
+        const context = new DbContext(new PostgreSQLProvider({
+            host: 'localhost',
+            port: 5432,
+            user: 'postgres',
+            password: process.env.DB_PASSWORD,
+            database: 'mydb',
+        }));
+        await context.connect();
+
+        const migrator = new Migrator(context);
+        migrator.addMigrations(Object.values(migrations).map(M => new M()));
+        return migrator;
+    },
+};
+```
+
+Then:
+
+```bash
+npx rnxorm migration:run                              # apply all pending migrations
+npx rnxorm migration:revert                           # revert the last applied migration
+npx rnxorm migration:status                           # show applied and pending migrations
+npx rnxorm migration:run --config ./config/orm.js     # use a custom config path
+```
+
+A TypeScript config (`rnxorm.config.ts`) also works when `ts-node` is
+installed in the project. The CLI disconnects the context when the command
+finishes and exits non-zero on failure.
+
 ### Running Migrations
 
-Create a migration runner script (e.g., `migrate.ts`):
+Alternatively, create a migration runner script (e.g., `migrate.ts`):
 
 ```typescript
 import { DbContext, PostgreSQLProvider, Migrator } from "rnxorm";

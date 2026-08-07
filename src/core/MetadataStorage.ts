@@ -79,6 +79,18 @@ export interface OwnedEntityMetadata {
     columnPrefix?: string; // Prefix for owned entity columns in owner table
 }
 
+/**
+ * A structured global query filter condition that can be translated to SQL.
+ * `property` is the entity property name (mapped to its column), `operator`
+ * is a SQL comparison operator, and `value` is the comparison value — pass a
+ * function to resolve the value at query time (e.g. a current tenant id).
+ */
+export interface QueryFilterCondition {
+    property: string;
+    operator: string;
+    value: any | (() => any);
+}
+
 export interface EntityMetadata {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     target: Function;
@@ -89,7 +101,8 @@ export interface EntityMetadata {
     uniqueConstraints: UniqueConstraintMetadata[];
     ownedEntities?: OwnedEntityMetadata[]; // Owned entity types
     seedData?: any[]; // Initial data for seeding
-    queryFilter?: (entity: any) => boolean; // Global query filter (e.g., soft delete)
+    queryFilter?: (entity: any) => boolean; // Global query filter evaluated in memory
+    queryFilterConditions?: QueryFilterCondition[]; // Global query filter translated to SQL WHERE clauses
     isKeyless?: boolean; // Is this a keyless entity type (for views, query types)
 }
 

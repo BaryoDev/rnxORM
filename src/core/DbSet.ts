@@ -2,6 +2,7 @@ import { DbContext } from "./DbContext";
 import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState } from "./EntityEntry";
 import { extractPropertyName } from "./utils";
+import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
 
 /**
  * Represents a collection of entities in the database.
@@ -79,12 +80,20 @@ export class DbSet<T> {
 
     async toList(): Promise<T[]> {
         const provider = this.context.getProvider();
-        const sql = provider.generateSelectSql(this.tableName);
-        const res = await this.context.query(sql);
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+
+        // Structured query filters are translated to SQL so filtered rows
+        // never leave the database; use ignoreQueryFilters() to bypass.
+        const filter = compileQueryFilter(metadata, provider, 1);
+        let sql = provider.generateSelectSql(this.tableName);
+        if (filter.clauses.length > 0) {
+            sql += ` WHERE ${filter.clauses.join(' AND ')}`;
+        }
+
+        const res = await this.context.query(sql, filter.clauses.length > 0 ? filter.params : undefined);
         const entities = res.rows.map((row: any) => this.mapRowToEntity(row, true));
 
-        // Apply global query filter (in-memory; use ignoreQueryFilters() via where()/orderBy() chains to bypass)
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        // Predicate-form query filters are evaluated in memory
         if (metadata?.queryFilter) {
             return entities.filter(metadata.queryFilter);
         }
@@ -117,6 +126,15 @@ export class DbSet<T> {
      */
     asNoTracking(): QueryBuilder<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName, false, true);
+    }
+
+    /**
+     * Returns a query builder with global query filters disabled.
+     * Useful for accessing soft-deleted entities or bypassing tenant filters.
+     * @returns QueryBuilder with query filters disabled
+     */
+    ignoreQueryFilters(): QueryBuilder<T> {
+        return new QueryBuilder(this.entityType, this.context, this.tableName).ignoreQueryFilters();
     }
 
     /**
@@ -161,13 +179,22 @@ export class DbSet<T> {
 
         const provider = this.context.getProvider();
         const placeholder = provider.getParameterPlaceholder(1);
-        const sql = `SELECT * FROM ${this.tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
-        const res = await this.context.query(sql, [id]);
+        let sql = `SELECT * FROM ${this.tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
+        const params: any[] = [id];
+
+        // Structured query filters are appended to the SQL WHERE clause
+        const filter = compileQueryFilter(metadata, provider, 2);
+        if (filter.clauses.length > 0) {
+            sql += ` AND ${filter.clauses.join(' AND ')}`;
+            params.push(...filter.params);
+        }
+
+        const res = await this.context.query(sql, params);
 
         if (res.rows.length === 0) return null;
         const entity = this.mapRowToEntity(res.rows[0], true); // Track the entity
 
-        // Apply global query filter (in-memory)
+        // Predicate-form query filters are evaluated in memory
         if (metadata.queryFilter && !metadata.queryFilter(entity)) {
             return null;
         }
@@ -175,10 +202,24 @@ export class DbSet<T> {
     }
 
     /**
+     * Build the WHERE clause for this entity's structured query filters,
+     * or an empty clause when none are configured.
+     */
+    private compileFilterWhere(): { where: string; params?: any[] } {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const filter = compileQueryFilter(metadata, this.context.getProvider(), 1);
+        if (filter.clauses.length === 0) {
+            return { where: '' };
+        }
+        return { where: ` WHERE ${filter.clauses.join(' AND ')}`, params: filter.params };
+    }
+
+    /**
      * Count all entities
      */
     async count(): Promise<number> {
-        const res = await this.context.query(`SELECT COUNT(*) as count FROM ${this.tableName}`);
+        const filter = this.compileFilterWhere();
+        const res = await this.context.query(`SELECT COUNT(*) as count FROM ${this.tableName}${filter.where}`, filter.params);
         return parseInt(res.rows[0].count);
     }
 
@@ -193,7 +234,8 @@ export class DbSet<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const res = await this.context.query(`SELECT SUM(${column.columnName}) as total FROM ${this.tableName}`);
+        const filter = this.compileFilterWhere();
+        const res = await this.context.query(`SELECT SUM(${column.columnName}) as total FROM ${this.tableName}${filter.where}`, filter.params);
         return parseFloat(res.rows[0].total) || 0;
     }
 
@@ -208,7 +250,8 @@ export class DbSet<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const res = await this.context.query(`SELECT AVG(${column.columnName}) as avg FROM ${this.tableName}`);
+        const filter = this.compileFilterWhere();
+        const res = await this.context.query(`SELECT AVG(${column.columnName}) as avg FROM ${this.tableName}${filter.where}`, filter.params);
         return parseFloat(res.rows[0].avg) || 0;
     }
 
@@ -223,7 +266,8 @@ export class DbSet<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const res = await this.context.query(`SELECT MIN(${column.columnName}) as min FROM ${this.tableName}`);
+        const filter = this.compileFilterWhere();
+        const res = await this.context.query(`SELECT MIN(${column.columnName}) as min FROM ${this.tableName}${filter.where}`, filter.params);
         return res.rows[0].min;
     }
 
@@ -238,7 +282,8 @@ export class DbSet<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const res = await this.context.query(`SELECT MAX(${column.columnName}) as max FROM ${this.tableName}`);
+        const filter = this.compileFilterWhere();
+        const res = await this.context.query(`SELECT MAX(${column.columnName}) as max FROM ${this.tableName}${filter.where}`, filter.params);
         return res.rows[0].max;
     }
 
@@ -456,10 +501,26 @@ export class QueryBuilder<T> {
         return this;
     }
 
+    /**
+     * Compile this entity's structured query filters (unless disabled) with
+     * placeholder numbering continuing after the user-supplied parameters.
+     */
+    private compileFilters(): { clauses: string[]; params: any[] } {
+        if (this.ignoreFilters) {
+            return { clauses: [], params: [] };
+        }
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        return compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
+    }
+
     async toList(): Promise<T[]> {
         const provider = this.context.getProvider();
         const dialect = provider.getDialect();
-        let whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const queryParams = [...this.params, ...filter.params];
+        let whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
 
         // Add ORDER BY clause
         if (this.orderByColumns.length > 0) {
@@ -499,14 +560,14 @@ export class QueryBuilder<T> {
         }
 
         const sql = `${selectClause} FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, queryParams);
 
         // Map rows to entities
         const entities = res.rows.map((row: any) =>
             DbSet.mapRowToEntity(this.entityType, row, this.noTracking, this.context)
         );
 
-        // Apply global query filter (unless ignored)
+        // Predicate-form query filters are evaluated in memory (unless ignored)
         let filteredEntities = entities;
         if (!this.ignoreFilters) {
             const metadata = MetadataStorage.get().getEntity(this.entityType);
@@ -535,9 +596,11 @@ export class QueryBuilder<T> {
      * Count results
      */
     async count(): Promise<number> {
-        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseInt(res.rows[0].count);
     }
 
@@ -604,9 +667,11 @@ export class QueryBuilder<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT SUM(${column.columnName}) as total FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseFloat(res.rows[0].total) || 0;
     }
 
@@ -620,9 +685,11 @@ export class QueryBuilder<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT AVG(${column.columnName}) as avg FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseFloat(res.rows[0].avg) || 0;
     }
 
@@ -636,9 +703,11 @@ export class QueryBuilder<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT MIN(${column.columnName}) as min FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return res.rows[0].min;
     }
 
@@ -652,9 +721,11 @@ export class QueryBuilder<T> {
         const column = metadata?.columns.find(c => c.propertyName === propertyName);
         if (!column) throw new Error(`Property ${propertyName} not found`);
 
-        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT MAX(${column.columnName}) as max FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return res.rows[0].max;
     }
 
@@ -671,6 +742,7 @@ export class QueryBuilder<T> {
         builder['skipCount'] = this.skipCount;
         builder['takeCount'] = this.takeCount;
         builder['isDistinct'] = this.isDistinct;
+        builder['ignoreFilters'] = this.ignoreFilters;
         return builder;
     }
 
@@ -889,6 +961,7 @@ export class SelectQueryBuilder<T, TResult> {
     private skipCount?: number;
     private takeCount?: number;
     private isDistinct: boolean = false;
+    private ignoreFilters: boolean = false;
 
     constructor(
         private entityType: new () => T,
@@ -896,6 +969,27 @@ export class SelectQueryBuilder<T, TResult> {
         private tableName: string,
         private selector: (entity: T) => TResult
     ) {}
+
+    /**
+     * Disables global query filters for this query.
+     * @returns This query builder
+     */
+    ignoreQueryFilters(): this {
+        this.ignoreFilters = true;
+        return this;
+    }
+
+    /**
+     * Compile this entity's structured query filters (unless disabled) with
+     * placeholder numbering continuing after the user-supplied parameters.
+     */
+    private compileFilters(): { clauses: string[]; params: any[] } {
+        if (this.ignoreFilters) {
+            return { clauses: [], params: [] };
+        }
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        return compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
+    }
 
     /**
      * Add a WHERE condition
@@ -956,7 +1050,10 @@ export class SelectQueryBuilder<T, TResult> {
         const dialect = provider.getDialect();
 
         // First, get the entities
-        let whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const queryParams = [...this.params, ...filter.params];
+        let whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
 
         // Add ORDER BY clause
         if (this.orderByColumns.length > 0) {
@@ -1001,7 +1098,7 @@ export class SelectQueryBuilder<T, TResult> {
             sql = `SELECT ${distinctKeyword}* FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
         }
 
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, queryParams);
 
         // Apply selector to each row
         if (projectedColumns && projectedColumns.length > 0) {
@@ -1028,9 +1125,11 @@ export class SelectQueryBuilder<T, TResult> {
      * Count results (doesn't apply projection)
      */
     async count(): Promise<number> {
-        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const filter = this.compileFilters();
+        const allConditions = [...this.conditions, ...filter.clauses];
+        const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseInt(res.rows[0].count);
     }
 
@@ -1116,13 +1215,10 @@ export class RawSqlQueryBuilder<T> {
             DbSet.mapRowToEntity(this.entityType, row, false, this.context)
         );
 
-        // Apply global query filter
+        // Raw SQL cannot be rewritten, so global query filters (both forms)
+        // are evaluated in memory here
         const metadata = MetadataStorage.get().getEntity(this.entityType);
-        if (metadata?.queryFilter) {
-            return entities.filter(metadata.queryFilter);
-        }
-
-        return entities;
+        return entities.filter((e: T) => matchesQueryFilter(metadata, e));
     }
 
     /**
@@ -1136,13 +1232,10 @@ export class RawSqlQueryBuilder<T> {
             DbSet.mapRowToEntity(this.entityType, row, true)
         );
 
-        // Apply global query filter
+        // Raw SQL cannot be rewritten, so global query filters (both forms)
+        // are evaluated in memory here
         const metadata = MetadataStorage.get().getEntity(this.entityType);
-        if (metadata?.queryFilter) {
-            return entities.filter(metadata.queryFilter);
-        }
-
-        return entities;
+        return entities.filter((e: T) => matchesQueryFilter(metadata, e));
     }
 
     /**

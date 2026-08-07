@@ -1,8 +1,13 @@
 name: Integration (real databases)
 
-# On-demand: run from the Actions tab. Spins up real PostgreSQL, MariaDB,
-# and SQL Server containers and runs the suite with USE_REAL_DB=true.
+# Runs on every PR and push to main (plus on-demand from the Actions tab).
+# Spins up real PostgreSQL, MariaDB, and SQL Server containers and runs the
+# suite with USE_REAL_DB=true.
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
