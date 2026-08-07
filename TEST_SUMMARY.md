@@ -1,10 +1,11 @@
 # rnxORM Test Suite Summary
 
-## Current state: 216 tests passing — mock by default, real databases via docker
+## Current state: 286 tests passing — mock by default, real databases via docker and CI
 
 The default `npm test` run uses the in-memory `MockDatabaseProvider` (fast, no
-infrastructure). The same suite can be run against **real PostgreSQL, MariaDB,
-and SQL Server** containers, and passes there too:
+infrastructure). The same suite runs against **real PostgreSQL, MariaDB,
+and SQL Server** containers on every pull request and push to `main`
+(`.github/workflows/integration.yml`), and locally:
 
 ```bash
 # All tests against the in-memory mock (no database required)
@@ -16,9 +17,6 @@ npm run test:integration
 docker compose -f docker-compose.test.yml down -v
 ```
 
-A GitHub Actions workflow (`.github/workflows/integration.yml`, manual trigger)
-runs the real-database suite in CI on demand.
-
 ## Test suites
 
 | Suite | Tests | What it validates |
@@ -28,23 +26,18 @@ runs the real-database suite in CI on demand.
 | MetadataStorage | 20 | Decorator metadata registration |
 | DbContext | 4 | Context construction, DbSet access |
 | SqlGeneration | 28 | **Exact SQL strings per dialect**: pagination (LIMIT/OFFSET vs OFFSET/FETCH), placeholders ($n / @pN / ?), aggregates, INSERT id-retrieval (RETURNING / OUTPUT INSERTED / insertId), IDENTITY_INSERT wrapping, concurrency-token UPDATE, projections, GROUP BY/HAVING, raw SQL passthrough |
+| QueryFilterSql | 18 | **SQL-translated global query filters**: WHERE clause generation per dialect, placeholder numbering after user conditions, find()/count()/aggregate/projection coverage, dynamic (function) values, ignoreQueryFilters(), in-memory filtering of raw SQL results |
+| EagerLoading | 8 | `.include()` for all four relation types: batched `WHERE ... IN` SQL, FK deduplication, entity stitching, empty-collection and null-FK edge cases |
+| RelationshipBuilder | 5 | ModelBuilder relations: hasOne/hasMany/hasManyToMany metadata, foreign keys, inverse sides, cascade options, join-table defaults and overrides |
+| ValueConversionAndKeyless | 6 | Value converters applied on insert/read/update; keyless entities (query mapping, ensureCreated skip, saveChanges no-op) |
+| TrackingTransactionsAndSchema | 9 | asNoTracking (untracked, no persistence), saveChanges transaction begin/commit and rollback-on-error, executeSqlRaw row counts, shadow columns in INSERT, ensureCreated add-column and type-migration paths |
+| ProviderTypeMapping | 10 | Real providers' type-mapping table (pins the README table), placeholder syntax per dialect, dialect ids, SqlCaptureProvider parity with real providers |
 | MigrationBuilder | ~40 | Per-dialect DDL: createTable, auto-increment syntax, defaults, alter/rename, indexes, foreign keys |
 | Migrator | ~34 | History table per dialect, migrate/revert/revertTo/status, transaction wrapping, rollback on error |
-| ModelBuilder | 12 | Fluent API metadata: toTable, hasKey, hasNoKey, indexes, constraints, property config, conversions, shadow properties, seeding, query filters (incl. end-to-end filter behavior on toList/find/where/ignoreQueryFilters) |
+| MigrationCli | 13 | migration:create scaffolding, config resolution (default + --config), createMigrator() factory shapes, run/revert/status dispatch |
+| ModelBuilder | 12 | Fluent API metadata: toTable, hasKey, hasNoKey, indexes, constraints, property config, conversions, shadow properties, seeding, query filters |
 | ConcurrencyToken | 2 | End-to-end optimistic concurrency: token increment on save, violation when a competing context saved first |
-| ActualApi (integration) | 15 | CRUD, pagination, ordering, bulk ops, SQL-injection safety, unicode — per provider when run with USE_REAL_DB |
-
-## Coverage (default mock run)
-
-```
-ChangeTracker / EntityEntry   100%
-src/migrations                ~98%
-MetadataStorage               ~86%
-DbContext                     ~55%
-ModelBuilder                  ~52%   (relationship builders still uncovered)
-DbSet                         ~49%   (eager-loading include() paths still uncovered)
-Real providers                ~2% here — exercised by the real-DB run instead
-```
+| ActualApi (integration) | 16 | CRUD, all documented comparison operators (incl. LIKE), pagination, ordering, bulk ops, SQL-injection safety, unicode — per provider when run with USE_REAL_DB |
 
 ## What the real-database run has verified
 
@@ -55,18 +48,15 @@ Real providers                ~2% here — exercised by the real-DB run instead
 
 ## Remaining gaps (honest list)
 
-- Eager loading (`.include()` for all four relationship types) has no dedicated tests
-- Relationship configuration via ModelBuilder (hasOne/hasMany/hasManyToMany) untested
-- Value converters, keyless entities, and shadow properties lack end-to-end tests
-- The real-DB integration job is manual (workflow_dispatch), not part of every CI run
-- The mock's SQL parsing supports multiple AND conditions but still no OR/LIKE/joins
+- Structured query filters are not applied to `groupBy()` queries (documented limitation)
+- The mock's SQL parsing supports multiple AND conditions and LIKE, but still no OR/joins
+- `migration:run`/`revert`/`status` are covered at the unit level (config loading, dispatch); no end-to-end CLI process test
 
 ## Readiness assessment
 
-- **Solid**: change tracking, transactions, concurrency tokens, migrations,
-  query/pagination SQL generation, seeding — tested at the SQL level and
-  against real engines.
-- **Implemented, tested lightly**: eager loading, value converters, keyless
-  entities (work in real-DB CRUD paths but lack dedicated tests).
+- **Solid**: change tracking, transactions, concurrency tokens, migrations
+  (library API and CLI), query/pagination SQL generation, SQL-translated query
+  filters, eager loading, value converters, keyless entities, seeding —
+  tested at the SQL level and against real engines.
 - **Not implemented** (see README feature status): owned entities, DDL default
-  values, computed columns, explicit loading, CLI migration:run/revert/status.
+  values, computed columns, explicit loading, lazy loading.

@@ -12,6 +12,14 @@ export class Migrator {
     constructor(private context: DbContext) {}
 
     /**
+     * Gets the DbContext this migrator operates on.
+     * Used by the CLI to manage the connection lifecycle.
+     */
+    getContext(): DbContext {
+        return this.context;
+    }
+
+    /**
      * Register a migration
      * @param migration Migration instance
      */

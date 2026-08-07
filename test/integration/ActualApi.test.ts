@@ -88,6 +88,30 @@ describe('Actual API Integration Tests', () => {
                 result.forEach(u => expect(u.age).toBeGreaterThan(23));
             });
 
+            it('should support the documented comparison operators', async () => {
+                const users = db.set(ApiTestUser);
+
+                // ages 21..25, names User1..User5
+                for (let i = 1; i <= 5; i++) {
+                    const user = new ApiTestUser();
+                    user.id = i;
+                    user.name = `User${i}`;
+                    user.email = `user${i}@test.com`;
+                    user.age = 20 + i;
+                    users.add(user);
+                }
+                await db.saveChanges();
+
+                expect((await users.where('age', '=', 25).toList()).map(u => u.name)).toEqual(['User5']);
+                expect(await users.where('age', '!=', 21).count()).toBe(4);
+                expect(await users.where('age', '<>', 21).count()).toBe(4);
+                expect(await users.where('age', '>=', 24).count()).toBe(2);
+                expect(await users.where('age', '<=', 22).count()).toBe(2);
+                expect(await users.where('age', '<', 22).count()).toBe(1);
+                expect(await users.where('name', 'LIKE', 'User%').count()).toBe(5);
+                expect((await users.where('name', 'LIKE', '%3').toList()).map(u => u.name)).toEqual(['User3']);
+            });
+
             it('should handle ORDER BY', async () => {
                 const users = db.set(ApiTestUser);
 

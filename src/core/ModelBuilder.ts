@@ -1,4 +1,4 @@
-import { MetadataStorage, RelationType, CascadeOption } from "./MetadataStorage";
+import { MetadataStorage, RelationType, CascadeOption, QueryFilterCondition } from "./MetadataStorage";
 import { extractPropertyName } from "./utils";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -511,22 +511,37 @@ export class EntityTypeBuilder<T> {
     }
 
     /**
-     * Configures a global query filter for this entity
-     * The filter is automatically applied to all queries
-     * @param filter Predicate function to filter entities
-     * @example
-     * // Soft delete filter
-     * modelBuilder.entity(User)
-     *     .hasQueryFilter(u => u.isDeleted === false)
+     * Configures a global query filter for this entity.
+     * The filter is automatically applied to all queries; bypass it per-query
+     * with ignoreQueryFilters().
      *
-     * // Multi-tenancy filter
+     * Preferred form — structured conditions, translated to SQL WHERE clauses
+     * so filtered rows never leave the database. Pass a function as `value`
+     * to resolve it at query time (e.g. the current tenant id):
+     * @example
+     * // Soft delete filter (SQL-translated)
+     * modelBuilder.entity(User)
+     *     .hasQueryFilter({ property: 'isDeleted', operator: '=', value: false });
+     *
+     * // Multi-tenancy filter with a dynamic value (SQL-translated)
      * modelBuilder.entity(Order)
-     *     .hasQueryFilter(o => o.tenantId === currentTenantId)
+     *     .hasQueryFilter({ property: 'tenantId', operator: '=', value: () => currentTenantId });
+     *
+     * Legacy form — a predicate function, evaluated in memory after rows are
+     * fetched. Correct, but filtered-out rows still cross the wire:
+     * @example
+     * modelBuilder.entity(User).hasQueryFilter(u => u.isDeleted === false);
      */
-    hasQueryFilter(filter: (entity: T) => boolean): this {
+    hasQueryFilter(filter: (entity: T) => boolean): this;
+    hasQueryFilter(conditions: QueryFilterCondition | QueryFilterCondition[]): this;
+    hasQueryFilter(filter: ((entity: T) => boolean) | QueryFilterCondition | QueryFilterCondition[]): this {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
-            metadata.queryFilter = filter as any;
+            if (typeof filter === 'function') {
+                metadata.queryFilter = filter as any;
+            } else {
+                metadata.queryFilterConditions = Array.isArray(filter) ? filter : [filter];
+            }
         }
         return this;
     }
