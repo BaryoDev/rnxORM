@@ -159,6 +159,8 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 
 Feature status is marked honestly: ✅ implemented, ⚠️ partial (works with documented limitations), ❌ planned (API may exist but is not functional yet).
 
+Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated tests in this repository — see the [feature verification map](#feature-verification) below for exactly which test suite proves each claim, and [Testing status](#testing-status) for how the suite runs against real databases in CI.
+
 ### Implemented ✅
 
 - **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL providers
@@ -200,20 +202,54 @@ Feature status is marked honestly: ✅ implemented, ⚠️ partial (works with d
 - **Computed Columns**: `hasComputedColumnSql()` stores metadata but no `GENERATED ALWAYS AS` DDL is emitted
 - **Lazy Loading**: Not implemented
 
+### Feature verification
+
+Each implemented feature maps to the automated tests that prove it. Unit suites assert **exact generated SQL per dialect** via a capturing provider; the integration suite executes against **real PostgreSQL, MariaDB, and SQL Server** in CI.
+
+| Feature | Proven by |
+|---------|-----------|
+| Multi-database support (3 providers) | `test/integration/ActualApi.test.ts` against real containers in CI (`.github/workflows/integration.yml`) |
+| Change tracking & state transitions | `test/unit/ChangeTracker.test.ts` (49 tests, 100% coverage), `test/unit/EntityEntry.test.ts` |
+| `saveChanges()` transaction wrapping & rollback on error | `test/unit/TrackingTransactionsAndSchema.test.ts` |
+| `asNoTracking()` (untracked, changes not persisted) | `test/unit/TrackingTransactionsAndSchema.test.ts` |
+| Concurrency tokens (end-to-end conflict detection) | `test/unit/ConcurrencyToken.test.ts`, `test/unit/SqlGeneration.test.ts` |
+| Per-dialect SQL: pagination, placeholders, generated-key retrieval, IDENTITY_INSERT | `test/unit/SqlGeneration.test.ts` (exact SQL strings), verified on real engines by the integration run |
+| Global query filters translated to SQL | `test/unit/QueryFilterSql.test.ts` (18 tests: all query paths, all 3 dialects, dynamic values, `ignoreQueryFilters()`) |
+| Eager loading (`include()`) for all four relation types | `test/unit/EagerLoading.test.ts` (batched IN queries, stitching, edge cases) |
+| Relationship configuration (decorators & ModelBuilder) | `test/unit/RelationshipBuilder.test.ts`, `test/unit/EagerLoading.test.ts` |
+| Value converters (insert / read / update round-trip) | `test/unit/ValueConversionAndKeyless.test.ts` |
+| Keyless entities (query, `ensureCreated()` skip, no persistence) | `test/unit/ValueConversionAndKeyless.test.ts` |
+| Shadow properties included in INSERTs | `test/unit/TrackingTransactionsAndSchema.test.ts` |
+| Schema evolution (add missing columns, attempt type migration) | `test/unit/TrackingTransactionsAndSchema.test.ts` |
+| Schema scaffolding (`ensureCreated()` on real databases) | `test/integration/ActualApi.test.ts` (creates schema on all 3 engines in CI) |
+| Migrations DDL (per-dialect create/alter/index/FK) | `test/unit/MigrationBuilder.test.ts` (~40 tests) |
+| Migrator (history table, migrate/revert/revertTo/status, transactions) | `test/unit/Migrator.test.ts` (~34 tests) |
+| Migration CLI (scaffolding, config loading, run/revert/status dispatch) | `test/unit/MigrationCli.test.ts` |
+| ModelBuilder fluent API (keys, indexes, constraints, seeding, filters) | `test/unit/ModelBuilder.test.ts` |
+| CRUD, bulk operations, SQL-injection safety, unicode | `test/integration/ActualApi.test.ts` per provider |
+| Documented comparison operators (`=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`) | `test/integration/ActualApi.test.ts` per provider |
+| Aggregations as real SQL aggregates | `test/unit/SqlGeneration.test.ts`, `test/unit/QueryFilterSql.test.ts` |
+| Raw SQL (`fromSqlRaw`/`executeSqlRaw`) | `test/unit/SqlGeneration.test.ts`, `test/unit/TrackingTransactionsAndSchema.test.ts` |
+| Data seeding (idempotent `hasData()`) | `test/unit/ModelBuilder.test.ts` |
+| Decorator metadata registration | `test/unit/MetadataStorage.test.ts` |
+| Type mapping table, placeholder syntax, dialect identifiers | `test/unit/ProviderTypeMapping.test.ts` (also pins the capture provider's parity with real providers) |
+
+If a claim in this README is not represented in this map or the linked suites, treat it as unverified and [open an issue](https://github.com/BaryoDev/rnxORM/issues).
+
 ### Testing status
 
-The test suite (266 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
+The test suite (286 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
 
 ## Type Mapping
 
-rnxORM automatically maps TypeScript types to database-specific types. You can override this using the `@Column({ type: '...' })` option.
+rnxORM automatically maps TypeScript types to database-specific types. You can override this using the `@Column({ type: '...' })` option. This table is pinned by `test/unit/ProviderTypeMapping.test.ts`:
 
 | TypeScript Type | PostgreSQL | SQL Server | MariaDB/MySQL |
 |----------------|------------|------------|---------------|
-| `string`       | `text`     | `NVARCHAR(255)` | `TEXT`   |
-| `number`       | `integer`  | `INT`      | `INT`         |
-| `boolean`      | `boolean`  | `BIT`      | `TINYINT(1)`  |
-| `Date`         | `timestamp`| `DATETIME2`| `TIMESTAMP`   |
+| `string`       | `TEXT`     | `NVARCHAR(MAX)` | `TEXT`   |
+| `number`       | `INTEGER`  | `INT`      | `INT`         |
+| `boolean`      | `BOOLEAN`  | `BIT`      | `TINYINT(1)`  |
+| `Date`         | `TIMESTAMP`| `DATETIME2`| `DATETIME`    |
 
 ### Overriding Types
 
@@ -229,22 +265,16 @@ price!: number;
 
 ## Query Operators
 
-The `.where(column, operator, value)` method supports standard SQL operators:
-
-- `=`: Equal to
-- `!=` or `<>`: Not equal to
-- `>`: Greater than
-- `<`: Less than
-- `>=`: Greater than or equal to
-- `<=`: Less than or equal to
-- `LIKE`: Pattern matching (case-sensitive)
-- `ILIKE`: Pattern matching (case-insensitive)
+The `.where(column, operator, value)` method passes the operator **verbatim** into the generated SQL, so any comparison operator your database supports works. Values are always bound as parameters (never interpolated). Common operators verified against all three engines by the integration suite: `=`, `!=`/`<>`, `>`, `<`, `>=`, `<=`, `LIKE`.
 
 ```typescript
 // Examples
 users.where("age", ">=", 21);
-users.where("name", "ILIKE", "%doe%");
+users.where("name", "LIKE", "%doe%");
+users.where("name", "ILIKE", "%doe%"); // ILIKE is PostgreSQL-only
 ```
+
+> **Note**: because column and operator strings are placed into the SQL as-is, they must come from your code, never from user input. Only the `value` argument is parameterized.
 
 ## Change Tracking & SaveChanges()
 

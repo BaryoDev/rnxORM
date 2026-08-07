@@ -409,15 +409,22 @@ export class MockDatabaseProvider implements IDatabaseProvider {
 
         const whereClause = whereMatch[1].trim();
 
-        // Handle conditions like "column = $1", joined by AND
+        // Handle conditions like "column = $1" or "column LIKE $1", joined by AND
         const conditions: { column: string; operator: string; value: any }[] = [];
         for (const part of whereClause.split(/\s+AND\s+/i)) {
             const simpleMatch = part.match(/(\w+)\s*(>=|<=|!=|<>|=|>|<)\s*\$(\d+)/);
+            const likeMatch = part.match(/(\w+)\s+LIKE\s+\$(\d+)/i);
             if (simpleMatch && params) {
                 conditions.push({
                     column: simpleMatch[1].toLowerCase(),
                     operator: simpleMatch[2],
                     value: params[parseInt(simpleMatch[3]) - 1],
+                });
+            } else if (likeMatch && params) {
+                conditions.push({
+                    column: likeMatch[1].toLowerCase(),
+                    operator: 'LIKE',
+                    value: params[parseInt(likeMatch[2]) - 1],
                 });
             }
         }
@@ -437,6 +444,14 @@ export class MockDatabaseProvider implements IDatabaseProvider {
                     case '<': return rowValue < value;
                     case '>=': return rowValue >= value;
                     case '<=': return rowValue <= value;
+                    case 'LIKE': {
+                        if (typeof rowValue !== 'string' || typeof value !== 'string') return false;
+                        const pattern = value
+                            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                            .replace(/%/g, '.*')
+                            .replace(/_/g, '.');
+                        return new RegExp(`^${pattern}$`).test(rowValue);
+                    }
                     default: return true;
                 }
             })

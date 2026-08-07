@@ -33,13 +33,28 @@
 - The real-database integration workflow now runs on every pull request and
   push to `main` (previously manual-trigger only).
 
+### Documentation
+
+- **The README is now evidence-based.** The Features section carries a
+  feature→test verification map linking every implemented claim to the test
+  suite that proves it. Claims that had no automated evidence got tests
+  (`asNoTracking`, `saveChanges` transaction wrapping and rollback,
+  `executeSqlRaw`, shadow-column inserts, schema evolution, the provider
+  type-mapping table, comparison operators). Two false claims were corrected:
+  SQL Server `string` maps to `NVARCHAR(MAX)` (not `NVARCHAR(255)`) and
+  MariaDB `Date` maps to `DATETIME` (not `TIMESTAMP`). The query-operator list
+  now states that operators are passed through verbatim and flags `ILIKE` as
+  PostgreSQL-only.
+
 ### Testing
 
-- Test suite grew from 216 to 266 tests: SQL-level assertions for query-filter
+- Test suite grew from 216 to 286 tests: SQL-level assertions for query-filter
   translation across all three dialects, dedicated eager-loading tests for all
   four relation types, ModelBuilder relationship-configuration coverage,
-  value-converter round-trip tests, keyless-entity tests, and migration-CLI
-  tests.
+  value-converter round-trip tests, keyless-entity tests, migration-CLI tests,
+  tracking/transaction/schema-evolution tests, provider type-mapping contract
+  tests, and a per-engine comparison-operator test. The mock provider now
+  understands `LIKE`.
 
 ### Removed
 

@@ -1,6 +1,6 @@
 # rnxORM Test Suite Summary
 
-## Current state: 266 tests passing — mock by default, real databases via docker and CI
+## Current state: 286 tests passing — mock by default, real databases via docker and CI
 
 The default `npm test` run uses the in-memory `MockDatabaseProvider` (fast, no
 infrastructure). The same suite runs against **real PostgreSQL, MariaDB,
@@ -30,12 +30,14 @@ docker compose -f docker-compose.test.yml down -v
 | EagerLoading | 8 | `.include()` for all four relation types: batched `WHERE ... IN` SQL, FK deduplication, entity stitching, empty-collection and null-FK edge cases |
 | RelationshipBuilder | 5 | ModelBuilder relations: hasOne/hasMany/hasManyToMany metadata, foreign keys, inverse sides, cascade options, join-table defaults and overrides |
 | ValueConversionAndKeyless | 6 | Value converters applied on insert/read/update; keyless entities (query mapping, ensureCreated skip, saveChanges no-op) |
+| TrackingTransactionsAndSchema | 9 | asNoTracking (untracked, no persistence), saveChanges transaction begin/commit and rollback-on-error, executeSqlRaw row counts, shadow columns in INSERT, ensureCreated add-column and type-migration paths |
+| ProviderTypeMapping | 10 | Real providers' type-mapping table (pins the README table), placeholder syntax per dialect, dialect ids, SqlCaptureProvider parity with real providers |
 | MigrationBuilder | ~40 | Per-dialect DDL: createTable, auto-increment syntax, defaults, alter/rename, indexes, foreign keys |
 | Migrator | ~34 | History table per dialect, migrate/revert/revertTo/status, transaction wrapping, rollback on error |
 | MigrationCli | 13 | migration:create scaffolding, config resolution (default + --config), createMigrator() factory shapes, run/revert/status dispatch |
 | ModelBuilder | 12 | Fluent API metadata: toTable, hasKey, hasNoKey, indexes, constraints, property config, conversions, shadow properties, seeding, query filters |
 | ConcurrencyToken | 2 | End-to-end optimistic concurrency: token increment on save, violation when a competing context saved first |
-| ActualApi (integration) | 15 | CRUD, pagination, ordering, bulk ops, SQL-injection safety, unicode — per provider when run with USE_REAL_DB |
+| ActualApi (integration) | 16 | CRUD, all documented comparison operators (incl. LIKE), pagination, ordering, bulk ops, SQL-injection safety, unicode — per provider when run with USE_REAL_DB |
 
 ## What the real-database run has verified
 
@@ -47,7 +49,7 @@ docker compose -f docker-compose.test.yml down -v
 ## Remaining gaps (honest list)
 
 - Structured query filters are not applied to `groupBy()` queries (documented limitation)
-- The mock's SQL parsing supports multiple AND conditions but still no OR/LIKE/joins
+- The mock's SQL parsing supports multiple AND conditions and LIKE, but still no OR/joins
 - `migration:run`/`revert`/`status` are covered at the unit level (config loading, dispatch); no end-to-end CLI process test
 
 ## Readiness assessment
