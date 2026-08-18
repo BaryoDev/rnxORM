@@ -1,6 +1,6 @@
 # rnxORM Industry Standards Compliance Report
 
-> **Scope and honesty note**: This is a **self-assessment**, not an external audit or certification. Its validation evidence comes from tests that run against an in-memory mock provider, not real database engines. Important nuance on injection safety: **query values** are always passed as bound parameters, but **identifiers** (table names, column names, ORDER BY columns) and pagination counts are interpolated into SQL strings. These come from your entity metadata and typed API arguments — not from end-user input in normal usage — but if your application passes untrusted input as a column name to `.where()`/`.orderBy()` or as raw SQL, rnxORM does not sanitize it. Treat claims below accordingly.
+> **Scope and honesty note**: This is a **self-assessment**, not an external audit or certification. Its validation evidence comes from tests that run against an in-memory mock provider, not real database engines. Important nuance on injection safety: **query values** are always passed as bound parameters, but **identifiers** (table names, column names, ORDER BY columns) and pagination counts are interpolated into SQL strings. These come from your entity metadata and typed API arguments, not from end-user input in normal usage, but if your application passes untrusted input as a column name to `.where()`/`.orderBy()` or as raw SQL, rnxORM does not sanitize it. Treat claims below accordingly.
 
 ## Executive Summary
 
@@ -14,7 +14,7 @@ This report evaluates rnxORM against industry-standard security frameworks and O
 
 **rnxORM Implementation**:
 - ✅ **Parameterized Values**: All query *values* use parameterized placeholders ($1, $2, @p1, etc.)
-- ⚠️ **Identifiers are interpolated**: table/column names and pagination counts are built into the SQL string from metadata and API arguments — never pass untrusted input as column names
+- ⚠️ **Identifiers are interpolated**: table/column names and pagination counts are built into the SQL string from metadata and API arguments, never pass untrusted input as column names
 - ✅ **Test Validation**: SQL injection tests pass with malicious *values* (mock provider)
 
 **Evidence**:

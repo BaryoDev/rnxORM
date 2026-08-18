@@ -10,7 +10,7 @@ Implemented:
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
 - **Change Tracking & SaveChanges()**: EF Core-style automatic change detection, single transaction
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
-- **Eager Loading**: `.include()` — batched follow-up queries (WHERE pk IN (...)), NOT JOINs; single-level only
+- **Eager Loading**: `.include()`: batched follow-up queries (WHERE pk IN (...)), NOT JOINs; single-level only
 - **Data Seeding**: `hasData()`, idempotent by primary key
 - **Migrations (library API)**: `MigrationBuilder` and `Migrator` with per-dialect SQL and history tracking
 - **Aggregations**: `sum`, `average`, `min`, `max`, `count` as real SQL aggregates
@@ -22,13 +22,13 @@ Implemented:
 
 Partial (works with limitations):
 - **LINQ-Style Projections**: `select`/`groupBy` lambdas are parsed via regex on source text; simple property/object-literal shapes translate to SQL, anything else falls back to in-memory evaluation of all rows
-- **Global Query Filters**: `hasQueryFilter()` predicates run in memory after fetching — never translated to SQL
-- **Raw SQL**: `fromSqlRaw()`/`executeSqlRaw()` — placeholders are provider-native ($1 postgres, @p0 mssql, ? mariadb), not translated
+- **Global Query Filters**: `hasQueryFilter()` predicates run in memory after fetching, never translated to SQL
+- **Raw SQL**: `fromSqlRaw()`/`executeSqlRaw()`: placeholders are provider-native ($1 postgres, @p0 mssql, ? mariadb), not translated
 - **Keyless Entity Types**: `hasNoKey()` queries views; read-only not enforced
-- **Shadow Properties**: columns created, but defaults are bound as literal parameter values — SQL expressions like CURRENT_TIMESTAMP do not work
-- **CLI**: only `migration:create` works; `migration:run`/`revert`/`status` are print-only stubs — use the Migrator API
+- **Shadow Properties**: columns created, but defaults are bound as literal parameter values, SQL expressions like CURRENT_TIMESTAMP do not work
+- **CLI**: only `migration:create` works; `migration:run`/`revert`/`status` are print-only stubs, use the Migrator API
 
-NOT implemented (API accepts config but has no runtime effect — do not rely on):
+NOT implemented (API accepts config but has no runtime effect, do not rely on):
 - **Owned Entity Types** (`ownsOne()`/`ownsMany()`)
 - **Default Values** (`hasDefaultValue()` on regular columns)
 - **Computed Columns** (`hasComputedColumnSql()`)
@@ -160,14 +160,14 @@ Each provider implements `IDatabaseProvider` with a `getDialect()` method return
 - `.hasData(seedArray)`: Seed initial data
 - `.hasQueryFilter(predicate)`: Add global query filter
 - `.hasNoKey()`: Mark as keyless entity
-- `.ownsOne(selector, Type)` / `.ownsMany(selector, Type)`: Configure owned entities (planned — no runtime effect yet)
+- `.ownsOne(selector, Type)` / `.ownsMany(selector, Type)`: Configure owned entities (planned, no runtime effect yet)
 - `.shadowProperty(name, type, options)`: Add database-only column
 - `.property(selector)`: Configure a property
   - `.isRequired()` / `.isOptional()`: Nullability
   - `.hasMaxLength(n)`: Max string length
   - `.hasColumnName(name)` / `.hasColumnType(type)`: Column mapping
-  - `.hasDefaultValue(val)`: Default value (planned — no runtime effect yet)
-  - `.hasComputedColumnSql(sql)`: Computed column (planned — no runtime effect yet)
+  - `.hasDefaultValue(val)`: Default value (planned, no runtime effect yet)
+  - `.hasComputedColumnSql(sql)`: Computed column (planned, no runtime effect yet)
   - `.hasConversion(toDB, fromDB)`: Value converter
   - `.isConcurrencyToken()`: Optimistic concurrency
 

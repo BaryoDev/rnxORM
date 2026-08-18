@@ -503,7 +503,7 @@ export class DbContext {
                             const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
                             await this.query(alterColumnSql);
                         } catch {
-                            // Type migration failed — data may be incompatible
+                            // Type migration failed: data may be incompatible
                         }
                     }
                 }

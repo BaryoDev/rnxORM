@@ -1,6 +1,6 @@
 # rnxORM Test Suite Summary
 
-## Current state: 216 tests passing — mock by default, real databases via docker
+## Current state: 216 tests passing, mock by default, real databases via docker
 
 The default `npm test` run uses the in-memory `MockDatabaseProvider` (fast, no
 infrastructure). The same suite can be run against **real PostgreSQL, MariaDB,
@@ -32,7 +32,7 @@ runs the real-database suite in CI on demand.
 | Migrator | ~34 | History table per dialect, migrate/revert/revertTo/status, transaction wrapping, rollback on error |
 | ModelBuilder | 12 | Fluent API metadata: toTable, hasKey, hasNoKey, indexes, constraints, property config, conversions, shadow properties, seeding, query filters (incl. end-to-end filter behavior on toList/find/where/ignoreQueryFilters) |
 | ConcurrencyToken | 2 | End-to-end optimistic concurrency: token increment on save, violation when a competing context saved first |
-| ActualApi (integration) | 15 | CRUD, pagination, ordering, bulk ops, SQL-injection safety, unicode — per provider when run with USE_REAL_DB |
+| ActualApi (integration) | 15 | CRUD, pagination, ordering, bulk ops, SQL-injection safety, unicode, per provider when run with USE_REAL_DB |
 
 ## Coverage (default mock run)
 
@@ -43,7 +43,7 @@ MetadataStorage               ~86%
 DbContext                     ~55%
 ModelBuilder                  ~52%   (relationship builders still uncovered)
 DbSet                         ~49%   (eager-loading include() paths still uncovered)
-Real providers                ~2% here — exercised by the real-DB run instead
+Real providers                ~2% here, exercised by the real-DB run instead
 ```
 
 ## What the real-database run has verified
@@ -64,7 +64,7 @@ Real providers                ~2% here — exercised by the real-DB run instead
 ## Readiness assessment
 
 - **Solid**: change tracking, transactions, concurrency tokens, migrations,
-  query/pagination SQL generation, seeding — tested at the SQL level and
+  query/pagination SQL generation, seeding, tested at the SQL level and
   against real engines.
 - **Implemented, tested lightly**: eager loading, value converters, keyless
   entities (work in real-DB CRUD paths but lack dedicated tests).

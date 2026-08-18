@@ -5,7 +5,7 @@
 Stabilization release: the suite now runs against real PostgreSQL 16, MariaDB 11,
 and SQL Server 2022 (via `docker-compose.test.yml` / `npm run test:integration`),
 and the documentation was rewritten to state feature status honestly
-(implemented / partial / planned) — see the Features section of the README.
+(implemented / partial / planned). See the Features section of the README.
 
 ### Fixed
 
