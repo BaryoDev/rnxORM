@@ -2288,3 +2288,7 @@ beforeEach(() => {
 ## License
 
 MPL-2.0
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
