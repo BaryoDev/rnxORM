@@ -19,14 +19,15 @@ and is the gate for most changes.
 The integration suite runs against PostgreSQL, MariaDB and SQL Server. It needs Docker:
 
 ```bash
-docker compose -f docker-compose.test.yml up -d
+docker compose -f docker-compose.test.yml up -d --wait
 npm run test:integration
 docker compose -f docker-compose.test.yml down -v
 ```
 
 The compose file binds non-default ports (PostgreSQL 5433, MariaDB 3307, SQL Server 11433) so it
 does not collide with a database already running locally. `test:integration` passes those ports
-through for you.
+through for you. `--wait` matters: without it the containers are up before the databases accept
+connections, and the suite fails on connection refused rather than on anything you changed.
 
 Anything touching `src/providers/` or SQL generation needs this suite, not just `npm test`. A change
 that passes against the mock and breaks on a real dialect is the failure this catches, and the mock
