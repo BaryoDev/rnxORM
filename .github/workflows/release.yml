@@ -113,14 +113,6 @@ jobs:
         if: ${{ inputs.publish != true }}
         run: npm publish --dry-run
 
-      # Direct un-2FA'd publishes are being restricted by the registry; the
-      # sanctioned automated flow is a STAGED publish — the release lands in
-      # the package's stage queue and a maintainer approves it with 2FA on
-      # npmjs.com (or `npm stage approve`). Nothing goes live without a human.
-      - name: Stage publish (OIDC trusted publishing)
+      - name: Publish (OIDC trusted publishing)
         if: ${{ inputs.publish == true }}
-        run: npm stage publish
-
-      - name: Dump npm debug log on failure
-        if: ${{ failure() }}
-        run: tail -n 120 /home/runner/.npm/_logs/*.log
+        run: npm publish
