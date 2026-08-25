@@ -120,3 +120,7 @@ jobs:
       - name: Stage publish (OIDC trusted publishing)
         if: ${{ inputs.publish == true }}
         run: npm stage publish
+
+      - name: Dump npm debug log on failure
+        if: ${{ failure() }}
+        run: tail -60 /home/runner/.npm/_logs/*.log
