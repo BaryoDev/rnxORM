@@ -222,6 +222,18 @@ export class DbContext {
         } else if (pkColumn && result.insertId !== undefined) {
             entity[pkColumn.propertyName] = result.insertId;
         }
+
+        // Register the inserted entity in the identity map so a subsequent
+        // find()/toList() for this primary key returns this same instance
+        // (issue #5), whether the id was just generated above or was already
+        // set explicitly by the caller before add().
+        const identityPkColumn = metadata.columns.find((c: any) => c.isPrimaryKey);
+        if (identityPkColumn) {
+            const pkValue = entity[identityPkColumn.propertyName];
+            if (pkValue !== undefined && pkValue !== null) {
+                this.changeTracker.registerIdentity(entity.constructor, pkValue, entity);
+            }
+        }
     }
 
     /**

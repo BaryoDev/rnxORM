@@ -329,8 +329,21 @@ export class DbSet<T> {
     }
 
     private mapRowToEntity(row: any, track: boolean = false): T {
-        const entity = new this.entityType();
         const metadata = MetadataStorage.get().getEntity(this.entityType);
+
+        // Identity map lookup: if this row's (converted) primary key is already
+        // tracked, return the SAME instance rather than mapping a new one -
+        // the tracked instance's current values win over fresh database values
+        // (EF Core semantics), so local unsaved modifications survive a re-query.
+        const pk = track ? DbSet.resolvePkValue(metadata, row) : null;
+        if (pk) {
+            const existing = this.context.changeTracker.findByKey(this.entityType, pk.pkValue);
+            if (existing !== undefined) {
+                return existing as T;
+            }
+        }
+
+        const entity = new this.entityType();
         metadata?.columns.forEach(col => {
             let value = row[col.columnName];
 
@@ -349,9 +362,34 @@ export class DbSet<T> {
         if (track) {
             const originalValues = { ...entity };
             this.context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+            if (pk) {
+                this.context.changeTracker.registerIdentity(this.entityType, pk.pkValue, entity);
+            }
         }
 
         return entity;
+    }
+
+    /**
+     * Resolve the (converted) primary key value for a row, using the same
+     * conversion the column mapping loop applies, so identity map keys stay
+     * consistent with mapped entity property values.
+     * Returns null when the entity is keyless or has no non-null pk value in
+     * the row - those rows never touch the identity map.
+     * @internal
+     */
+    private static resolvePkValue(metadata: any, row: any): { pkColumn: any; pkValue: any } | null {
+        const pkColumn = metadata?.columns.find((c: any) => c.isPrimaryKey);
+        if (!pkColumn) return null;
+
+        let pkValue = row[pkColumn.columnName];
+        if (pkColumn.hasConversion && pkColumn.convertFromDb) {
+            pkValue = pkColumn.convertFromDb(pkValue);
+        }
+
+        if (pkValue === null || pkValue === undefined) return null;
+
+        return { pkColumn, pkValue };
     }
 
     /**
@@ -364,8 +402,19 @@ export class DbSet<T> {
         noTracking: boolean = false,
         context?: DbContext
     ): T {
-        const entity = new entityType();
         const metadata = MetadataStorage.get().getEntity(entityType);
+        const track = !noTracking && !!context;
+
+        // Identity map lookup (see the instance mapRowToEntity for rationale).
+        const pk = track ? DbSet.resolvePkValue(metadata, row) : null;
+        if (pk) {
+            const existing = context!.changeTracker.findByKey(entityType, pk.pkValue);
+            if (existing !== undefined) {
+                return existing as T;
+            }
+        }
+
+        const entity = new entityType();
         metadata?.columns.forEach(col => {
             let value = row[col.columnName];
 
@@ -381,9 +430,12 @@ export class DbSet<T> {
         });
 
         // Track the entity if tracking is enabled and context is provided
-        if (!noTracking && context) {
+        if (track) {
             const originalValues = { ...entity };
-            context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+            context!.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+            if (pk) {
+                context!.changeTracker.registerIdentity(entityType, pk.pkValue, entity);
+            }
         }
 
         return entity;
