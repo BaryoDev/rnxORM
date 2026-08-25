@@ -1,4 +1,5 @@
 import { EntityEntry, EntityState } from "./EntityEntry";
+import { MetadataStorage } from "./MetadataStorage";
 
 /**
  * Tracks changes to entities loaded from or added to the context
@@ -6,6 +7,14 @@ import { EntityEntry, EntityState } from "./EntityEntry";
 export class ChangeTracker {
     private trackedEntities: Map<any, EntityEntry<any>> = new Map();
     private autoDetectChanges: boolean = true;
+
+    /**
+     * Identity map: entity constructor -> primary key value -> tracked entity instance.
+     * Lets the row-mapping path (DbSet) return the SAME tracked instance when the
+     * same row is loaded more than once, instead of two conflicting instances.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    private identityMap: Map<Function, Map<any, any>> = new Map();
 
     /**
      * Gets or sets whether DetectChanges is called automatically
@@ -30,7 +39,34 @@ export class ChangeTracker {
 
         const entry = new EntityEntry<T>(entity, state, originalValues);
         this.trackedEntities.set(entity, entry);
+        this.registerIdentityFromEntity(entity, state);
         return entry;
+    }
+
+    /**
+     * Identity-map an entity that entered tracking without a database round
+     * trip — `attach()`, `update()`, or `add()` with an explicit key. Without
+     * this, a later `find()` for the same key maps a second instance and the
+     * context holds two tracked copies of one row (issue #5's third door).
+     *
+     * Entities with no key value yet (a pending auto-increment insert) are
+     * skipped here and registered by DbContext once the key is backfilled;
+     * Detached entities are deliberately not identity-mapped.
+     */
+    private registerIdentityFromEntity(entity: any, state: EntityState): void {
+        if (state === EntityState.Detached || entity === null || typeof entity !== 'object') {
+            return;
+        }
+        const metadata = MetadataStorage.get().getEntity(entity.constructor);
+        const pkColumn = metadata?.columns.find(c => c.isPrimaryKey);
+        if (!pkColumn) return;
+
+        // The identity map is keyed by the ENTITY-side value, which is what the
+        // row-mapping path registers after applying convertFromDb.
+        const pkValue = entity[pkColumn.propertyName];
+        if (pkValue === undefined || pkValue === null) return;
+
+        this.registerIdentity(entity.constructor, pkValue, entity);
     }
 
     /**
@@ -52,6 +88,49 @@ export class ChangeTracker {
      */
     untrack<T>(entity: T): void {
         this.trackedEntities.delete(entity);
+        this.removeFromIdentityMap(entity);
+    }
+
+    /**
+     * Look up a tracked entity by its type and primary key value.
+     * @param entityType The entity's constructor function
+     * @param pkValue The primary key value (already converted, if the column has a conversion)
+     */
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    findByKey(entityType: Function, pkValue: any): any | undefined {
+        return this.identityMap.get(entityType)?.get(pkValue);
+    }
+
+    /**
+     * Register an entity in the identity map so subsequent loads of the same
+     * primary key return this same instance.
+     * @param entityType The entity's constructor function
+     * @param pkValue The primary key value (already converted, if the column has a conversion)
+     * @param entity The entity instance to register
+     */
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    registerIdentity(entityType: Function, pkValue: any, entity: any): void {
+        let typeMap = this.identityMap.get(entityType);
+        if (!typeMap) {
+            typeMap = new Map();
+            this.identityMap.set(entityType, typeMap);
+        }
+        typeMap.set(pkValue, entity);
+    }
+
+    /**
+     * Remove any identity map entry pointing at this entity instance.
+     * Scans by value (O(n) per type map) since the map is keyed by pk value,
+     * not by entity reference.
+     */
+    private removeFromIdentityMap(entity: any): void {
+        for (const typeMap of this.identityMap.values()) {
+            for (const [key, value] of typeMap.entries()) {
+                if (value === entity) {
+                    typeMap.delete(key);
+                }
+            }
+        }
     }
 
     /**
@@ -121,6 +200,7 @@ export class ChangeTracker {
      */
     clear(): void {
         this.trackedEntities.clear();
+        this.identityMap.clear();
     }
 
     /**
@@ -137,9 +217,10 @@ export class ChangeTracker {
             }
         }
 
-        // Remove deleted entities from tracking
+        // Remove deleted entities from tracking (and from the identity map)
         for (const entity of entriesToRemove) {
             this.trackedEntities.delete(entity);
+            this.removeFromIdentityMap(entity);
         }
     }
 

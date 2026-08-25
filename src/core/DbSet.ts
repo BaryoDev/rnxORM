@@ -1,8 +1,18 @@
 import { DbContext } from "./DbContext";
 import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState } from "./EntityEntry";
-import { extractPropertyName } from "./utils";
+import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
+import { assertColumn, assertColumnOrAlias, assertHavingExpression, assertLimit, buildComparison } from "./Identifiers";
+
+/** Renders a captured aggregate into its SQL function call. `col` is undefined for count(). */
+const AGG_SQL: Record<AggregateFn, (col?: string) => string> = {
+    count: () => "COUNT(*)",
+    sum: (col?: string) => `SUM(${col})`,
+    avg: (col?: string) => `AVG(${col})`,
+    min: (col?: string) => `MIN(${col})`,
+    max: (col?: string) => `MAX(${col})`,
+};
 
 /**
  * Represents a collection of entities in the database.
@@ -102,6 +112,8 @@ export class DbSet<T> {
 
     // Simple Fluent API for WHERE
     // usage: dbSet.where("age", ">", 18).toList()
+    where(column: keyof T & string, operator: string, value: any): QueryBuilder<T>;
+    where(column: string, operator: string, value: any): QueryBuilder<T>;
     where(column: string, operator: string, value: any): QueryBuilder<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).where(column, operator, value);
     }
@@ -140,6 +152,8 @@ export class DbSet<T> {
     /**
      * Order results by column ascending
      */
+    orderBy(column: keyof T & string): QueryBuilder<T>;
+    orderBy(column: string): QueryBuilder<T>;
     orderBy(column: string): QueryBuilder<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).orderBy(column);
     }
@@ -147,6 +161,8 @@ export class DbSet<T> {
     /**
      * Order results by column descending
      */
+    orderByDescending(column: keyof T & string): QueryBuilder<T>;
+    orderByDescending(column: string): QueryBuilder<T>;
     orderByDescending(column: string): QueryBuilder<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).orderByDescending(column);
     }
@@ -229,13 +245,10 @@ export class DbSet<T> {
      * @example await users.sum(u => u.salary)
      */
     async sum(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'sum');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT SUM(${column.columnName}) as total FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT SUM(${columnName}) as total FROM ${this.tableName}${filter.where}`, filter.params);
         return parseFloat(res.rows[0].total) || 0;
     }
 
@@ -245,13 +258,10 @@ export class DbSet<T> {
      * @example await users.average(u => u.age)
      */
     async average(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'average');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT AVG(${column.columnName}) as avg FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT AVG(${columnName}) as avg FROM ${this.tableName}${filter.where}`, filter.params);
         return parseFloat(res.rows[0].avg) || 0;
     }
 
@@ -261,13 +271,10 @@ export class DbSet<T> {
      * @example await users.min(u => u.age)
      */
     async min(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'min');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT MIN(${column.columnName}) as min FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT MIN(${columnName}) as min FROM ${this.tableName}${filter.where}`, filter.params);
         return res.rows[0].min;
     }
 
@@ -277,13 +284,10 @@ export class DbSet<T> {
      * @example await users.max(u => u.createdAt)
      */
     async max(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'max');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT MAX(${column.columnName}) as max FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT MAX(${columnName}) as max FROM ${this.tableName}${filter.where}`, filter.params);
         return res.rows[0].max;
     }
 
@@ -309,8 +313,9 @@ export class DbSet<T> {
      * @example await users.groupBy(u => u.department).select(g => ({ dept: g.key, count: g.count() })).toList()
      */
     groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
-        const propertyName = extractPropertyName(selector);
-        return new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
+        const propertyName = resolvePropertyName(selector, 'groupBy');
+        const builder = new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
+        return builder.applyQueryFilter();
     }
 
     /**
@@ -328,8 +333,21 @@ export class DbSet<T> {
     }
 
     private mapRowToEntity(row: any, track: boolean = false): T {
-        const entity = new this.entityType();
         const metadata = MetadataStorage.get().getEntity(this.entityType);
+
+        // Identity map lookup: if this row's (converted) primary key is already
+        // tracked, return the SAME instance rather than mapping a new one -
+        // the tracked instance's current values win over fresh database values
+        // (EF Core semantics), so local unsaved modifications survive a re-query.
+        const pk = track ? DbSet.resolvePkValue(metadata, row) : null;
+        if (pk) {
+            const existing = this.context.changeTracker.findByKey(this.entityType, pk.pkValue);
+            if (existing !== undefined) {
+                return existing as T;
+            }
+        }
+
+        const entity = new this.entityType();
         metadata?.columns.forEach(col => {
             let value = row[col.columnName];
 
@@ -348,9 +366,34 @@ export class DbSet<T> {
         if (track) {
             const originalValues = { ...entity };
             this.context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+            if (pk) {
+                this.context.changeTracker.registerIdentity(this.entityType, pk.pkValue, entity);
+            }
         }
 
         return entity;
+    }
+
+    /**
+     * Resolve the (converted) primary key value for a row, using the same
+     * conversion the column mapping loop applies, so identity map keys stay
+     * consistent with mapped entity property values.
+     * Returns null when the entity is keyless or has no non-null pk value in
+     * the row - those rows never touch the identity map.
+     * @internal
+     */
+    private static resolvePkValue(metadata: any, row: any): { pkColumn: any; pkValue: any } | null {
+        const pkColumn = metadata?.columns.find((c: any) => c.isPrimaryKey);
+        if (!pkColumn) return null;
+
+        let pkValue = row[pkColumn.columnName];
+        if (pkColumn.hasConversion && pkColumn.convertFromDb) {
+            pkValue = pkColumn.convertFromDb(pkValue);
+        }
+
+        if (pkValue === null || pkValue === undefined) return null;
+
+        return { pkColumn, pkValue };
     }
 
     /**
@@ -363,8 +406,19 @@ export class DbSet<T> {
         noTracking: boolean = false,
         context?: DbContext
     ): T {
-        const entity = new entityType();
         const metadata = MetadataStorage.get().getEntity(entityType);
+        const track = !noTracking && !!context;
+
+        // Identity map lookup (see the instance mapRowToEntity for rationale).
+        const pk = track ? DbSet.resolvePkValue(metadata, row) : null;
+        if (pk) {
+            const existing = context!.changeTracker.findByKey(entityType, pk.pkValue);
+            if (existing !== undefined) {
+                return existing as T;
+            }
+        }
+
+        const entity = new entityType();
         metadata?.columns.forEach(col => {
             let value = row[col.columnName];
 
@@ -380,9 +434,12 @@ export class DbSet<T> {
         });
 
         // Track the entity if tracking is enabled and context is provided
-        if (!noTracking && context) {
+        if (track) {
             const originalValues = { ...entity };
-            context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+            context!.changeTracker.track(entity, EntityState.Unchanged, originalValues);
+            if (pk) {
+                context!.changeTracker.registerIdentity(entityType, pk.pkValue, entity);
+            }
         }
 
         return entity;
@@ -416,11 +473,20 @@ export class QueryBuilder<T> {
         this.noTracking = noTracking;
     }
 
+    where(column: keyof T & string, operator: string, value: any): this;
+    where(column: string, operator: string, value: any): this;
     where(column: string, operator: string, value: any): this {
-        const provider = this.context.getProvider();
-        const placeholder = provider.getParameterPlaceholder(this.params.length + 1);
-        this.conditions.push(`${column} ${operator} ${placeholder}`);
-        this.params.push(value);
+        // Column and operator are validated against metadata and a closed
+        // operator set before touching SQL (issues #13/#24); the value is
+        // always bound as a parameter. buildComparison owns placeholder
+        // expansion, so IN binds one placeholder per element and IS binds none
+        // — the next condition numbers from the updated params length.
+        const sqlColumn = assertColumn(this.entityType, column, 'where');
+        const comparison = buildComparison(
+            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where'
+        );
+        this.conditions.push(comparison.clause);
+        this.params.push(...comparison.params);
         return this;
     }
 
@@ -428,7 +494,7 @@ export class QueryBuilder<T> {
      * Include related entities (eager loading)
      */
     include(relation: (entity: T) => any): this {
-        const propertyName = extractPropertyName(relation);
+        const propertyName = resolvePropertyName(relation, 'include');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
 
         if (!metadata) {
@@ -451,16 +517,20 @@ export class QueryBuilder<T> {
     /**
      * Order results by column ascending
      */
+    orderBy(column: keyof T & string): this;
+    orderBy(column: string): this;
     orderBy(column: string): this {
-        this.orderByColumns.push({ column, direction: 'ASC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
     /**
      * Order results by column descending
      */
+    orderByDescending(column: keyof T & string): this;
+    orderByDescending(column: string): this;
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column, direction: 'DESC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -468,7 +538,7 @@ export class QueryBuilder<T> {
      * Skip N results (for pagination)
      */
     skip(count: number): this {
-        this.skipCount = count;
+        this.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -476,7 +546,7 @@ export class QueryBuilder<T> {
      * Take N results (limit)
      */
     take(count: number): this {
-        this.takeCount = count;
+        this.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -662,15 +732,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async sum(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'sum');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT SUM(${column.columnName}) as total FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT SUM(${columnName}) as total FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseFloat(res.rows[0].total) || 0;
     }
@@ -680,15 +747,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async average(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'average');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT AVG(${column.columnName}) as avg FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT AVG(${columnName}) as avg FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseFloat(res.rows[0].avg) || 0;
     }
@@ -698,15 +762,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async min(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'min');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT MIN(${column.columnName}) as min FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT MIN(${columnName}) as min FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return res.rows[0].min;
     }
@@ -716,15 +777,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async max(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'max');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT MAX(${column.columnName}) as max FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT MAX(${columnName}) as max FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return res.rows[0].max;
     }
@@ -759,14 +817,26 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
-        const propertyName = extractPropertyName(selector);
+        const propertyName = resolvePropertyName(selector, 'groupBy');
         const builder = new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
         // Copy current query state (WHERE conditions)
         builder['conditions'] = [...this.conditions];
         builder['params'] = [...this.params];
+        if (!this.ignoreFilters) {
+            builder.applyQueryFilter();
+        }
         return builder;
     }
 
+    /**
+     * Eager-load the requested relations for the already-materialized entities.
+     *
+     * Every related row is mapped with this query's context, so related
+     * entities are change-tracked and identity-mapped exactly like the roots
+     * are (issue #5's "wrong object graphs on eager load"): including an entity
+     * that is already tracked yields the SAME instance, local edits included.
+     * `asNoTracking()` still propagates and keeps the whole graph untracked.
+     */
     private async loadIncludes(entities: T[]): Promise<void> {
         if (entities.length === 0) return;
 
@@ -822,7 +892,7 @@ export class QueryBuilder<T> {
         // Map related entities by their primary key
         const relatedEntitiesMap = new Map();
         res.rows.forEach((row: any) => {
-            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking);
+            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn], relatedEntity);
         });
 
@@ -864,7 +934,7 @@ export class QueryBuilder<T> {
         // Group related entities by foreign key
         const relatedEntitiesMap = new Map<any, any[]>();
         res.rows.forEach((row: any) => {
-            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking);
+            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             const fkValue = row[foreignKeyColumn];
 
             if (!relatedEntitiesMap.has(fkValue)) {
@@ -923,7 +993,7 @@ export class QueryBuilder<T> {
         // Map related entities
         const relatedEntitiesMap = new Map();
         relatedRes.rows.forEach((row: any) => {
-            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking);
+            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn.columnName], relatedEntity);
         });
 
@@ -994,27 +1064,35 @@ export class SelectQueryBuilder<T, TResult> {
     /**
      * Add a WHERE condition
      */
+    where(column: keyof T & string, operator: string, value: any): this;
+    where(column: string, operator: string, value: any): this;
     where(column: string, operator: string, value: any): this {
-        const provider = this.context.getProvider();
-        const placeholder = provider.getParameterPlaceholder(this.params.length + 1);
-        this.conditions.push(`${column} ${operator} ${placeholder}`);
-        this.params.push(value);
+        const sqlColumn = assertColumn(this.entityType, column, 'where');
+        const comparison = buildComparison(
+            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where'
+        );
+        this.conditions.push(comparison.clause);
+        this.params.push(...comparison.params);
         return this;
     }
 
     /**
      * Order results by column ascending
      */
+    orderBy(column: keyof T & string): this;
+    orderBy(column: string): this;
     orderBy(column: string): this {
-        this.orderByColumns.push({ column, direction: 'ASC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
     /**
      * Order results by column descending
      */
+    orderByDescending(column: keyof T & string): this;
+    orderByDescending(column: string): this;
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column, direction: 'DESC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -1022,7 +1100,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Skip N results
      */
     skip(count: number): this {
-        this.skipCount = count;
+        this.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -1030,7 +1108,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Take N results
      */
     take(count: number): this {
-        this.takeCount = count;
+        this.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -1134,61 +1212,38 @@ export class SelectQueryBuilder<T, TResult> {
     }
 
     /**
-     * Try to extract projected column names from the selector for SQL optimization
-     * Returns null if the selector is too complex for SQL projection
+     * Try to extract projected column names from the selector for SQL optimization.
+     * Returns null if the selector is too complex for SQL projection (e.g. it computes
+     * a value rather than naming columns) - callers fall back to in-memory projection.
+     * Throws if the selector names a property that isn't a mapped column: an unmapped
+     * property is a caller bug, not something to silently degrade into a full-table scan.
      */
     private extractProjectedColumns(): string[] | null {
-        try {
-            const selectorStr = this.selector.toString();
-
-            // Try to match simple object literal projections like: u => ({ name: u.name, age: u.age })
-            const objectLiteralMatch = selectorStr.match(/\{\s*([^}]+)\s*\}/);
-            if (objectLiteralMatch) {
-                const properties = objectLiteralMatch[1];
-
-                // Extract property names
-                const propertyMatches = properties.matchAll(/(\w+)\s*:\s*\w+\.(\w+)/g);
-                const columns: string[] = [];
-
-                for (const match of propertyMatches) {
-                    const alias = match[1];
-                    const propertyName = match[2];
-
-                    const metadata = MetadataStorage.get().getEntity(this.entityType);
-                    const column = metadata?.columns.find(c => c.propertyName === propertyName);
-
-                    if (column) {
-                        // Use "columnName AS alias" format
-                        columns.push(`${column.columnName} AS ${alias}`);
-                    } else {
-                        // Can't optimize - unknown property
-                        return null;
-                    }
-                }
-
-                if (columns.length > 0) {
-                    return columns;
-                }
-            }
-
-            // Try to match single property projection like: u => u.name
-            const singlePropertyMatch = selectorStr.match(/=>\s*\w+\.(\w+)\s*$/);
-            if (singlePropertyMatch) {
-                const propertyName = singlePropertyMatch[1];
-                const metadata = MetadataStorage.get().getEntity(this.entityType);
-                const column = metadata?.columns.find(c => c.propertyName === propertyName);
-
-                if (column) {
-                    return [column.columnName];
-                }
-            }
-
-            // Can't optimize - use in-memory projection
-            return null;
-        } catch {
-            // Error parsing selector - use in-memory projection
+        const result = capture(this.selector as unknown as (entity: any) => any);
+        if (result.kind === "opaque") {
+            // Honest fallback: the selector computes something SQL cannot express,
+            // so fetch full rows and project in memory.
             return null;
         }
+
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const columnFor = (propertyName: string): string => {
+            const column = metadata?.columns.find(c => c.propertyName === propertyName);
+            if (!column) {
+                throw new Error(
+                    `select(): property '${propertyName}' is not a mapped column on ${this.entityType.name}`
+                );
+            }
+            return column.columnName;
+        };
+
+        if (result.kind === "property") {
+            return [columnFor(result.path)];
+        }
+
+        return Object.entries(result.aliases).map(
+            ([alias, propertyName]) => `${columnFor(propertyName)} AS ${alias}`
+        );
     }
 }
 
@@ -1280,6 +1335,7 @@ export class GroupedQueryBuilder<T, TKey> {
     private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
     private skipCount?: number;
     private takeCount?: number;
+    private queryFilterApplied: boolean = false;
 
     constructor(
         private entityType: new () => T,
@@ -1289,6 +1345,29 @@ export class GroupedQueryBuilder<T, TKey> {
     ) {}
 
     /**
+     * Inject compiled global query filters as WHERE conditions.
+     * @internal Called by the groupBy() factories, and deliberately BEFORE the
+     * caller can invoke having(): having() bakes placeholder indices from the
+     * current params length at call time, so filters appended any later would
+     * silently shift every HAVING placeholder (issue #23 — groupBy was the
+     * last read path that ignored structured query filters). Function-valued
+     * filter conditions are therefore resolved when groupBy() is called.
+     */
+    applyQueryFilter(): this {
+        // Idempotent: calling it twice would append the filter clauses (and
+        // their parameters) a second time, shifting every later placeholder.
+        if (this.queryFilterApplied) {
+            return this;
+        }
+        this.queryFilterApplied = true;
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const filter = compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
+        this.conditions.push(...filter.clauses);
+        this.params.push(...filter.params);
+        return this;
+    }
+
+    /**
      * Filter groups using HAVING clause
      * @param column Aggregate column or group column
      * @param operator Comparison operator
@@ -1296,18 +1375,30 @@ export class GroupedQueryBuilder<T, TKey> {
      * @example groupBy(u => u.dept).having('COUNT(*)', '>', 5)
      */
     having(column: string, operator: string, value: any): this {
-        const provider = this.context.getProvider();
-        const placeholder = provider.getParameterPlaceholder(this.params.length + this.havingParams.length + 1);
-        this.havingConditions.push(`${column} ${operator} ${placeholder}`);
-        this.havingParams.push(value);
+        // Only aggregate-over-mapped-column expressions or mapped columns are
+        // accepted; the operator comes from the closed set (issues #13/#24).
+        // HAVING placeholders are numbered after the WHERE parameters, which is
+        // why applyQueryFilter() must have run before this point.
+        const sqlExpression = assertHavingExpression(this.entityType, column, 'having');
+        const comparison = buildComparison(
+            sqlExpression,
+            operator,
+            value,
+            this.context.getProvider(),
+            this.params.length + this.havingParams.length + 1,
+            'having'
+        );
+        this.havingConditions.push(comparison.clause);
+        this.havingParams.push(...comparison.params);
         return this;
     }
 
     /**
-     * Order grouped results
+     * Order grouped results. Accepts a mapped column or a projection alias
+     * from the select() list; aliases must be plain identifiers.
      */
     orderBy(column: string): this {
-        this.orderByColumns.push({ column, direction: 'ASC' });
+        this.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -1315,7 +1406,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Order grouped results descending
      */
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column, direction: 'DESC' });
+        this.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -1323,7 +1414,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Skip N groups
      */
     skip(count: number): this {
-        this.skipCount = count;
+        this.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -1331,7 +1422,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Take N groups
      */
     take(count: number): this {
-        this.takeCount = count;
+        this.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -1439,24 +1530,9 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
             throw new Error(`Property ${this.groupByProperty} not found on entity`);
         }
 
-        // Parse the selector to extract aggregations
-        const selectorStr = this.selector.toString();
-
-        // Extract aggregation and key references from selector
-        const aggregations = this.parseAggregations(selectorStr, groupColumn.columnName);
-
-        // Build SQL query
-        const selectClauses: string[] = [];
-        const aliases: string[] = [];
-
-        // Always include the grouping column
-        selectClauses.push(`${groupColumn.columnName}`);
-
-        // Add aggregations
-        aggregations.forEach(agg => {
-            selectClauses.push(agg.sql);
-            aliases.push(agg.alias);
-        });
+        // Extract aggregations (and, if present, the g.key alias) from the
+        // result selector via property capture.
+        const selectClauses = this.captureAggregations(groupColumn.columnName);
 
         let sql = `SELECT ${selectClauses.join(', ')} FROM ${this.tableName}`;
 
@@ -1525,77 +1601,64 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
     }
 
     /**
-     * Parse selector string to extract SQL aggregations
+     * Capture the result selector's `g.key` / aggregate calls (g.count(),
+     * g.sum(x => x.col), ...) and resolve each referenced property to its
+     * mapped column name, producing the list of SELECT clauses in the order
+     * the selector declared them.
+     *
+     * Throws if the selector isn't a plain object of supported entries, or if
+     * an aggregate references a property that isn't a mapped column - an honest
+     * failure in place of the previous regex silently dropping the aggregate.
+     *
+     * When the selector contains no `g.key` entry, the grouping column is
+     * still emitted first, bare (un-aliased) - this preserves the exact SQL
+     * shape of every pre-existing groupBy().select() call site that never
+     * referenced `g.key`.
      */
-    private parseAggregations(selectorStr: string, groupColumn: string): Array<{ sql: string; alias: string }> {
+    private captureAggregations(groupColumnName: string): string[] {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const aggregations: Array<{ sql: string; alias: string }> = [];
-
-        // Match patterns like: count: g.count()
-        const countMatch = selectorStr.match(/(\w+)\s*:\s*\w+\.count\(\)/);
-        if (countMatch) {
-            aggregations.push({
-                sql: 'COUNT(*) as ' + countMatch[1],
-                alias: countMatch[1]
-            });
-        }
-
-        // Match patterns like: avgSalary: g.average(u => u.salary)
-        const avgMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.average\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of avgMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
+        const columnFor = (propertyName: string): string => {
             const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `AVG(${column.columnName}) as ${alias}`,
-                    alias
-                });
+            if (!column) {
+                throw new Error(
+                    `groupBy().select(): property '${propertyName}' is not a mapped column on ${this.entityType.name}`
+                );
             }
+            return column.columnName;
+        };
+
+        const result = captureAggregates(this.selector as unknown as (group: any) => any);
+        if (result.kind === "opaque") {
+            throw new Error(
+                "groupBy().select(): result selector must build an object literal from " +
+                "g.key, g.count(), g.sum(x => x.col), g.average(x => x.col), g.min(x => x.col), or g.max(x => x.col)"
+            );
         }
 
-        // Match patterns like: totalSalary: g.sum(u => u.salary)
-        const sumMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.sum\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of sumMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
-            const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `SUM(${column.columnName}) as ${alias}`,
-                    alias
-                });
+        const entries = Object.entries(result.aggregates);
+        const clauseFor = ([alias, entry]: [string, AggregateSelectorEntry]): string => {
+            if ('kind' in entry) {
+                return `${groupColumnName} AS ${alias}`;
             }
+            // count() is the only aggregate that is meaningful without a column
+            // (it renders COUNT(*)). Every other one needs a selector, or the
+            // rendered SQL would read `SUM(undefined)`.
+            if (entry.fn !== 'count' && entry.path === undefined) {
+                throw new Error(
+                    `groupBy().select(): g.${entry.fn}() requires a column selector, ` +
+                    `e.g. g.${entry.fn}(x => x.total)`
+                );
+            }
+            const column = entry.path ? columnFor(entry.path) : undefined;
+            return `${AGG_SQL[entry.fn](column)} as ${alias}`;
+        };
+
+        const hasKey = entries.some(([, entry]) => 'kind' in entry);
+        if (hasKey) {
+            return entries.map(clauseFor);
         }
 
-        // Match patterns like: minAge: g.min(u => u.age)
-        const minMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.min\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of minMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
-            const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `MIN(${column.columnName}) as ${alias}`,
-                    alias
-                });
-            }
-        }
-
-        // Match patterns like: maxAge: g.max(u => u.age)
-        const maxMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.max\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of maxMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
-            const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `MAX(${column.columnName}) as ${alias}`,
-                    alias
-                });
-            }
-        }
-
-        return aggregations;
+        // No g.key entry: preserve the original bare-group-column-first shape.
+        return [groupColumnName, ...entries.map(clauseFor)];
     }
 }

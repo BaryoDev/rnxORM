@@ -11,7 +11,9 @@ describe('migration CLI', () => {
 
     beforeEach(() => {
         originalCwd = process.cwd();
-        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rnxorm-cli-'));
+        // realpathSync: os.tmpdir() is a symlink on macOS (/var -> /private/var);
+        // the CLI resolves paths, so the test must compare against the real path
+        tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rnxorm-cli-')));
         process.chdir(tempDir);
         logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     });

@@ -1,0 +1,113 @@
+name: Release to npm
+
+# Publishing is gated on the real-database integration suite (issue #6):
+# nothing reaches npm unless the full test run passes against live
+# PostgreSQL, MariaDB, and SQL Server.
+#
+# Trigger it manually from the Actions tab. It defaults to a DRY RUN
+# (builds, tests against real databases, runs `npm publish --dry-run`);
+# set publish=true to actually publish.
+#
+# Auth uses npm trusted publishing (OIDC): this repo + this workflow
+# filename (release.yml) must be registered as a trusted publisher on the
+# npm package settings. No NPM_TOKEN secret is needed; provenance is
+# generated automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Actually publish (false = dry run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rnxorm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rnxorm_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: password
+          MARIADB_DATABASE: rnxorm_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "YourStrong@Passw0rd"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'YourStrong@Passw0rd' -Q 'SELECT 1' -b"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+
+    steps:
+      # This job holds the OIDC publish identity, so its dependencies are
+      # pinned: actions by full commit SHA, npm by exact version.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20.x
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 20 bundles an older one
+      - name: Update npm for OIDC trusted publishing
+        run: npm install -g npm@12.0.2 && npm --version
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+      - name: Unit suite (mock)
+        run: npm test
+
+      - name: Create SQL Server test database
+        run: >-
+          docker exec ${{ job.services.mssql.id }}
+          /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'YourStrong@Passw0rd'
+          -Q "IF DB_ID('rnxorm_test') IS NULL CREATE DATABASE rnxorm_test" -b
+
+      - name: Integration suite (real databases)
+        run: npm test
+        env:
+          USE_REAL_DB: "true"
+          TEST_PROVIDERS: postgres,mariadb,mssql
+
+      - name: Publish (dry run)
+        if: ${{ inputs.publish != true }}
+        run: npm publish --dry-run
+
+      - name: Publish (OIDC trusted publishing)
+        if: ${{ inputs.publish == true }}
+        run: npm publish

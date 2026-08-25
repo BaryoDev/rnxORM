@@ -1,5 +1,6 @@
 import { MetadataStorage, RelationType, CascadeOption, QueryFilterCondition } from "./MetadataStorage";
-import { extractPropertyName } from "./utils";
+import { resolvePropertyName } from "./expressions/PropertyCapture";
+import { assertOperator } from "./Identifiers";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Constructor<T = any> = new (...args: any[]) => T;
@@ -194,7 +195,7 @@ export class RelationshipBuilder<T, TRelated> {
      */
     withMany(inverseProperty?: (entity: TRelated) => any): this {
         if (inverseProperty) {
-            const inverseName = extractPropertyName(inverseProperty);
+            const inverseName = resolvePropertyName(inverseProperty, 'withMany');
             const metadata = MetadataStorage.get().getEntity(this.entityType);
             if (metadata) {
                 const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
@@ -211,7 +212,7 @@ export class RelationshipBuilder<T, TRelated> {
      */
     withOne(inverseProperty?: (entity: TRelated) => any): this {
         if (inverseProperty) {
-            const inverseName = extractPropertyName(inverseProperty);
+            const inverseName = resolvePropertyName(inverseProperty, 'withOne');
             const metadata = MetadataStorage.get().getEntity(this.entityType);
             if (metadata) {
                 const relation = metadata.relations.find(r => r.propertyName === this.propertyName);
@@ -289,7 +290,7 @@ export class EntityTypeBuilder<T> {
      * Configures the primary key
      */
     hasKey(selector: (entity: T) => any): this {
-        const propertyName = extractPropertyName(selector);
+        const propertyName = resolvePropertyName(selector, 'hasKey');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
             // Clear existing primary keys
@@ -325,7 +326,7 @@ export class EntityTypeBuilder<T> {
      * Configures a property
      */
     property<TProp>(selector: (entity: T) => TProp): PropertyBuilder<T, TProp> {
-        const propertyName = extractPropertyName(selector);
+        const propertyName = resolvePropertyName(selector, 'property');
         return new PropertyBuilder<T, TProp>(this.entityType, propertyName);
     }
 
@@ -333,7 +334,7 @@ export class EntityTypeBuilder<T> {
      * Configures an index
      */
     hasIndex(selector: (entity: T) => any, options?: { unique?: boolean; name?: string }): this {
-        const propertyName = extractPropertyName(selector);
+        const propertyName = resolvePropertyName(selector, 'hasIndex');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
             const existingIndex = metadata.indexes.find(idx =>
@@ -355,7 +356,7 @@ export class EntityTypeBuilder<T> {
      * Configures a composite index
      */
     hasCompositeIndex(selectors: Array<(entity: T) => any>, options?: { unique?: boolean; name?: string }): this {
-        const propertyNames = selectors.map(s => extractPropertyName(s));
+        const propertyNames = selectors.map(s => resolvePropertyName(s, 'hasCompositeIndex'));
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
             const existingIndex = metadata.indexes.find(idx =>
@@ -378,7 +379,7 @@ export class EntityTypeBuilder<T> {
      * Configures a unique constraint
      */
     hasUnique(selector: (entity: T) => any, options?: { name?: string }): this {
-        const propertyName = extractPropertyName(selector);
+        const propertyName = resolvePropertyName(selector, 'hasUnique');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
             const existingConstraint = metadata.uniqueConstraints.find(uc =>
@@ -402,7 +403,7 @@ export class EntityTypeBuilder<T> {
         navigationProperty: (entity: T) => TRelated[],
         relatedEntityType: new () => TRelated
     ): RelationshipBuilder<T, TRelated> {
-        const propertyName = extractPropertyName(navigationProperty);
+        const propertyName = resolvePropertyName(navigationProperty, 'hasMany');
 
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
@@ -432,7 +433,7 @@ export class EntityTypeBuilder<T> {
         navigationProperty: (entity: T) => TRelated,
         relatedEntityType: new () => TRelated
     ): RelationshipBuilder<T, TRelated> {
-        const propertyName = extractPropertyName(navigationProperty);
+        const propertyName = resolvePropertyName(navigationProperty, 'hasOne');
 
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
@@ -463,7 +464,7 @@ export class EntityTypeBuilder<T> {
         relatedEntityType: new () => TRelated,
         options?: { joinTable?: string; leftKey?: string; rightKey?: string }
     ): RelationshipBuilder<T, TRelated> {
-        const propertyName = extractPropertyName(navigationProperty);
+        const propertyName = resolvePropertyName(navigationProperty, 'hasManyToMany');
 
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
@@ -536,12 +537,23 @@ export class EntityTypeBuilder<T> {
     hasQueryFilter(conditions: QueryFilterCondition | QueryFilterCondition[]): this;
     hasQueryFilter(filter: ((entity: T) => boolean) | QueryFilterCondition | QueryFilterCondition[]): this {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
-        if (metadata) {
-            if (typeof filter === 'function') {
+        if (typeof filter === 'function') {
+            if (metadata) {
                 metadata.queryFilter = filter as any;
-            } else {
-                metadata.queryFilterConditions = Array.isArray(filter) ? filter : [filter];
             }
+            return this;
+        }
+
+        // Validate operators at configuration time so a typo in a filter fails
+        // once, inside onModelCreating(), instead of on every read that
+        // compiles the filter. Validation happens before anything is stored, so
+        // a rejected configuration leaves no half-registered filter behind.
+        const conditions = Array.isArray(filter) ? filter : [filter];
+        for (const condition of conditions) {
+            assertOperator(condition.operator, 'hasQueryFilter');
+        }
+        if (metadata) {
+            metadata.queryFilterConditions = conditions;
         }
         return this;
     }
@@ -601,7 +613,7 @@ export class EntityTypeBuilder<T> {
             columnPrefix?: string;
         }
     ): this {
-        const propertyName = extractPropertyName(navigationProperty);
+        const propertyName = resolvePropertyName(navigationProperty, 'ownsOne');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
 
         if (metadata) {
@@ -632,7 +644,7 @@ export class EntityTypeBuilder<T> {
         navigationProperty: (entity: T) => TOwned[],
         ownedEntityType: new () => TOwned
     ): this {
-        const propertyName = extractPropertyName(navigationProperty);
+        const propertyName = resolvePropertyName(navigationProperty, 'ownsMany');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
 
         if (metadata) {

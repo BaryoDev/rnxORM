@@ -112,6 +112,47 @@ describe('Actual API Integration Tests', () => {
                 expect((await users.where('name', 'LIKE', '%3').toList()).map(u => u.name)).toEqual(['User3']);
             });
 
+            it('should support IN / NOT IN / IS / IS NOT against a real driver', async () => {
+                const users = db.set(ApiTestUser);
+
+                for (let i = 1; i <= 5; i++) {
+                    const user = new ApiTestUser();
+                    user.id = i;
+                    user.name = `User${i}`;
+                    user.email = `user${i}@test.com`;
+                    user.age = 20 + i;
+                    users.add(user);
+                }
+                await db.saveChanges();
+
+                // The placeholder-expansion hazard: the condition after an IN
+                // must bind to the parameter AFTER the whole expanded list, and
+                // the condition after an IS NULL must not skip an index. Each
+                // driver numbers placeholders differently, so this only proves
+                // itself against real databases.
+                expect((await users.where('age', 'IN', [21, 23, 25]).toList()).map(u => u.name).sort())
+                    .toEqual(['User1', 'User3', 'User5']);
+                expect((await users.where('age', 'IN', [21, 23, 25]).where('name', '=', 'User3').toList())
+                    .map(u => u.name)).toEqual(['User3']);
+                expect(await users.where('age', 'NOT IN', [21, 22]).count()).toBe(3);
+                expect(await users.where('email', 'IS NOT', null).count()).toBe(5);
+                expect(await users.where('email', 'IS', null).count()).toBe(0);
+                expect((await users.where('email', 'IS NOT', null).where('age', '=', 22).toList())
+                    .map(u => u.name)).toEqual(['User2']);
+                // An empty set is a constant, not a syntax error.
+                expect(await users.where('age', 'IN', []).count()).toBe(0);
+                expect(await users.where('age', 'NOT IN', []).count()).toBe(5);
+            });
+
+            it('should reject a non-integer take() before it reaches the driver', async () => {
+                const users = db.set(ApiTestUser);
+                expect(() => users.take('10; DROP TABLE api_test_users --' as any)).toThrow(/take\(\)/);
+
+                // The table is still there.
+                const count = await users.count();
+                expect(count).toBe(0);
+            });
+
             it('should handle ORDER BY', async () => {
                 const users = db.set(ApiTestUser);
 
