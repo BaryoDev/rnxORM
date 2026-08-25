@@ -183,12 +183,15 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 - **Repository Pattern**: `DbSet<T>` with integrated change tracking
 - **Query Optimization**: `.asNoTracking()` skips change tracking for read-only queries
 - **Primary Key Lookup**: `.find(id)`
-- **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })` conditions are **translated to SQL WHERE clauses** on every query path (`toList`, `find`, `where()` chains, aggregates, projections), so filtered rows never leave the database. Bypass per-query with `ignoreQueryFilters()`. See [Global Query Filters](#global-query-filters)
+- **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })` conditions are **translated to SQL WHERE clauses** on every query path (`toList`, `find`, `where()` chains, aggregates, projections, `groupBy()`), so filtered rows never leave the database. Bypass per-query with `ignoreQueryFilters()`. See [Global Query Filters](#global-query-filters)
+- **Identifier & operator validation**: `where()`/`orderBy()`/`having()` and query-filter conditions validate column names against entity metadata and operators against a closed set at runtime — injected strings throw before SQL is assembled. See [Query Operators](#query-operators) and [SECURITY.md](SECURITY.md)
+- **Identity map**: loading the same row twice returns the **same tracked instance** (keyed by entity type + primary key), so re-queries can't create conflicting tracked copies and local unsaved modifications survive a re-query. `asNoTracking()` results are never identity-mapped
+- **Selector capture (no regex parsing)**: lambda selectors (`include`, aggregates, `select`, `groupBy`, ModelBuilder, decorators) are resolved by a recording Proxy; nested paths and computed expressions fail loudly instead of silently resolving to a wrong column
 - **Migration CLI**: `npx rnxorm migration:create|run|revert|status` — run/revert/status load a `rnxorm.config.js` exporting a `createMigrator()` factory. See [Migrations](#migrations)
 
 ### Partial ⚠️
 
-- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are parsed with regex-based string matching, not a real expression parser. Simple shapes like `u => ({ name: u.name })` and `g.count()` / `g.sum(u => u.prop)` translate to SQL; anything more complex silently falls back to fetching all rows and projecting in memory. See [LINQ-Style Query API](#linq-style-query-api)
+- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`) — TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. Nested paths (`u => u.address.city`) throw instead of silently resolving to the wrong column. See [LINQ-Style Query API](#linq-style-query-api)
 - **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched** — it is never translated to SQL. Prefer the structured-condition form, which is. See [Global Query Filters](#global-query-filters)
 - **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects — write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB. Global query filters on raw SQL results are evaluated in memory
 - **Keyless Entity Types**: `hasNoKey()` works for querying views; read-only behavior is not enforced (no error if you try to track one)
@@ -233,12 +236,17 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Data seeding (idempotent `hasData()`) | `test/unit/ModelBuilder.test.ts` |
 | Decorator metadata registration | `test/unit/MetadataStorage.test.ts` |
 | Type mapping table, placeholder syntax, dialect identifiers | `test/unit/ProviderTypeMapping.test.ts` (also pins the capture provider's parity with real providers) |
+| Selector capture (Proxy, nested/computed classification, aggregates, `g.key`) | `test/unit/PropertyCapture.test.ts` (36 tests), renamed-column proof tests in `test/unit/SqlGeneration.test.ts` |
+| Identifier & operator validation (injection payloads rejected end-to-end) | `test/unit/Injection.test.ts` (46 tests) |
+| Query filters on every read path incl. `groupBy()`, having-placeholder ordering, legacy-lambda limitations | `test/unit/QueryFilterCoverage.test.ts` |
+| Row→entity mapping characterization (both paths, converters, shadow columns, tracking) | `test/unit/EntityMapper.test.ts` |
+| Identity map (same instance on re-query, eviction, no-tracking exclusion) | `test/unit/IdentityMap.test.ts` |
 
 If a claim in this README is not represented in this map or the linked suites, treat it as unverified and [open an issue](https://github.com/BaryoDev/rnxORM/issues).
 
 ### Testing status
 
-The test suite (286 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
+The test suite (423 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
 
 ## Type Mapping
 
@@ -265,16 +273,17 @@ price!: number;
 
 ## Query Operators
 
-The `.where(column, operator, value)` method passes the operator **verbatim** into the generated SQL, so any comparison operator your database supports works. Values are always bound as parameters (never interpolated). Common operators verified against all three engines by the integration suite: `=`, `!=`/`<>`, `>`, `<`, `>=`, `<=`, `LIKE`.
+`.where(column, operator, value)` validates both identifier arguments at runtime before any SQL is assembled: the **column** must be a mapped property or column of the entity (renamed columns resolve to their mapped name), and the **operator** must come from the closed set `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`, `NOT LIKE`. Anything else throws. Values are always bound as parameters (never interpolated). The same validation guards `orderBy()`, `orderByDescending()`, `having()` (aggregate-over-mapped-column shapes only), and structured query-filter conditions.
+
+`where` and `orderBy` also carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. The plain-string forms remain supported for dynamic columns — now safe to use with untrusted input like `orderBy(req.query.sort)`, which throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
 
 ```typescript
 // Examples
 users.where("age", ">=", 21);
 users.where("name", "LIKE", "%doe%");
 users.where("name", "ILIKE", "%doe%"); // ILIKE is PostgreSQL-only
+users.where("age; DROP TABLE users", "=", 1); // throws: not a mapped column
 ```
-
-> **Note**: because column and operator strings are placed into the SQL as-is, they must come from your code, never from user input. Only the `value` argument is parameterized.
 
 ## Change Tracking & SaveChanges()
 
@@ -960,9 +969,11 @@ const activeCount = await db.set(User).count();
 ```
 
 > **Scope**: structured filters apply to `toList()`, `find()`, `where()`
-> chains, aggregates (`count`/`sum`/`average`/`min`/`max`), and `select()`
-> projections. `groupBy()` queries and raw SQL are not rewritten — raw SQL
-> results are filtered in memory instead.
+> chains, aggregates (`count`/`sum`/`average`/`min`/`max`), `select()`
+> projections, and `groupBy()` queries (injected into the WHERE clause ahead
+> of GROUP BY/HAVING). Raw SQL is the one path that is not rewritten — raw
+> SQL results are filtered in memory instead. Filters are a convenience, not
+> a tenant-isolation boundary; see [SECURITY.md](SECURITY.md).
 
 ### Bypassing Query Filters
 

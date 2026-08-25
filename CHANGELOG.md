@@ -1,8 +1,54 @@
 # Changelog
 
-## 2.2.0 (2026-08-07)
+## 2.2.0 (unreleased)
+
+### Security
+
+- **Runtime identifier and operator validation** (issues #13/#24).
+  `where()`, `orderBy()`, `orderByDescending()`, and `having()` on every
+  builder validate the column against entity metadata (accepting property or
+  column spelling; renamed properties resolve to their mapped column) and the
+  operator against a closed set (`=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`,
+  `LIKE`, `ILIKE`, `NOT LIKE`). Structured query-filter operators pass
+  through the same set. Injected strings — including the
+  `orderBy(req.query.sort)` pattern — now throw before any SQL is assembled.
+  Previously column and operator were interpolated verbatim. Added
+  `SECURITY.md` documenting the protection boundary.
 
 ### Added
+
+- **Identity map** (issue #5). Loading the same row twice returns the same
+  tracked instance, keyed by entity type + primary key. Local unsaved
+  modifications survive a re-query; deletion and `changeTracker.clear()`
+  evict; `asNoTracking()` results are never identity-mapped.
+- **Recording-Proxy selector capture** (issues #3/#21/#16/#17).
+  `src/core/expressions/PropertyCapture.ts` replaces regex parsing of lambda
+  selectors everywhere (include, aggregates, select/groupBy projections,
+  ModelBuilder, decorators). Nested paths (`u => u.address.city`) and
+  computed selectors now fail loudly or fall back explicitly instead of
+  silently resolving to a wrong column. `groupBy().select()` gains `g.key`
+  aliasing and a working `g.average()`.
+- **Typed `where`/`orderBy` overloads** (`keyof T`) for editor autocomplete,
+  additive over the string forms (issue #26's runtime half).
+- **Query filters now apply to `groupBy()`** (issue #23's last gap), injected
+  ahead of GROUP BY/HAVING with placeholder ordering preserved;
+  `ignoreQueryFilters()` respected.
+- Publish gate: `release.yml` runs the full suite against real PostgreSQL,
+  MariaDB, and SQL Server before `npm publish` (dry-run by default; issue #6).
+- Issue and PR templates (issue #11's remainder).
+
+### Changed (breaking for undocumented usage)
+
+- `where()`/`orderBy()`/`having()` now **throw** on unmapped columns and
+  unknown operators instead of emitting them into SQL. Code passing invalid
+  identifiers was generating broken or dangerous SQL before; it now fails at
+  the call site.
+- A `select()` projection naming an unmapped property now **throws** instead
+  of silently returning `SELECT *`-based results.
+- `extractPropertyName` (regex selector parsing) is removed from the public
+  API, replaced by the PropertyCapture module.
+
+### Added (from the earlier unreleased 2.2.0 work)
 
 - **SQL-translated global query filters.** `hasQueryFilter()` now accepts
   structured conditions — `{ property, operator, value }` or an array of them —
