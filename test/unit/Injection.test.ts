@@ -116,3 +116,50 @@ describe('assertColumnOrAlias', () => {
         expect(() => assertColumnOrAlias(InjProduct, name, 'orderBy')).toThrow();
     });
 });
+
+// End-to-end: the validation actually guards the public query API.
+import { DbContext } from '../../src/core/DbContext';
+import { SqlCaptureProvider } from '../mocks/SqlCaptureProvider';
+
+describe('query API rejects untrusted identifiers end-to-end', () => {
+    function makeDb() {
+        const provider = new SqlCaptureProvider('postgresql');
+        return { db: new DbContext(provider), provider };
+    }
+
+    it('where() rejects an injected column before any SQL is built', () => {
+        const { db, provider } = makeDb();
+        expect(() => db.set(InjProduct).where('name; DROP TABLE inj_products; --', '=', 'x'))
+            .toThrow(/InjProduct/);
+        expect(provider.calls).toHaveLength(0);
+    });
+
+    it('where() rejects an injected operator', () => {
+        const { db } = makeDb();
+        expect(() => db.set(InjProduct).where('name', '= 1 OR 1', 'x')).toThrow(/not supported/);
+    });
+
+    it('orderBy() rejects the classic sortable-table payload', () => {
+        const { db } = makeDb();
+        expect(() => db.set(InjProduct).orderBy('name; SELECT pg_sleep(10)')).toThrow(/InjProduct/);
+    });
+
+    it('having() rejects non-aggregate expressions', () => {
+        const { db } = makeDb();
+        expect(() =>
+            db.set(InjProduct).groupBy(p => p.name).having('COUNT(*) > 0; DROP TABLE x', '>', 1)
+        ).toThrow();
+    });
+
+    it('where() resolves a renamed property to its mapped column', async () => {
+        const { db, provider } = makeDb();
+        await db.set(InjProduct).where('price', '>', 10).toList();
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products WHERE unit_price > $1');
+    });
+
+    it('keyword operators are normalized into SQL', async () => {
+        const { db, provider } = makeDb();
+        await db.set(InjProduct).where('name', 'like', '%a%').toList();
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products WHERE name LIKE $1');
+    });
+});

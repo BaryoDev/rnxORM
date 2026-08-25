@@ -1,5 +1,6 @@
 import { IDatabaseProvider } from "../providers/IDatabaseProvider";
 import { EntityMetadata } from "./MetadataStorage";
+import { assertOperator } from "./Identifiers";
 
 /**
  * A global query filter compiled to parameterized SQL fragments.
@@ -42,8 +43,11 @@ export function compileQueryFilter(
             value = column.convertToDb(value);
         }
 
+        // The operator string reaches SQL, so it goes through the same closed
+        // set as where() — filter conditions are data, not trusted SQL.
+        const operator = assertOperator(condition.operator, 'hasQueryFilter');
         const placeholder = provider.getParameterPlaceholder(startIndex + compiled.params.length);
-        compiled.clauses.push(`${column.columnName} ${condition.operator} ${placeholder}`);
+        compiled.clauses.push(`${column.columnName} ${operator} ${placeholder}`);
         compiled.params.push(value);
     }
 

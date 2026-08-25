@@ -223,22 +223,20 @@ describe('ignoreQueryFilters() omits the structured filter', () => {
     });
 });
 
-describe('documented limitation: structured filters are NOT applied to groupBy()', () => {
-    // Reading GroupedQueryBuilder.toList() and GroupedSelectBuilder.toList() in
-    // src/core/DbSet.ts shows neither calls compileQueryFilter()/compileFilters()
-    // at all - conditions carried over from a preceding where() are included,
-    // but the entity's global structured query filter never is. This is a
-    // known, currently-unaddressed gap (see issues #23 / #19); it is pinned
-    // here rather than skipped so a future fix shows up as an intentional
-    // test change, not a silent regression.
-    it('bare groupBy().toList() omits the filter entirely', async () => {
+describe('structured filters ARE applied to groupBy() (issue #23, closed)', () => {
+    // These three cases originally pinned the opposite behavior as a
+    // documented limitation. The groupBy() factories now inject the compiled
+    // filter eagerly (before having() can bake placeholder indices), closing
+    // the last read path that ignored structured query filters.
+    it('bare groupBy().toList() includes the filter', async () => {
         const { db, provider } = makeDb();
         await db.set(QfcUser).groupBy((u) => u.name).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users WHERE isdeleted = $1');
+        expect(provider.lastCall!.params).toEqual([false]);
     });
 
-    it('groupBy().select() (aggregated) SQL also omits the filter', async () => {
+    it('groupBy().select() (aggregated) SQL includes the filter', async () => {
         const { db, provider } = makeDb();
         await db
             .set(QfcUser)
@@ -246,10 +244,13 @@ describe('documented limitation: structured filters are NOT applied to groupBy()
             .select((g) => ({ count: g.count() }))
             .toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT name, COUNT(*) as count FROM qfc_users GROUP BY name');
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT name, COUNT(*) as count FROM qfc_users WHERE isdeleted = $1 GROUP BY name'
+        );
+        expect(provider.lastCall!.params).toEqual([false]);
     });
 
-    it('groupBy() inherited from a where() chain keeps the user condition but still drops the filter', async () => {
+    it('groupBy() inherited from a where() chain keeps the user condition and appends the filter', async () => {
         const { db, provider } = makeDb();
         await db
             .set(QfcUser)
@@ -258,7 +259,37 @@ describe('documented limitation: structured filters are NOT applied to groupBy()
             .select((g) => ({ count: g.count() }))
             .toList();
 
-        // 'isdeleted = ...' is absent even though QfcUser has a structured filter.
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT name, COUNT(*) as count FROM qfc_users WHERE salary > $1 AND isdeleted = $2 GROUP BY name'
+        );
+        expect(provider.lastCall!.params).toEqual([0, false]);
+    });
+
+    it('having() placeholders stay correct with the filter injected before them', async () => {
+        const { db, provider } = makeDb();
+        await db
+            .set(QfcUser)
+            .groupBy((u) => u.name)
+            .having('COUNT(*)', '>', 5)
+            .select((g) => ({ count: g.count() }))
+            .toList();
+
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT name, COUNT(*) as count FROM qfc_users WHERE isdeleted = $1 GROUP BY name HAVING COUNT(*) > $2'
+        );
+        expect(provider.lastCall!.params).toEqual([false, 5]);
+    });
+
+    it('ignoreQueryFilters() before groupBy() skips the filter', async () => {
+        const { db, provider } = makeDb();
+        await db
+            .set(QfcUser)
+            .where('salary', '>', 0)
+            .ignoreQueryFilters()
+            .groupBy((u) => u.name)
+            .select((g) => ({ count: g.count() }))
+            .toList();
+
         expect(provider.lastCall!.sql).toBe(
             'SELECT name, COUNT(*) as count FROM qfc_users WHERE salary > $1 GROUP BY name'
         );

@@ -3,6 +3,7 @@ import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
+import { assertColumn, assertColumnOrAlias, assertHavingExpression, assertOperator } from "./Identifiers";
 
 /** Renders a captured aggregate into its SQL function call. `col` is undefined for count(). */
 const AGG_SQL: Record<AggregateFn, (col?: string) => string> = {
@@ -111,6 +112,8 @@ export class DbSet<T> {
 
     // Simple Fluent API for WHERE
     // usage: dbSet.where("age", ">", 18).toList()
+    where(column: keyof T & string, operator: string, value: any): QueryBuilder<T>;
+    where(column: string, operator: string, value: any): QueryBuilder<T>;
     where(column: string, operator: string, value: any): QueryBuilder<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).where(column, operator, value);
     }
@@ -307,7 +310,8 @@ export class DbSet<T> {
      */
     groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
         const propertyName = resolvePropertyName(selector, 'groupBy');
-        return new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
+        const builder = new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
+        return builder.applyQueryFilter();
     }
 
     /**
@@ -413,10 +417,17 @@ export class QueryBuilder<T> {
         this.noTracking = noTracking;
     }
 
+    where(column: keyof T & string, operator: string, value: any): this;
+    where(column: string, operator: string, value: any): this;
     where(column: string, operator: string, value: any): this {
+        // Column and operator are validated against metadata and a closed
+        // operator set before touching SQL (issues #13/#24); the value is
+        // always bound as a parameter.
+        const sqlColumn = assertColumn(this.entityType, column, 'where');
+        const sqlOperator = assertOperator(operator, 'where');
         const provider = this.context.getProvider();
         const placeholder = provider.getParameterPlaceholder(this.params.length + 1);
-        this.conditions.push(`${column} ${operator} ${placeholder}`);
+        this.conditions.push(`${sqlColumn} ${sqlOperator} ${placeholder}`);
         this.params.push(value);
         return this;
     }
@@ -448,16 +459,20 @@ export class QueryBuilder<T> {
     /**
      * Order results by column ascending
      */
+    orderBy(column: keyof T & string): this;
+    orderBy(column: string): this;
     orderBy(column: string): this {
-        this.orderByColumns.push({ column, direction: 'ASC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
     /**
      * Order results by column descending
      */
+    orderByDescending(column: keyof T & string): this;
+    orderByDescending(column: string): this;
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column, direction: 'DESC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -749,6 +764,9 @@ export class QueryBuilder<T> {
         // Copy current query state (WHERE conditions)
         builder['conditions'] = [...this.conditions];
         builder['params'] = [...this.params];
+        if (!this.ignoreFilters) {
+            builder.applyQueryFilter();
+        }
         return builder;
     }
 
@@ -979,10 +997,14 @@ export class SelectQueryBuilder<T, TResult> {
     /**
      * Add a WHERE condition
      */
+    where(column: keyof T & string, operator: string, value: any): this;
+    where(column: string, operator: string, value: any): this;
     where(column: string, operator: string, value: any): this {
+        const sqlColumn = assertColumn(this.entityType, column, 'where');
+        const sqlOperator = assertOperator(operator, 'where');
         const provider = this.context.getProvider();
         const placeholder = provider.getParameterPlaceholder(this.params.length + 1);
-        this.conditions.push(`${column} ${operator} ${placeholder}`);
+        this.conditions.push(`${sqlColumn} ${sqlOperator} ${placeholder}`);
         this.params.push(value);
         return this;
     }
@@ -991,7 +1013,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Order results by column ascending
      */
     orderBy(column: string): this {
-        this.orderByColumns.push({ column, direction: 'ASC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -999,7 +1021,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Order results by column descending
      */
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column, direction: 'DESC' });
+        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -1251,6 +1273,23 @@ export class GroupedQueryBuilder<T, TKey> {
     ) {}
 
     /**
+     * Inject compiled global query filters as WHERE conditions.
+     * @internal Called by the groupBy() factories, and deliberately BEFORE the
+     * caller can invoke having(): having() bakes placeholder indices from the
+     * current params length at call time, so filters appended any later would
+     * silently shift every HAVING placeholder (issue #23 — groupBy was the
+     * last read path that ignored structured query filters). Function-valued
+     * filter conditions are therefore resolved when groupBy() is called.
+     */
+    applyQueryFilter(): this {
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const filter = compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
+        this.conditions.push(...filter.clauses);
+        this.params.push(...filter.params);
+        return this;
+    }
+
+    /**
      * Filter groups using HAVING clause
      * @param column Aggregate column or group column
      * @param operator Comparison operator
@@ -1258,18 +1297,23 @@ export class GroupedQueryBuilder<T, TKey> {
      * @example groupBy(u => u.dept).having('COUNT(*)', '>', 5)
      */
     having(column: string, operator: string, value: any): this {
+        // Only aggregate-over-mapped-column expressions or mapped columns are
+        // accepted; the operator comes from the closed set (issues #13/#24).
+        const sqlExpression = assertHavingExpression(this.entityType, column, 'having');
+        const sqlOperator = assertOperator(operator, 'having');
         const provider = this.context.getProvider();
         const placeholder = provider.getParameterPlaceholder(this.params.length + this.havingParams.length + 1);
-        this.havingConditions.push(`${column} ${operator} ${placeholder}`);
+        this.havingConditions.push(`${sqlExpression} ${sqlOperator} ${placeholder}`);
         this.havingParams.push(value);
         return this;
     }
 
     /**
-     * Order grouped results
+     * Order grouped results. Accepts a mapped column or a projection alias
+     * from the select() list; aliases must be plain identifiers.
      */
     orderBy(column: string): this {
-        this.orderByColumns.push({ column, direction: 'ASC' });
+        this.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -1277,7 +1321,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Order grouped results descending
      */
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column, direction: 'DESC' });
+        this.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
