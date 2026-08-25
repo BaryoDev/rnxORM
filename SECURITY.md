@@ -31,6 +31,17 @@ Honest scope, so you can threat-model correctly:
   `orderBy(req.query.sort)` fails loudly instead of reaching SQL. On 2.1.x and
   earlier these were interpolated unvalidated — do not pass untrusted input to
   them on old versions.
+  One documented exception: `orderBy()` on a **grouped** query also accepts a
+  projection alias, which exists only in the SELECT list and cannot be checked
+  against entity metadata. Such aliases are required to be plain identifiers
+  (`^[A-Za-z_][A-Za-z0-9_]*$`), so injection-shaped strings — anything with
+  quotes, whitespace, semicolons, or comment markers — are still rejected.
+- **Row limits are validated at runtime** (2.2.0+): `skip()` and `take()` must
+  receive a non-negative integer. They are the only query-API arguments that
+  are interpolated rather than bound (no driver accepts a parameter for
+  `LIMIT`/`OFFSET` everywhere), and TypeScript's `number` type erases at
+  runtime, so an untyped `req.query.limit` reaching them used to be an
+  injection vector. It now throws before SQL is assembled.
 - **Raw SQL is yours.** `fromSqlRaw()` / `executeSqlRaw()` execute exactly what
   you pass; parameterize your own inputs.
 - **Global query filters are a convenience, not an isolation boundary.** Do not

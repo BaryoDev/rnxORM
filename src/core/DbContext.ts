@@ -209,18 +209,28 @@ export class DbContext {
 
         const result = await this.provider.query(sql, values);
 
+        // A generated key comes back in the database's own representation, so
+        // it goes through the column's convertFromDb before landing on the
+        // entity — the same conversion the row-mapping path applies. Otherwise
+        // a converted key would sit on the entity in its raw form and the
+        // identity map would key insert-then-find differently.
+        const fromDb = (value: any) =>
+            pkColumn?.hasConversion && pkColumn.convertFromDb && value !== undefined && value !== null
+                ? pkColumn.convertFromDb(value)
+                : value;
+
         // Set auto-increment ID if applicable
         if (needsGeneratedId) {
             if (result.insertId !== undefined) {
-                entity[pkColumn.propertyName] = result.insertId;
+                entity[pkColumn.propertyName] = fromDb(result.insertId);
             } else if (result.rows?.length > 0) {
                 const returned = result.rows[0][pkColumn.columnName];
                 if (returned !== undefined && returned !== null) {
-                    entity[pkColumn.propertyName] = typeof returned === 'bigint' ? Number(returned) : returned;
+                    entity[pkColumn.propertyName] = fromDb(typeof returned === 'bigint' ? Number(returned) : returned);
                 }
             }
         } else if (pkColumn && result.insertId !== undefined) {
-            entity[pkColumn.propertyName] = result.insertId;
+            entity[pkColumn.propertyName] = fromDb(result.insertId);
         }
 
         // Register the inserted entity in the identity map so a subsequent

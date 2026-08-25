@@ -3,7 +3,7 @@ import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
-import { assertColumn, assertColumnOrAlias, assertHavingExpression, assertOperator } from "./Identifiers";
+import { assertColumn, assertColumnOrAlias, assertHavingExpression, assertLimit, buildComparison } from "./Identifiers";
 
 /** Renders a captured aggregate into its SQL function call. `col` is undefined for count(). */
 const AGG_SQL: Record<AggregateFn, (col?: string) => string> = {
@@ -152,6 +152,8 @@ export class DbSet<T> {
     /**
      * Order results by column ascending
      */
+    orderBy(column: keyof T & string): QueryBuilder<T>;
+    orderBy(column: string): QueryBuilder<T>;
     orderBy(column: string): QueryBuilder<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).orderBy(column);
     }
@@ -159,6 +161,8 @@ export class DbSet<T> {
     /**
      * Order results by column descending
      */
+    orderByDescending(column: keyof T & string): QueryBuilder<T>;
+    orderByDescending(column: string): QueryBuilder<T>;
     orderByDescending(column: string): QueryBuilder<T> {
         return new QueryBuilder(this.entityType, this.context, this.tableName).orderByDescending(column);
     }
@@ -474,13 +478,15 @@ export class QueryBuilder<T> {
     where(column: string, operator: string, value: any): this {
         // Column and operator are validated against metadata and a closed
         // operator set before touching SQL (issues #13/#24); the value is
-        // always bound as a parameter.
+        // always bound as a parameter. buildComparison owns placeholder
+        // expansion, so IN binds one placeholder per element and IS binds none
+        // — the next condition numbers from the updated params length.
         const sqlColumn = assertColumn(this.entityType, column, 'where');
-        const sqlOperator = assertOperator(operator, 'where');
-        const provider = this.context.getProvider();
-        const placeholder = provider.getParameterPlaceholder(this.params.length + 1);
-        this.conditions.push(`${sqlColumn} ${sqlOperator} ${placeholder}`);
-        this.params.push(value);
+        const comparison = buildComparison(
+            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where'
+        );
+        this.conditions.push(comparison.clause);
+        this.params.push(...comparison.params);
         return this;
     }
 
@@ -532,7 +538,7 @@ export class QueryBuilder<T> {
      * Skip N results (for pagination)
      */
     skip(count: number): this {
-        this.skipCount = count;
+        this.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -540,7 +546,7 @@ export class QueryBuilder<T> {
      * Take N results (limit)
      */
     take(count: number): this {
-        this.takeCount = count;
+        this.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -822,6 +828,15 @@ export class QueryBuilder<T> {
         return builder;
     }
 
+    /**
+     * Eager-load the requested relations for the already-materialized entities.
+     *
+     * Every related row is mapped with this query's context, so related
+     * entities are change-tracked and identity-mapped exactly like the roots
+     * are (issue #5's "wrong object graphs on eager load"): including an entity
+     * that is already tracked yields the SAME instance, local edits included.
+     * `asNoTracking()` still propagates and keeps the whole graph untracked.
+     */
     private async loadIncludes(entities: T[]): Promise<void> {
         if (entities.length === 0) return;
 
@@ -877,7 +892,7 @@ export class QueryBuilder<T> {
         // Map related entities by their primary key
         const relatedEntitiesMap = new Map();
         res.rows.forEach((row: any) => {
-            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking);
+            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn], relatedEntity);
         });
 
@@ -919,7 +934,7 @@ export class QueryBuilder<T> {
         // Group related entities by foreign key
         const relatedEntitiesMap = new Map<any, any[]>();
         res.rows.forEach((row: any) => {
-            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking);
+            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             const fkValue = row[foreignKeyColumn];
 
             if (!relatedEntitiesMap.has(fkValue)) {
@@ -978,7 +993,7 @@ export class QueryBuilder<T> {
         // Map related entities
         const relatedEntitiesMap = new Map();
         relatedRes.rows.forEach((row: any) => {
-            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking);
+            const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn.columnName], relatedEntity);
         });
 
@@ -1053,17 +1068,19 @@ export class SelectQueryBuilder<T, TResult> {
     where(column: string, operator: string, value: any): this;
     where(column: string, operator: string, value: any): this {
         const sqlColumn = assertColumn(this.entityType, column, 'where');
-        const sqlOperator = assertOperator(operator, 'where');
-        const provider = this.context.getProvider();
-        const placeholder = provider.getParameterPlaceholder(this.params.length + 1);
-        this.conditions.push(`${sqlColumn} ${sqlOperator} ${placeholder}`);
-        this.params.push(value);
+        const comparison = buildComparison(
+            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where'
+        );
+        this.conditions.push(comparison.clause);
+        this.params.push(...comparison.params);
         return this;
     }
 
     /**
      * Order results by column ascending
      */
+    orderBy(column: keyof T & string): this;
+    orderBy(column: string): this;
     orderBy(column: string): this {
         this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
@@ -1072,6 +1089,8 @@ export class SelectQueryBuilder<T, TResult> {
     /**
      * Order results by column descending
      */
+    orderByDescending(column: keyof T & string): this;
+    orderByDescending(column: string): this;
     orderByDescending(column: string): this {
         this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
@@ -1081,7 +1100,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Skip N results
      */
     skip(count: number): this {
-        this.skipCount = count;
+        this.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -1089,7 +1108,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Take N results
      */
     take(count: number): this {
-        this.takeCount = count;
+        this.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -1316,6 +1335,7 @@ export class GroupedQueryBuilder<T, TKey> {
     private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
     private skipCount?: number;
     private takeCount?: number;
+    private queryFilterApplied: boolean = false;
 
     constructor(
         private entityType: new () => T,
@@ -1334,6 +1354,12 @@ export class GroupedQueryBuilder<T, TKey> {
      * filter conditions are therefore resolved when groupBy() is called.
      */
     applyQueryFilter(): this {
+        // Idempotent: calling it twice would append the filter clauses (and
+        // their parameters) a second time, shifting every later placeholder.
+        if (this.queryFilterApplied) {
+            return this;
+        }
+        this.queryFilterApplied = true;
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         const filter = compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
         this.conditions.push(...filter.clauses);
@@ -1351,12 +1377,19 @@ export class GroupedQueryBuilder<T, TKey> {
     having(column: string, operator: string, value: any): this {
         // Only aggregate-over-mapped-column expressions or mapped columns are
         // accepted; the operator comes from the closed set (issues #13/#24).
+        // HAVING placeholders are numbered after the WHERE parameters, which is
+        // why applyQueryFilter() must have run before this point.
         const sqlExpression = assertHavingExpression(this.entityType, column, 'having');
-        const sqlOperator = assertOperator(operator, 'having');
-        const provider = this.context.getProvider();
-        const placeholder = provider.getParameterPlaceholder(this.params.length + this.havingParams.length + 1);
-        this.havingConditions.push(`${sqlExpression} ${sqlOperator} ${placeholder}`);
-        this.havingParams.push(value);
+        const comparison = buildComparison(
+            sqlExpression,
+            operator,
+            value,
+            this.context.getProvider(),
+            this.params.length + this.havingParams.length + 1,
+            'having'
+        );
+        this.havingConditions.push(comparison.clause);
+        this.havingParams.push(...comparison.params);
         return this;
     }
 
@@ -1381,7 +1414,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Skip N groups
      */
     skip(count: number): this {
-        this.skipCount = count;
+        this.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -1389,7 +1422,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Take N groups
      */
     take(count: number): this {
-        this.takeCount = count;
+        this.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -1606,6 +1639,15 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
         const clauseFor = ([alias, entry]: [string, AggregateSelectorEntry]): string => {
             if ('kind' in entry) {
                 return `${groupColumnName} AS ${alias}`;
+            }
+            // count() is the only aggregate that is meaningful without a column
+            // (it renders COUNT(*)). Every other one needs a selector, or the
+            // rendered SQL would read `SUM(undefined)`.
+            if (entry.fn !== 'count' && entry.path === undefined) {
+                throw new Error(
+                    `groupBy().select(): g.${entry.fn}() requires a column selector, ` +
+                    `e.g. g.${entry.fn}(x => x.total)`
+                );
             }
             const column = entry.path ? columnFor(entry.path) : undefined;
             return `${AGG_SQL[entry.fn](column)} as ${alias}`;

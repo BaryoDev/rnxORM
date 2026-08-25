@@ -1,5 +1,6 @@
 import { MetadataStorage, RelationType, CascadeOption, QueryFilterCondition } from "./MetadataStorage";
 import { resolvePropertyName } from "./expressions/PropertyCapture";
+import { assertOperator } from "./Identifiers";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Constructor<T = any> = new (...args: any[]) => T;
@@ -536,12 +537,23 @@ export class EntityTypeBuilder<T> {
     hasQueryFilter(conditions: QueryFilterCondition | QueryFilterCondition[]): this;
     hasQueryFilter(filter: ((entity: T) => boolean) | QueryFilterCondition | QueryFilterCondition[]): this {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
-        if (metadata) {
-            if (typeof filter === 'function') {
+        if (typeof filter === 'function') {
+            if (metadata) {
                 metadata.queryFilter = filter as any;
-            } else {
-                metadata.queryFilterConditions = Array.isArray(filter) ? filter : [filter];
             }
+            return this;
+        }
+
+        // Validate operators at configuration time so a typo in a filter fails
+        // once, inside onModelCreating(), instead of on every read that
+        // compiles the filter. Validation happens before anything is stored, so
+        // a rejected configuration leaves no half-registered filter behind.
+        const conditions = Array.isArray(filter) ? filter : [filter];
+        for (const condition of conditions) {
+            assertOperator(condition.operator, 'hasQueryFilter');
+        }
+        if (metadata) {
+            metadata.queryFilterConditions = conditions;
         }
         return this;
     }

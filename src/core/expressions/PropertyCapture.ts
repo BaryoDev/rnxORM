@@ -44,10 +44,13 @@ function isPlainObject(value: any): boolean {
 interface Recorder {
     root: any;
     coerced: () => boolean;
+    /** Total root property accesses, counting repeats (see capture). */
+    accesses: () => number;
 }
 
 function createRecorder(): Recorder {
     let coerced = false;
+    let accesses = 0;
 
     const marker = (path: string): any => {
         const base: any = function () {
@@ -81,15 +84,90 @@ function createRecorder(): Recorder {
                 coerced = true;
                 return undefined;
             }
+            accesses++;
             return marker(String(prop));
         },
     });
 
-    return { root, coerced: () => coerced };
+    return { root, coerced: () => coerced, accesses: () => accesses };
 }
 
+/**
+ * Result of re-running a selector against a root whose every property reads as
+ * `undefined` — the "nullish probe" described in capture().
+ */
+interface NullishProbe {
+    accesses: number;
+    returned: any;
+    threw: boolean;
+}
+
+function probeNullish(selector: (entity: any) => any): NullishProbe {
+    const state = { accesses: 0 };
+    const root = new Proxy({} as any, {
+        get(_target, prop) {
+            if (prop === 'then' || typeof prop === 'symbol') return undefined;
+            state.accesses++;
+            return undefined;
+        },
+    });
+
+    try {
+        // The selector must run before the count is read.
+        const returned = selector(root);
+        return { accesses: state.accesses, returned, threw: false };
+    } catch {
+        return { accesses: state.accesses, returned: undefined, threw: true };
+    }
+}
+
+/** True when the probe's return value is what a faithful column selector produces. */
+function probeReturnedOnlyUndefined(returned: any, aliases?: string[]): boolean {
+    if (aliases === undefined) {
+        return returned === undefined;
+    }
+    if (returned === null || typeof returned !== 'object') return false;
+    const keys = Object.keys(returned);
+    if (keys.length !== aliases.length || !aliases.every(a => keys.includes(a))) return false;
+    return keys.every(k => (returned as any)[k] === undefined);
+}
+
+/**
+ * Resolve a selector lambda to the column(s) it names, or report it opaque.
+ *
+ * A selector that *picks between* columns (`u => u.nickname || u.name`,
+ * `u => u.a ?? u.b`, `u => flag ? u.a : u.b`) is not a column reference and must
+ * not be silently resolved to whichever operand happened to be evaluated
+ * (issue I2). Two independent signals catch those, because neither can alone:
+ *
+ * 1. **Root-access count.** A faithful selector performs exactly one root
+ *    property access per marker it returns, so a bare return with more than one
+ *    access — or a projection with more accesses than alias entries — is
+ *    computing something. This is what catches ternaries and `&&`, whose
+ *    condition operand costs an extra access. (Duplicate columns are fine:
+ *    `{a: u.x, b: u.x}` is 2 accesses over 2 entries.)
+ *
+ * 2. **Nullish probe.** `||` and `??` short-circuit on their left operand, and a
+ *    marker is always truthy and non-nullish, so the recorder never observes the
+ *    right operand at all — no proxy trap can see it, and the access count is 1.
+ *    Re-running the selector against a root whose properties all read
+ *    `undefined` forces the other branch: any extra root access, any thrown
+ *    error, or any returned value that is not `undefined` (respectively an
+ *    object of exactly the same aliases all holding `undefined`) means the
+ *    selector contributed something beyond a column reference.
+ *
+ * The probe means the selector is evaluated twice on the success path; selectors
+ * are required to be pure column pickers, so that is safe.
+ *
+ * RESIDUAL BLIND SPOT: a discarded operand that both costs no root access and
+ * evaluates to `undefined` — `u => u.a || undefined`, `u => u.a ?? undefined`,
+ * or a closed-over variable that happens to hold `undefined`. Such an
+ * expression is a semantic no-op (its result is always `u.a`), so resolving it
+ * to column `a` is the correct answer anyway. Conversely, a selector that is
+ * impure or non-deterministic can look computed and fall back conservatively.
+ */
 export function capture(selector: (entity: any) => any): CaptureResult {
-    const { root, coerced } = createRecorder();
+    const { root, coerced, accesses } = createRecorder();
 
     let returned: any;
     try {
@@ -99,12 +177,14 @@ export function capture(selector: (entity: any) => any): CaptureResult {
     }
 
     if (coerced()) return { kind: 'opaque', reason: 'computed' };
+    const accessCount = accesses();
 
     const direct = pathOf(returned);
     if (direct !== undefined) {
-        return direct.includes('.')
-            ? { kind: 'opaque', reason: 'nested' }
-            : { kind: 'property', path: direct };
+        if (direct.includes('.')) return { kind: 'opaque', reason: 'nested' };
+        if (accessCount > 1) return { kind: 'opaque', reason: 'computed' };
+        if (!probeIsFaithful(selector, accessCount)) return { kind: 'opaque', reason: 'computed' };
+        return { kind: 'property', path: direct };
     }
 
     if (isPlainObject(returned)) {
@@ -115,13 +195,30 @@ export function capture(selector: (entity: any) => any): CaptureResult {
             if (path.includes('.')) return { kind: 'opaque', reason: 'nested' };
             aliases[alias] = path;
         }
-        if (Object.keys(aliases).length === 0) {
+        const aliasNames = Object.keys(aliases);
+        if (aliasNames.length === 0) {
             return { kind: 'opaque', reason: 'unsupported' };
+        }
+        if (accessCount > aliasNames.length) return { kind: 'opaque', reason: 'computed' };
+        if (!probeIsFaithful(selector, accessCount, aliasNames)) {
+            return { kind: 'opaque', reason: 'computed' };
         }
         return { kind: 'projection', aliases };
     }
 
     return { kind: 'opaque', reason: 'unsupported' };
+}
+
+/** Run the nullish probe and report whether it agrees with the first pass. */
+function probeIsFaithful(
+    selector: (entity: any) => any,
+    accessCount: number,
+    aliasNames?: string[]
+): boolean {
+    const probe = probeNullish(selector);
+    if (probe.threw) return false;
+    if (probe.accesses !== accessCount) return false;
+    return probeReturnedOnlyUndefined(probe.returned, aliasNames);
 }
 
 // Property names recognized on the `g` grouping object, mapped to the

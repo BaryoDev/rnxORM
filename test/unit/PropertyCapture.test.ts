@@ -101,10 +101,91 @@ describe('capture — opaque detection', () => {
     });
 });
 
+/**
+ * I2: a selector that picks between two columns (`||`, `??`, ternary) used to
+ * resolve to whichever column happened to be reached first, silently dropping
+ * the rest of the expression from the emitted SQL.
+ *
+ * Two independent signals catch these, because neither alone can:
+ *  - the root-access count (a faithful selector touches exactly one root
+ *    property per returned marker), which catches ternaries and any other shape
+ *    that evaluates more than one root access; and
+ *  - a second "nullish probe" evaluation, which catches `||`/`??`, whose left
+ *    operand is a truthy, non-nullish marker in the normal pass and therefore
+ *    short-circuits without the recorder ever observing the right operand.
+ */
+const FALLBACK = 'anonymous';
+
+describe('capture — short-circuit and branching selectors are opaque (I2)', () => {
+    it.each([
+        ['|| between two columns', (u: any) => u.nickname || u.name],
+        ['?? between two columns', (u: any) => u.nickname ?? u.name],
+        ['ternary between two columns', (u: any) => (u.flag ? u.nickname : u.name)],
+        ['|| with a literal fallback', (u: any) => u.nickname || 'anonymous'],
+        ['?? with a closed-over fallback', (u: any) => u.nickname ?? FALLBACK],
+    ])('is opaque for a bare %s', (_label, selector) => {
+        expect(capture(selector)).toEqual({ kind: 'opaque', reason: 'computed' });
+    });
+
+    it.each([
+        ['||', (u: any) => ({ label: u.nickname || u.name })],
+        ['??', (u: any) => ({ label: u.nickname ?? u.name })],
+        ['ternary', (u: any) => ({ label: u.flag ? u.nickname : u.name })],
+        ['literal fallback', (u: any) => ({ label: u.nickname || 'anonymous' })],
+    ])('is opaque for a projection entry using %s', (_label, selector) => {
+        expect(capture(selector)).toEqual({ kind: 'opaque', reason: 'computed' });
+    });
+
+    it('is opaque when one entry of a multi-entry projection short-circuits', () => {
+        expect(capture((u: any) => ({ label: u.nickname || u.name, age: u.age })))
+            .toEqual({ kind: 'opaque', reason: 'computed' });
+    });
+
+    it('is opaque when a reused marker hides a short-circuit', () => {
+        // Compensating shape: aliasing a marker into a local means the extra
+        // operand costs no additional root access, so the access count alone
+        // would let it through — the nullish probe is what catches it.
+        expect(capture((u: any) => {
+            const nick = u.nickname;
+            return { a: nick, b: nick || u.name };
+        })).toEqual({ kind: 'opaque', reason: 'computed' });
+    });
+
+    it('still accepts a faithful projection that names the same column twice', () => {
+        expect(capture((u: any) => ({ a: u.name, b: u.name })))
+            .toEqual({ kind: 'projection', aliases: { a: 'name', b: 'name' } });
+    });
+
+    it('still accepts plain single-property and multi-property selectors', () => {
+        expect(capture((u: any) => u.name)).toEqual({ kind: 'property', path: 'name' });
+        expect(capture((u: any) => ({ n: u.name, a: u.age })))
+            .toEqual({ kind: 'projection', aliases: { n: 'name', a: 'age' } });
+    });
+
+    it('documents the residual blind spot: a fallback that is itself undefined', () => {
+        // `u.a || undefined` is indistinguishable from `u.a` to both signals:
+        // the discarded operand consumes no root access AND evaluates to the
+        // same `undefined` the probe pass produces for a plain column read.
+        // The expression is a semantic no-op, so resolving it to column 'a' is
+        // the correct answer anyway.
+        expect(capture((u: any) => u.nickname || undefined))
+            .toEqual({ kind: 'property', path: 'nickname' });
+    });
+});
+
 describe('capture — safety', () => {
-    it('invokes the selector exactly once', () => {
+    it('invokes the selector at most twice (normal pass + nullish probe)', () => {
+        // The probe pass is what makes `||`/`??` detectable at all (see the I2
+        // block above), so capture is no longer single-invocation. Selectors are
+        // required to be pure column pickers, so a second evaluation is safe.
         let calls = 0;
         capture((u: any) => { calls++; return u.name; });
+        expect(calls).toBe(2);
+    });
+
+    it('does not run the probe pass when the first pass is already opaque', () => {
+        let calls = 0;
+        capture((u: any) => { calls++; return `${u.name}!`; });
         expect(calls).toBe(1);
     });
 
@@ -168,6 +249,11 @@ describe('captureAggregates', () => {
                 kind: 'aggregates',
                 aggregates: { dept: { kind: 'key' }, total: { fn: 'sum', path: 'balance' } },
             });
+    });
+
+    it('inherits the short-circuit rejection through inner selectors (I2)', () => {
+        expect(captureAggregates((g: any) => ({ n: g.sum((u: any) => u.a || u.b) })))
+            .toEqual({ kind: 'opaque', reason: 'unsupported' });
     });
 
     it('is opaque for a genuinely unsupported selector shape', () => {

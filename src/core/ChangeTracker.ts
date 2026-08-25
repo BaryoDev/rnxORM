@@ -1,4 +1,5 @@
 import { EntityEntry, EntityState } from "./EntityEntry";
+import { MetadataStorage } from "./MetadataStorage";
 
 /**
  * Tracks changes to entities loaded from or added to the context
@@ -38,7 +39,34 @@ export class ChangeTracker {
 
         const entry = new EntityEntry<T>(entity, state, originalValues);
         this.trackedEntities.set(entity, entry);
+        this.registerIdentityFromEntity(entity, state);
         return entry;
+    }
+
+    /**
+     * Identity-map an entity that entered tracking without a database round
+     * trip — `attach()`, `update()`, or `add()` with an explicit key. Without
+     * this, a later `find()` for the same key maps a second instance and the
+     * context holds two tracked copies of one row (issue #5's third door).
+     *
+     * Entities with no key value yet (a pending auto-increment insert) are
+     * skipped here and registered by DbContext once the key is backfilled;
+     * Detached entities are deliberately not identity-mapped.
+     */
+    private registerIdentityFromEntity(entity: any, state: EntityState): void {
+        if (state === EntityState.Detached || entity === null || typeof entity !== 'object') {
+            return;
+        }
+        const metadata = MetadataStorage.get().getEntity(entity.constructor);
+        const pkColumn = metadata?.columns.find(c => c.isPrimaryKey);
+        if (!pkColumn) return;
+
+        // The identity map is keyed by the ENTITY-side value, which is what the
+        // row-mapping path registers after applying convertFromDb.
+        const pkValue = entity[pkColumn.propertyName];
+        if (pkValue === undefined || pkValue === null) return;
+
+        this.registerIdentity(entity.constructor, pkValue, entity);
     }
 
     /**

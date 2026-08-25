@@ -191,7 +191,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 - **Primary Key Lookup**: `.find(id)`
 - **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })` conditions are **translated to SQL WHERE clauses** on every query path (`toList`, `find`, `where()` chains, aggregates, projections, `groupBy()`), so filtered rows never leave the database. Bypass per-query with `ignoreQueryFilters()`. See [Global Query Filters](#global-query-filters)
 - **Identifier & operator validation**: `where()`/`orderBy()`/`having()` and query-filter conditions validate column names against entity metadata and operators against a closed set at runtime — injected strings throw before SQL is assembled. See [Query Operators](#query-operators) and [SECURITY.md](SECURITY.md)
-- **Identity map**: loading the same row twice returns the **same tracked instance** (keyed by entity type + primary key), so re-queries can't create conflicting tracked copies and local unsaved modifications survive a re-query. `asNoTracking()` results are never identity-mapped
+- **Identity map**: loading the same row twice returns the **same tracked instance** (keyed by entity type + primary key), so re-queries can't create conflicting tracked copies and local unsaved modifications survive a re-query. This covers rows loaded through `find()`/`toList()`/`where()` chains, entities eagerly loaded with `include()`, and entities that entered tracking with a known key via `attach()`/`update()`/`add()`. `asNoTracking()` results are never identity-mapped, and neither are primary keys whose value converter produces a non-primitive (the map compares keys by value, so a fresh object per row never matches)
 - **Selector capture (no regex parsing)**: lambda selectors (`include`, aggregates, `select`, `groupBy`, ModelBuilder, decorators) are resolved by a recording Proxy; nested paths and computed expressions fail loudly instead of silently resolving to a wrong column
 - **Migration CLI**: `npx rnxorm migration:create|run|revert|status` — run/revert/status load a `rnxorm.config.js` exporting a `createMigrator()` factory. See [Migrations](#migrations)
 
@@ -242,17 +242,17 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Data seeding (idempotent `hasData()`) | `test/unit/ModelBuilder.test.ts` |
 | Decorator metadata registration | `test/unit/MetadataStorage.test.ts` |
 | Type mapping table, placeholder syntax, dialect identifiers | `test/unit/ProviderTypeMapping.test.ts` (also pins the capture provider's parity with real providers) |
-| Selector capture (Proxy, nested/computed classification, aggregates, `g.key`) | `test/unit/PropertyCapture.test.ts` (36 tests), renamed-column proof tests in `test/unit/SqlGeneration.test.ts` |
-| Identifier & operator validation (injection payloads rejected end-to-end) | `test/unit/Injection.test.ts` (46 tests) |
+| Selector capture (Proxy, nested/computed classification, aggregates, `g.key`) | `test/unit/PropertyCapture.test.ts` (52 tests), renamed-column proof tests in `test/unit/SqlGeneration.test.ts` |
+| Identifier & operator validation (injection payloads rejected end-to-end) | `test/unit/Injection.test.ts` (90 tests) |
 | Query filters on every read path incl. `groupBy()`, having-placeholder ordering, legacy-lambda limitations | `test/unit/QueryFilterCoverage.test.ts` |
 | Row→entity mapping characterization (both paths, converters, shadow columns, tracking) | `test/unit/EntityMapper.test.ts` |
-| Identity map (same instance on re-query, eviction, no-tracking exclusion) | `test/unit/IdentityMap.test.ts` |
+| Identity map (same instance on re-query, eager-loaded relations, `attach()`/`update()`, converted keys, eviction, no-tracking exclusion) | `test/unit/IdentityMap.test.ts` |
 
 If a claim in this README is not represented in this map or the linked suites, treat it as unverified and [open an issue](https://github.com/BaryoDev/rnxORM/issues).
 
 ### Testing status
 
-The test suite (423 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
+The test suite (534 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
 
 ## Type Mapping
 
@@ -279,16 +279,25 @@ price!: number;
 
 ## Query Operators
 
-`.where(column, operator, value)` validates both identifier arguments at runtime before any SQL is assembled: the **column** must be a mapped property or column of the entity (renamed columns resolve to their mapped name), and the **operator** must come from the closed set `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`, `NOT LIKE`. Anything else throws. Values are always bound as parameters (never interpolated). The same validation guards `orderBy()`, `orderByDescending()`, `having()` (aggregate-over-mapped-column shapes only), and structured query-filter conditions.
+`.where(column, operator, value)` validates both identifier arguments at runtime before any SQL is assembled: the **column** must be a mapped property or column of the entity (renamed columns resolve to their mapped name), and the **operator** must come from the closed set `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`. Anything else throws. Values are always bound as parameters (never interpolated). The same validation guards `orderBy()`, `orderByDescending()`, `having()` (aggregate-over-mapped-column shapes only), and structured query-filter conditions.
 
-`where` and `orderBy` also carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. The plain-string forms remain supported for dynamic columns — now safe to use with untrusted input like `orderBy(req.query.sort)`, which throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
+`IN` / `NOT IN` take an **array** and expand to one placeholder per element; an empty array compiles to the constant `1 = 0` (`IN`) or `1 = 1` (`NOT IN`) instead of invalid SQL. `IS` / `IS NOT` take **`null`** and emit `IS NULL` / `IS NOT NULL`, binding nothing. Passing a non-array to `IN`, or a non-null value to `IS`, throws.
+
+`BETWEEN` is **not** supported; express it as two conditions: `.where('age', '>=', 18).where('age', '<=', 65)`.
+
+`where()`, `orderBy()`, and `orderByDescending()` on `DbSet`, `QueryBuilder`, and `SelectQueryBuilder` carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. (Grouped `orderBy()` stays string-only: it also accepts projection aliases, which are not properties of `T`.) The plain-string forms remain supported for dynamic columns — now safe to use with untrusted input like `orderBy(req.query.sort)`, which throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
+
+`skip()` and `take()` require a non-negative integer. They are the only query arguments interpolated into SQL rather than bound, so they are checked at runtime — TypeScript's `number` type does not survive to runtime.
 
 ```typescript
 // Examples
 users.where("age", ">=", 21);
 users.where("name", "LIKE", "%doe%");
 users.where("name", "ILIKE", "%doe%"); // ILIKE is PostgreSQL-only
+users.where("status", "IN", ["active", "trial"]); // status IN ($1, $2)
+users.where("deletedAt", "IS", null);             // deletedat IS NULL
 users.where("age; DROP TABLE users", "=", 1); // throws: not a mapped column
+users.take("10; DROP TABLE users" as any);    // throws: not a non-negative integer
 ```
 
 ## Change Tracking & SaveChanges()
@@ -952,8 +961,17 @@ protected onModelCreating(modelBuilder: ModelBuilder): void {
 ```
 
 `property` is the entity property name (mapped to its column, with value
-converters applied), and `operator` is any SQL comparison operator supported
-by your database (`=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, ...).
+converters applied — per element for `IN`/`NOT IN`), and `operator` must come
+from the same validated set as `where()`: `=`, `!=`, `<>`, `>`, `<`, `>=`,
+`<=`, `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`. The operator
+is checked when `hasQueryFilter()` runs, so a typo fails at startup rather than
+on every read.
+
+```typescript
+// Set and null operators work in filters too
+modelBuilder.entity(Post).hasQueryFilter({ property: 'status', operator: 'IN', value: ['live', 'draft'] });
+modelBuilder.entity(User).hasQueryFilter({ property: 'deletedAt', operator: 'IS', value: null });
+```
 
 The **predicate form** is still supported for arbitrary JavaScript logic, but
 runs **in memory after rows are fetched** — the SQL is not modified, so
@@ -988,6 +1006,13 @@ const activeCount = await db.set(User).count();
 > of GROUP BY/HAVING). Raw SQL is the one path that is not rewritten — raw
 > SQL results are filtered in memory instead. Filters are a convenience, not
 > a tenant-isolation boundary; see [SECURITY.md](SECURITY.md).
+>
+> **`groupBy()` caveat**: grouped queries must inject the filter before
+> `having()` can bake its placeholder indices, so a **function-valued** filter
+> value is resolved when `groupBy()` is called, not when the query runs. Every
+> other read path resolves it at execution time. If the value can change
+> (a current tenant id, a request-scoped flag), build the grouped query after
+> it is set.
 
 ### Bypassing Query Filters
 
@@ -1010,6 +1035,14 @@ const user = await db.set(User)
     .ignoreQueryFilters()
     .where('id', '=', 1)
     .first(); // Returns the user even if soft-deleted
+
+// Grouped queries: call ignoreQueryFilters() BEFORE groupBy(), which is where
+// the filter would otherwise be injected
+const byRole = await db.set(User)
+    .ignoreQueryFilters()
+    .groupBy(u => u.role)
+    .select(g => ({ role: g.key, count: g.count() }))
+    .toList();
 ```
 
 ### Use Cases

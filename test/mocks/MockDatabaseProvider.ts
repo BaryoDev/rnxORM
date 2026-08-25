@@ -409,53 +409,71 @@ export class MockDatabaseProvider implements IDatabaseProvider {
 
         const whereClause = whereMatch[1].trim();
 
-        // Handle conditions like "column = $1" or "column LIKE $1", joined by AND
-        const conditions: { column: string; operator: string; value: any }[] = [];
+        // Handle conditions like "column = $1", "column LIKE $1",
+        // "column IN ($1, $2)", "column IS NULL", and the constant clauses an
+        // empty IN/NOT IN compiles to, joined by AND.
+        const predicates: ((row: any) => boolean)[] = [];
+        const bound = (placeholder: string): any => params?.[parseInt(placeholder, 10) - 1];
+
         for (const part of whereClause.split(/\s+AND\s+/i)) {
-            const simpleMatch = part.match(/(\w+)\s*(>=|<=|!=|<>|=|>|<)\s*\$(\d+)/);
+            const constantMatch = part.match(/^1\s*=\s*([01])$/);
+            const setMatch = part.match(/(\w+)\s+(NOT\s+IN|IN)\s*\(([^)]*)\)/i);
+            const nullMatch = part.match(/(\w+)\s+IS\s+(NOT\s+)?NULL/i);
             const likeMatch = part.match(/(\w+)\s+LIKE\s+\$(\d+)/i);
-            if (simpleMatch && params) {
-                conditions.push({
-                    column: simpleMatch[1].toLowerCase(),
-                    operator: simpleMatch[2],
-                    value: params[parseInt(simpleMatch[3]) - 1],
+            const simpleMatch = part.match(/(\w+)\s*(>=|<=|!=|<>|=|>|<)\s*\$(\d+)/);
+
+            if (constantMatch) {
+                const truthy = constantMatch[1] === '1';
+                predicates.push(() => truthy);
+            } else if (setMatch) {
+                const column = setMatch[1].toLowerCase();
+                const negated = /NOT/i.test(setMatch[2]);
+                const values = (setMatch[3].match(/\$(\d+)/g) ?? []).map(p => bound(p.slice(1)));
+                predicates.push(row => (negated ? !values.includes(row[column]) : values.includes(row[column])));
+            } else if (nullMatch) {
+                const column = nullMatch[1].toLowerCase();
+                const negated = nullMatch[2] !== undefined;
+                predicates.push(row => {
+                    const isNull = row[column] === null || row[column] === undefined;
+                    return negated ? !isNull : isNull;
                 });
             } else if (likeMatch && params) {
-                conditions.push({
-                    column: likeMatch[1].toLowerCase(),
-                    operator: 'LIKE',
-                    value: params[parseInt(likeMatch[2]) - 1],
+                const column = likeMatch[1].toLowerCase();
+                const value = bound(likeMatch[2]);
+                predicates.push(row => {
+                    const rowValue = row[column];
+                    if (typeof rowValue !== 'string' || typeof value !== 'string') return false;
+                    const pattern = value
+                        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                        .replace(/%/g, '.*')
+                        .replace(/_/g, '.');
+                    return new RegExp(`^${pattern}$`).test(rowValue);
+                });
+            } else if (simpleMatch && params) {
+                const column = simpleMatch[1].toLowerCase();
+                const operator = simpleMatch[2];
+                const value = bound(simpleMatch[3]);
+                predicates.push(row => {
+                    const rowValue = row[column];
+                    switch (operator) {
+                        case '=': return rowValue === value;
+                        case '!=':
+                        case '<>': return rowValue !== value;
+                        case '>': return rowValue > value;
+                        case '<': return rowValue < value;
+                        case '>=': return rowValue >= value;
+                        case '<=': return rowValue <= value;
+                        default: return true;
+                    }
                 });
             }
         }
 
-        if (conditions.length === 0) {
+        if (predicates.length === 0) {
             return rows;
         }
 
-        return rows.filter(row =>
-            conditions.every(({ column, operator, value }) => {
-                const rowValue = row[column];
-                switch (operator) {
-                    case '=': return rowValue === value;
-                    case '!=':
-                    case '<>': return rowValue !== value;
-                    case '>': return rowValue > value;
-                    case '<': return rowValue < value;
-                    case '>=': return rowValue >= value;
-                    case '<=': return rowValue <= value;
-                    case 'LIKE': {
-                        if (typeof rowValue !== 'string' || typeof value !== 'string') return false;
-                        const pattern = value
-                            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                            .replace(/%/g, '.*')
-                            .replace(/_/g, '.');
-                        return new RegExp(`^${pattern}$`).test(rowValue);
-                    }
-                    default: return true;
-                }
-            })
-        );
+        return rows.filter(row => predicates.every(predicate => predicate(row)));
     }
 
     private applyOrderBy(rows: any[], sql: string): any[] {

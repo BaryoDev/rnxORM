@@ -10,10 +10,13 @@ import { SqlCaptureProvider, CaptureDialect } from '../mocks/SqlCaptureProvider'
  * across every DbSet/QueryBuilder read path (GitHub issues #23 / #19).
  *
  * The original shipped bug was that count() silently ignored query filters.
- * This file pins that count() (and every other read path) now includes the
- * filter, and separately documents where the filter is still NOT applied:
- * groupBy(), and the legacy predicate form of hasQueryFilter() on any
- * SQL-aggregating path (count/sum/average/min/max).
+ * This file pins that count() (and every other SQL read path) now includes the
+ * filter — groupBy() included, since 2.2.0 closed that last gap.
+ *
+ * What is still NOT applied in SQL, and is pinned here as such: the legacy
+ * predicate form of hasQueryFilter(), which runs in memory over materialized
+ * entities and therefore cannot filter an SQL-aggregating path
+ * (count/sum/average/min/max) at all.
  */
 
 @Entity('qfc_users')
@@ -273,6 +276,22 @@ describe('structured filters ARE applied to groupBy() (issue #23, closed)', () =
             .having('COUNT(*)', '>', 5)
             .select((g) => ({ count: g.count() }))
             .toList();
+
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT name, COUNT(*) as count FROM qfc_users WHERE isdeleted = $1 GROUP BY name HAVING COUNT(*) > $2'
+        );
+        expect(provider.lastCall!.params).toEqual([false, 5]);
+    });
+
+    it('applyQueryFilter() is idempotent', async () => {
+        // A second injection would duplicate both the clause and its parameter,
+        // shifting every HAVING placeholder that was numbered from the first.
+        const { db, provider } = makeDb();
+        const grouped = db.set(QfcUser).groupBy((u) => u.name);
+        grouped.applyQueryFilter();
+        grouped.applyQueryFilter();
+
+        await grouped.having('COUNT(*)', '>', 5).select((g) => ({ count: g.count() })).toList();
 
         expect(provider.lastCall!.sql).toBe(
             'SELECT name, COUNT(*) as count FROM qfc_users WHERE isdeleted = $1 GROUP BY name HAVING COUNT(*) > $2'
