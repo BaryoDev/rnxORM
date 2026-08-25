@@ -123,4 +123,4 @@ jobs:
 
       - name: Dump npm debug log on failure
         if: ${{ failure() }}
-        run: tail -60 /home/runner/.npm/_logs/*.log
+        run: tail -n 120 /home/runner/.npm/_logs/*.log
