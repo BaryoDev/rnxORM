@@ -74,12 +74,15 @@ jobs:
       # pinned: actions by full commit SHA, npm by exact version.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      # NOTE: no registry-url here. Setting it makes setup-node write an
+      # .npmrc with an _authToken placeholder, which npm prefers over the
+      # OIDC exchange — the publish then 403s. Trusted publishing needs the
+      # default registry with NO token configured.
       - name: Use Node.js 20.x
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20.x
           cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
 
       # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 20 bundles an older
       # one, and npm 12.x requires Node >= 22 — 11.19.0 is the newest that
