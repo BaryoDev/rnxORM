@@ -115,4 +115,4 @@ jobs:
 
       - name: Publish (OIDC trusted publishing)
         if: ${{ inputs.publish == true }}
-        run: npm publish
+        run: npm publish --loglevel http
