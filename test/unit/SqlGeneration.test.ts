@@ -29,6 +29,21 @@ class SgProduct {
     version!: number;
 }
 
+// Property names deliberately differ from their mapped column names, so any
+// assertion against SQL generated from this entity proves the column name -
+// not the property name - reached the statement.
+@Entity('sqlgen_accounts')
+class SgAccount {
+    @PrimaryKey()
+    id!: number;
+
+    @Column({ name: 'full_name' })
+    fullName!: string;
+
+    @Column({ name: 'acct_balance' })
+    balance!: number;
+}
+
 function makeDb(dialect: CaptureDialect): { db: DbContext; provider: SqlCaptureProvider } {
     const provider = new SqlCaptureProvider(dialect);
     const db = new DbContext(provider);
@@ -353,6 +368,101 @@ describe('GROUP BY SQL generation', () => {
         expect(provider.lastCall!.sql).toBe(
             'SELECT age, COUNT(*) as count FROM sqlgen_users GROUP BY age' +
             ' ORDER BY (SELECT NULL) OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY'
+        );
+    });
+
+    it('generates AVG SQL for g.average()', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(SgUser)
+            .groupBy(u => u.age)
+            .select(g => ({ avgAge: g.average(u => u.age) }))
+            .toList();
+
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT age, AVG(age) as avgAge FROM sqlgen_users GROUP BY age'
+        );
+    });
+
+    it('generates MIN SQL for g.min()', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(SgUser)
+            .groupBy(u => u.age)
+            .select(g => ({ minAge: g.min(u => u.age) }))
+            .toList();
+
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT age, MIN(age) as minAge FROM sqlgen_users GROUP BY age'
+        );
+    });
+
+    it('generates MAX SQL for g.max()', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(SgUser)
+            .groupBy(u => u.age)
+            .select(g => ({ maxAge: g.max(u => u.age) }))
+            .toList();
+
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT age, MAX(age) as maxAge FROM sqlgen_users GROUP BY age'
+        );
+    });
+});
+
+describe('projection SQL from captured selectors (renamed columns and error paths)', () => {
+    it('uses the mapped column name, not the property name, for a renamed column', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(SgAccount).select(a => ({ n: a.fullName })).toList();
+        expect(provider.lastCall!.sql).toBe('SELECT full_name AS n FROM sqlgen_accounts');
+    });
+
+    it('uses the mapped column name for a renamed column in a single-property projection', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(SgAccount).select(a => a.fullName).toList();
+        expect(provider.lastCall!.sql).toBe('SELECT full_name FROM sqlgen_accounts');
+    });
+
+    it('throws when a projected property is not a mapped column', async () => {
+        const { db } = makeDb('postgresql');
+        await expect(db.set(SgUser).select((u: any) => ({ x: u.nope })).toList())
+            .rejects.toThrow(/nope/);
+    });
+
+    it('falls back to SELECT * and projects in memory for a selector property capture cannot express', async () => {
+        // A different opaque shape than the template-literal case already covered
+        // above ("falls back to SELECT * and in-memory projection for complex
+        // selectors") - this proves the fallback is general, not special-cased to
+        // one kind of computed expression.
+        const { db, provider } = makeDb('postgresql');
+        provider.nextResult({ rows: [{ id: 1, name: 'Ada', age: 15 }], rowCount: 1 });
+        const results = await db.set(SgUser).select(u => u.age * 2).toList();
+
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_users');
+        expect(results).toEqual([30]);
+    });
+});
+
+describe('GROUP BY SQL generation with renamed columns', () => {
+    it('groups and aggregates by their mapped column names, not property names', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(SgAccount)
+            .groupBy(a => a.fullName)
+            .select(g => ({ total: g.sum(a => a.balance) }))
+            .toList();
+
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT full_name, SUM(acct_balance) as total FROM sqlgen_accounts GROUP BY full_name'
+        );
+    });
+
+    it('aliases the group key via g.key, distinguishing column from alias', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(SgAccount)
+            .groupBy(a => a.fullName)
+            .select(g => ({ dept: g.key, total: g.sum(a => a.balance) }))
+            .toList();
+
+        expect(provider.lastCall!.sql).toBe(
+            'SELECT full_name AS dept, SUM(acct_balance) as total FROM sqlgen_accounts GROUP BY full_name'
         );
     });
 });

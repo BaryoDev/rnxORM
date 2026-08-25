@@ -1,8 +1,17 @@
 import { DbContext } from "./DbContext";
 import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState } from "./EntityEntry";
-import { extractPropertyName } from "./utils";
+import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
+
+/** Renders a captured aggregate into its SQL function call. `col` is undefined for count(). */
+const AGG_SQL: Record<AggregateFn, (col?: string) => string> = {
+    count: () => "COUNT(*)",
+    sum: (col?: string) => `SUM(${col})`,
+    avg: (col?: string) => `AVG(${col})`,
+    min: (col?: string) => `MIN(${col})`,
+    max: (col?: string) => `MAX(${col})`,
+};
 
 /**
  * Represents a collection of entities in the database.
@@ -229,13 +238,10 @@ export class DbSet<T> {
      * @example await users.sum(u => u.salary)
      */
     async sum(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'sum');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT SUM(${column.columnName}) as total FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT SUM(${columnName}) as total FROM ${this.tableName}${filter.where}`, filter.params);
         return parseFloat(res.rows[0].total) || 0;
     }
 
@@ -245,13 +251,10 @@ export class DbSet<T> {
      * @example await users.average(u => u.age)
      */
     async average(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'average');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT AVG(${column.columnName}) as avg FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT AVG(${columnName}) as avg FROM ${this.tableName}${filter.where}`, filter.params);
         return parseFloat(res.rows[0].avg) || 0;
     }
 
@@ -261,13 +264,10 @@ export class DbSet<T> {
      * @example await users.min(u => u.age)
      */
     async min(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'min');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT MIN(${column.columnName}) as min FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT MIN(${columnName}) as min FROM ${this.tableName}${filter.where}`, filter.params);
         return res.rows[0].min;
     }
 
@@ -277,13 +277,10 @@ export class DbSet<T> {
      * @example await users.max(u => u.createdAt)
      */
     async max(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'max');
 
         const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT MAX(${column.columnName}) as max FROM ${this.tableName}${filter.where}`, filter.params);
+        const res = await this.context.query(`SELECT MAX(${columnName}) as max FROM ${this.tableName}${filter.where}`, filter.params);
         return res.rows[0].max;
     }
 
@@ -309,7 +306,7 @@ export class DbSet<T> {
      * @example await users.groupBy(u => u.department).select(g => ({ dept: g.key, count: g.count() })).toList()
      */
     groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
-        const propertyName = extractPropertyName(selector);
+        const propertyName = resolvePropertyName(selector, 'groupBy');
         return new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
     }
 
@@ -428,7 +425,7 @@ export class QueryBuilder<T> {
      * Include related entities (eager loading)
      */
     include(relation: (entity: T) => any): this {
-        const propertyName = extractPropertyName(relation);
+        const propertyName = resolvePropertyName(relation, 'include');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
 
         if (!metadata) {
@@ -662,15 +659,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async sum(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'sum');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT SUM(${column.columnName}) as total FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT SUM(${columnName}) as total FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseFloat(res.rows[0].total) || 0;
     }
@@ -680,15 +674,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async average(selector: (entity: T) => number): Promise<number> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'average');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT AVG(${column.columnName}) as avg FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT AVG(${columnName}) as avg FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return parseFloat(res.rows[0].avg) || 0;
     }
@@ -698,15 +689,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async min(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'min');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT MIN(${column.columnName}) as min FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT MIN(${columnName}) as min FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return res.rows[0].min;
     }
@@ -716,15 +704,12 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async max(selector: (entity: T) => any): Promise<any> {
-        const propertyName = extractPropertyName(selector);
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const column = metadata?.columns.find(c => c.propertyName === propertyName);
-        if (!column) throw new Error(`Property ${propertyName} not found`);
+        const columnName = resolveColumn(selector, this.entityType, 'max');
 
         const filter = this.compileFilters();
         const allConditions = [...this.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT MAX(${column.columnName}) as max FROM ${this.tableName} ${whereClause}`;
+        const sql = `SELECT MAX(${columnName}) as max FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
         return res.rows[0].max;
     }
@@ -759,7 +744,7 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
-        const propertyName = extractPropertyName(selector);
+        const propertyName = resolvePropertyName(selector, 'groupBy');
         const builder = new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
         // Copy current query state (WHERE conditions)
         builder['conditions'] = [...this.conditions];
@@ -1134,61 +1119,38 @@ export class SelectQueryBuilder<T, TResult> {
     }
 
     /**
-     * Try to extract projected column names from the selector for SQL optimization
-     * Returns null if the selector is too complex for SQL projection
+     * Try to extract projected column names from the selector for SQL optimization.
+     * Returns null if the selector is too complex for SQL projection (e.g. it computes
+     * a value rather than naming columns) - callers fall back to in-memory projection.
+     * Throws if the selector names a property that isn't a mapped column: an unmapped
+     * property is a caller bug, not something to silently degrade into a full-table scan.
      */
     private extractProjectedColumns(): string[] | null {
-        try {
-            const selectorStr = this.selector.toString();
-
-            // Try to match simple object literal projections like: u => ({ name: u.name, age: u.age })
-            const objectLiteralMatch = selectorStr.match(/\{\s*([^}]+)\s*\}/);
-            if (objectLiteralMatch) {
-                const properties = objectLiteralMatch[1];
-
-                // Extract property names
-                const propertyMatches = properties.matchAll(/(\w+)\s*:\s*\w+\.(\w+)/g);
-                const columns: string[] = [];
-
-                for (const match of propertyMatches) {
-                    const alias = match[1];
-                    const propertyName = match[2];
-
-                    const metadata = MetadataStorage.get().getEntity(this.entityType);
-                    const column = metadata?.columns.find(c => c.propertyName === propertyName);
-
-                    if (column) {
-                        // Use "columnName AS alias" format
-                        columns.push(`${column.columnName} AS ${alias}`);
-                    } else {
-                        // Can't optimize - unknown property
-                        return null;
-                    }
-                }
-
-                if (columns.length > 0) {
-                    return columns;
-                }
-            }
-
-            // Try to match single property projection like: u => u.name
-            const singlePropertyMatch = selectorStr.match(/=>\s*\w+\.(\w+)\s*$/);
-            if (singlePropertyMatch) {
-                const propertyName = singlePropertyMatch[1];
-                const metadata = MetadataStorage.get().getEntity(this.entityType);
-                const column = metadata?.columns.find(c => c.propertyName === propertyName);
-
-                if (column) {
-                    return [column.columnName];
-                }
-            }
-
-            // Can't optimize - use in-memory projection
-            return null;
-        } catch {
-            // Error parsing selector - use in-memory projection
+        const result = capture(this.selector as unknown as (entity: any) => any);
+        if (result.kind === "opaque") {
+            // Honest fallback: the selector computes something SQL cannot express,
+            // so fetch full rows and project in memory.
             return null;
         }
+
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const columnFor = (propertyName: string): string => {
+            const column = metadata?.columns.find(c => c.propertyName === propertyName);
+            if (!column) {
+                throw new Error(
+                    `select(): property '${propertyName}' is not a mapped column on ${this.entityType.name}`
+                );
+            }
+            return column.columnName;
+        };
+
+        if (result.kind === "property") {
+            return [columnFor(result.path)];
+        }
+
+        return Object.entries(result.aliases).map(
+            ([alias, propertyName]) => `${columnFor(propertyName)} AS ${alias}`
+        );
     }
 }
 
@@ -1439,24 +1401,9 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
             throw new Error(`Property ${this.groupByProperty} not found on entity`);
         }
 
-        // Parse the selector to extract aggregations
-        const selectorStr = this.selector.toString();
-
-        // Extract aggregation and key references from selector
-        const aggregations = this.parseAggregations(selectorStr, groupColumn.columnName);
-
-        // Build SQL query
-        const selectClauses: string[] = [];
-        const aliases: string[] = [];
-
-        // Always include the grouping column
-        selectClauses.push(`${groupColumn.columnName}`);
-
-        // Add aggregations
-        aggregations.forEach(agg => {
-            selectClauses.push(agg.sql);
-            aliases.push(agg.alias);
-        });
+        // Extract aggregations (and, if present, the g.key alias) from the
+        // result selector via property capture.
+        const selectClauses = this.captureAggregations(groupColumn.columnName);
 
         let sql = `SELECT ${selectClauses.join(', ')} FROM ${this.tableName}`;
 
@@ -1525,77 +1472,55 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
     }
 
     /**
-     * Parse selector string to extract SQL aggregations
+     * Capture the result selector's `g.key` / aggregate calls (g.count(),
+     * g.sum(x => x.col), ...) and resolve each referenced property to its
+     * mapped column name, producing the list of SELECT clauses in the order
+     * the selector declared them.
+     *
+     * Throws if the selector isn't a plain object of supported entries, or if
+     * an aggregate references a property that isn't a mapped column - an honest
+     * failure in place of the previous regex silently dropping the aggregate.
+     *
+     * When the selector contains no `g.key` entry, the grouping column is
+     * still emitted first, bare (un-aliased) - this preserves the exact SQL
+     * shape of every pre-existing groupBy().select() call site that never
+     * referenced `g.key`.
      */
-    private parseAggregations(selectorStr: string, groupColumn: string): Array<{ sql: string; alias: string }> {
+    private captureAggregations(groupColumnName: string): string[] {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
-        const aggregations: Array<{ sql: string; alias: string }> = [];
-
-        // Match patterns like: count: g.count()
-        const countMatch = selectorStr.match(/(\w+)\s*:\s*\w+\.count\(\)/);
-        if (countMatch) {
-            aggregations.push({
-                sql: 'COUNT(*) as ' + countMatch[1],
-                alias: countMatch[1]
-            });
-        }
-
-        // Match patterns like: avgSalary: g.average(u => u.salary)
-        const avgMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.average\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of avgMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
+        const columnFor = (propertyName: string): string => {
             const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `AVG(${column.columnName}) as ${alias}`,
-                    alias
-                });
+            if (!column) {
+                throw new Error(
+                    `groupBy().select(): property '${propertyName}' is not a mapped column on ${this.entityType.name}`
+                );
             }
+            return column.columnName;
+        };
+
+        const result = captureAggregates(this.selector as unknown as (group: any) => any);
+        if (result.kind === "opaque") {
+            throw new Error(
+                "groupBy().select(): result selector must build an object literal from " +
+                "g.key, g.count(), g.sum(x => x.col), g.average(x => x.col), g.min(x => x.col), or g.max(x => x.col)"
+            );
         }
 
-        // Match patterns like: totalSalary: g.sum(u => u.salary)
-        const sumMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.sum\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of sumMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
-            const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `SUM(${column.columnName}) as ${alias}`,
-                    alias
-                });
+        const entries = Object.entries(result.aggregates);
+        const clauseFor = ([alias, entry]: [string, AggregateSelectorEntry]): string => {
+            if ('kind' in entry) {
+                return `${groupColumnName} AS ${alias}`;
             }
+            const column = entry.path ? columnFor(entry.path) : undefined;
+            return `${AGG_SQL[entry.fn](column)} as ${alias}`;
+        };
+
+        const hasKey = entries.some(([, entry]) => 'kind' in entry);
+        if (hasKey) {
+            return entries.map(clauseFor);
         }
 
-        // Match patterns like: minAge: g.min(u => u.age)
-        const minMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.min\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of minMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
-            const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `MIN(${column.columnName}) as ${alias}`,
-                    alias
-                });
-            }
-        }
-
-        // Match patterns like: maxAge: g.max(u => u.age)
-        const maxMatches = selectorStr.matchAll(/(\w+)\s*:\s*\w+\.max\(\w+\s*=>\s*\w+\.(\w+)\)/g);
-        for (const match of maxMatches) {
-            const alias = match[1];
-            const propertyName = match[2];
-            const column = metadata?.columns.find(c => c.propertyName === propertyName);
-            if (column) {
-                aggregations.push({
-                    sql: `MAX(${column.columnName}) as ${alias}`,
-                    alias
-                });
-            }
-        }
-
-        return aggregations;
+        // No g.key entry: preserve the original bare-group-column-first shape.
+        return [groupColumnName, ...entries.map(clauseFor)];
     }
 }

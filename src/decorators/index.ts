@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { MetadataStorage, RelationType, CascadeOption, RelationMetadata } from "../core/MetadataStorage";
-import { extractPropertyName } from "../core/utils";
+import { resolvePropertyName } from "../core/expressions/PropertyCapture";
 
 export function Entity(tableName?: string) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -101,7 +101,7 @@ export function ManyToOne(
     options: ManyToOneOptions = {}
 ) {
     return function (target: object, propertyName: string) {
-        const inverseSideName = inverseSide ? extractPropertyName(inverseSide) : undefined;
+        const inverseSideName = inverseSide ? resolvePropertyName(inverseSide, 'ManyToOne') : undefined;
         const foreignKeyColumn = options.foreignKey || `${propertyName.toLowerCase()}id`;
 
         const relation: RelationMetadata = {
@@ -149,7 +149,7 @@ export function OneToMany(
     options: OneToManyOptions = {}
 ) {
     return function (target: object, propertyName: string) {
-        const inverseSideName = inverseSide ? extractPropertyName(inverseSide) : undefined;
+        const inverseSideName = inverseSide ? resolvePropertyName(inverseSide, 'OneToMany') : undefined;
 
         const relation: RelationMetadata = {
             target: target.constructor,
@@ -187,7 +187,7 @@ export function OneToOne(
     options: OneToOneOptions = {}
 ) {
     return function (target: object, propertyName: string) {
-        const inverseSideName = inverseSide ? extractPropertyName(inverseSide) : undefined;
+        const inverseSideName = inverseSide ? resolvePropertyName(inverseSide, 'OneToOne') : undefined;
         const foreignKeyColumn = options.foreignKey || `${propertyName.toLowerCase()}id`;
 
         const relation: RelationMetadata = {
@@ -235,7 +235,7 @@ export function ManyToMany(
     options: ManyToManyOptions = {}
 ) {
     return function (target: object, propertyName: string) {
-        const inverseSideName = inverseSide ? extractPropertyName(inverseSide) : undefined;
+        const inverseSideName = inverseSide ? resolvePropertyName(inverseSide, 'ManyToMany') : undefined;
         const entityName = target.constructor.name.toLowerCase();
         const relatedEntityName = relatedEntity().name.toLowerCase();
 
