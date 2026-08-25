@@ -78,17 +78,17 @@ jobs:
       # .npmrc with an _authToken placeholder, which npm prefers over the
       # OIDC exchange — the publish then 403s. Trusted publishing needs the
       # default registry with NO token configured.
-      - name: Use Node.js 20.x
+      # Node 22: staged publishing requires Node >= 22.14 / npm >= 11.15.
+      - name: Use Node.js 22.x
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20.x
+          node-version: 22.x
           cache: 'npm'
 
-      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 20 bundles an older
-      # one, and npm 12.x requires Node >= 22 — 11.19.0 is the newest that
-      # supports both OIDC and this job's Node 20 runtime.
+      # Trusted publishing (OIDC) + staged publishing need a current npm;
+      # pinned exactly because this job holds the publish identity.
       - name: Update npm for OIDC trusted publishing
-        run: npm install -g npm@11.19.0 && npm --version
+        run: npm install -g npm@12.0.2 && npm --version
 
       - run: npm ci
       - run: npm run lint
@@ -113,6 +113,10 @@ jobs:
         if: ${{ inputs.publish != true }}
         run: npm publish --dry-run
 
-      - name: Publish (OIDC trusted publishing)
+      # Direct un-2FA'd publishes are being restricted by the registry; the
+      # sanctioned automated flow is a STAGED publish — the release lands in
+      # the package's stage queue and a maintainer approves it with 2FA on
+      # npmjs.com (or `npm stage approve`). Nothing goes live without a human.
+      - name: Stage publish (OIDC trusted publishing)
         if: ${{ inputs.publish == true }}
-        run: npm publish --loglevel http
+        run: npm stage publish
