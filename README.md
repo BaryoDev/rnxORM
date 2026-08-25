@@ -43,6 +43,12 @@ Ensure you have `experimentalDecorators` and `emitDecoratorMetadata` enabled in 
 
 ## Usage
 
+> **Runnable examples**: [`examples/`](examples/) contains five self-contained
+> demos verified against real PostgreSQL — quickstart CRUD, relationships and
+> eager loading, query filters + the injection-rejection showcase, identity
+> map + optimistic concurrency, and migrations. Each prints labeled output
+> and cleans up after itself; see [`examples/README.md`](examples/README.md).
+
 ### 1. Define your Entity
 
 ```typescript
@@ -491,6 +497,14 @@ users[0].posts.forEach(post => console.log(post.title));
 ```
 
 ### Many-to-Many
+
+> **Declaration order matters**: `@ManyToMany` derives its default join-table
+> name from the related class at decoration time, and TypeScript's
+> `emitDecoratorMetadata` embeds a direct reference to the property's type —
+> so declare a class **before** any class whose decorated properties
+> reference it, or you'll hit `ReferenceError: Cannot access 'X' before
+> initialization` at import time. See `examples/02-relationships.ts` for a
+> working ordering.
 
 ```typescript
 import { Entity, PrimaryKey, Column, ManyToMany } from "rnxorm";
