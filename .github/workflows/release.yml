@@ -6,7 +6,12 @@ name: Release to npm
 #
 # Trigger it manually from the Actions tab. It defaults to a DRY RUN
 # (builds, tests against real databases, runs `npm publish --dry-run`);
-# set publish=true to actually publish. Requires the NPM_TOKEN secret.
+# set publish=true to actually publish.
+#
+# Auth uses npm trusted publishing (OIDC): this repo + this workflow
+# filename (release.yml) must be registered as a trusted publisher on the
+# npm package settings. No NPM_TOKEN secret is needed; provenance is
+# generated automatically.
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +19,10 @@ on:
         description: "Actually publish (false = dry run)"
         type: boolean
         default: false
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   release:
@@ -70,6 +79,10 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 20 bundles an older one
+      - name: Update npm for OIDC trusted publishing
+        run: npm install -g npm@latest && npm --version
+
       - run: npm ci
       - run: npm run lint
       - run: npm run build
@@ -92,11 +105,7 @@ jobs:
       - name: Publish (dry run)
         if: ${{ inputs.publish != true }}
         run: npm publish --dry-run
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish
+      - name: Publish (OIDC trusted publishing)
         if: ${{ inputs.publish == true }}
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
