@@ -302,8 +302,8 @@ users.where("name", "LIKE", "%doe%");
 users.where("name", "ILIKE", "%doe%"); // ILIKE is PostgreSQL-only
 users.where("status", "IN", ["active", "trial"]); // status IN ($1, $2)
 users.where("deletedAt", "IS", null);             // deletedat IS NULL
-users.where("age; DROP TABLE users", "=", 1); // throws: not a mapped column
-users.take("10; DROP TABLE users" as any);    // throws: not a non-negative integer
+users.where("age; DELETE FROM users", "=", 1); // throws: not a mapped column
+users.take("10; DELETE FROM users" as any);    // throws: not a non-negative integer
 ```
 
 ## Change Tracking & SaveChanges()

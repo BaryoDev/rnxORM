@@ -32,7 +32,7 @@
   `OFFSET ... FETCH NEXT` take no bound parameter on every driver), and
   TypeScript's `number` type erases at runtime — an `as any` cast or an untyped
   `req.query.limit` used to land verbatim in the statement
-  (`take("10; DROP TABLE users --")` emitted the payload). All four builders
+  (`take("10; DELETE FROM users --")` emitted the payload). All four builders
   now require a non-negative integer and throw before any SQL is assembled.
 
 ### Added
