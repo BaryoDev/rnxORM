@@ -4,8 +4,8 @@ A lightweight TypeScript ORM for **PostgreSQL**, **SQL Server**, and **MariaDB**
 
 [![npm version](https://img.shields.io/npm/v/rnxorm.svg)](https://www.npmjs.com/package/rnxorm)
 [![GitHub](https://img.shields.io/badge/github-BaryoDev%2FrnxORM-blue)](https://github.com/BaryoDev/rnxORM)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/BaryoDev/rnxORM/actions)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/BaryoDev/rnxORM/actions)
+[![CI](https://github.com/BaryoDev/rnxORM/actions/workflows/ci.yml/badge.svg)](https://github.com/BaryoDev/rnxORM/actions/workflows/ci.yml)
+[![Integration (real databases)](https://github.com/BaryoDev/rnxORM/actions/workflows/integration.yml/badge.svg)](https://github.com/BaryoDev/rnxORM/actions/workflows/integration.yml)
 [![Ko-fi](https://img.shields.io/badge/Support%20me%20on-Ko--fi-ff5f5f?logo=ko-fi&logoColor=white)](https://ko-fi.com/T6T01CQT4R)
 
 ## Installation
