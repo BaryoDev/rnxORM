@@ -480,7 +480,7 @@ export class QueryBuilder<T> {
         // operator set before touching SQL (issues #13/#24); the value is
         // always bound as a parameter. buildComparison owns placeholder
         // expansion, so IN binds one placeholder per element and IS binds none
-        // — the next condition numbers from the updated params length.
+        //. The next condition numbers from the updated params length.
         const sqlColumn = assertColumn(this.entityType, column, 'where');
         const comparison = buildComparison(
             sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where'
@@ -1349,7 +1349,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * @internal Called by the groupBy() factories, and deliberately BEFORE the
      * caller can invoke having(): having() bakes placeholder indices from the
      * current params length at call time, so filters appended any later would
-     * silently shift every HAVING placeholder (issue #23 — groupBy was the
+     * silently shift every HAVING placeholder (issue #23. GroupBy was the
      * last read path that ignored structured query filters). Function-valued
      * filter conditions are therefore resolved when groupBy() is called.
      */

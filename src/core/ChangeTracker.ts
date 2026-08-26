@@ -45,7 +45,7 @@ export class ChangeTracker {
 
     /**
      * Identity-map an entity that entered tracking without a database round
-     * trip — `attach()`, `update()`, or `add()` with an explicit key. Without
+     * trip. `attach()`, `update()`, or `add()` with an explicit key. Without
      * this, a later `find()` for the same key maps a second instance and the
      * context holds two tracked copies of one row (issue #5's third door).
      *

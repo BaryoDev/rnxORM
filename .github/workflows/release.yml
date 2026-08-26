@@ -76,7 +76,7 @@ jobs:
 
       # NOTE: no registry-url here. Setting it makes setup-node write an
       # .npmrc with an _authToken placeholder, which npm prefers over the
-      # OIDC exchange — the publish then 403s. Trusted publishing needs the
+      # OIDC exchange. The publish then 403s. Trusted publishing needs the
       # default registry with NO token configured.
       # Node 22: staged publishing requires Node >= 22.14 / npm >= 11.15.
       - name: Use Node.js 22.x

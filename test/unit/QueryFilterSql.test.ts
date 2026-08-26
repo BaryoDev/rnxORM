@@ -278,7 +278,7 @@ describe('query filters on raw SQL', () => {
 /**
  * Query filters that use the set/null operators (I4). compileQueryFilter numbers
  * its placeholders from `startIndex + compiled.params.length`, and QueryBuilder
- * hands it `this.params.length + 1` — both must account for an IN condition
+ * hands it `this.params.length + 1`. Both must account for an IN condition
  * consuming N parameters and an IS condition consuming none.
  *
  * Hand-traced (postgres), user conditions are emitted before filter clauses:

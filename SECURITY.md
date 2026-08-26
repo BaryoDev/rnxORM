@@ -11,7 +11,7 @@
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting on this repository
-(Security tab → "Report a vulnerability"). If that is unavailable, open an
+(Security tab to "Report a vulnerability"). If that is unavailable, open an
 issue that says only "security report, requesting contact" without details,
 and a maintainer will follow up privately.
 
@@ -29,13 +29,13 @@ Honest scope, so you can threat-model correctly:
   `orderBy()`, and `having()` reject identifiers that are not mapped columns of
   the entity and operators outside the supported set, so untrusted input like
   `orderBy(req.query.sort)` fails loudly instead of reaching SQL. On 2.1.x and
-  earlier these were interpolated unvalidated — do not pass untrusted input to
+  earlier these were interpolated unvalidated. Do not pass untrusted input to
   them on old versions.
   One documented exception: `orderBy()` on a **grouped** query also accepts a
   projection alias, which exists only in the SELECT list and cannot be checked
   against entity metadata. Such aliases are required to be plain identifiers
-  (`^[A-Za-z_][A-Za-z0-9_]*$`), so injection-shaped strings — anything with
-  quotes, whitespace, semicolons, or comment markers — are still rejected.
+  (`^[A-Za-z_][A-Za-z0-9_]*$`), so injection-shaped strings. Anything with
+  quotes, whitespace, semicolons, or comment markers. Are still rejected.
 - **Row limits are validated at runtime** (2.2.0+): `skip()` and `take()` must
   receive a non-negative integer. They are the only query-API arguments that
   are interpolated rather than bound (no driver accepts a parameter for

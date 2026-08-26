@@ -39,7 +39,7 @@ export function compileQueryFilter(
         }
 
         // The operator string reaches SQL, so it goes through the same closed
-        // set as where() — filter conditions are data, not trusted SQL.
+        // set as where(). Filter conditions are data, not trusted SQL.
         // ModelBuilder.hasQueryFilter() validates at registration time too; this
         // check stays because metadata can also be populated directly.
         const operator = assertOperator(condition.operator, 'hasQueryFilter');
@@ -55,7 +55,7 @@ export function compileQueryFilter(
             : convert(value);
 
         // Placeholder numbering continues from however many parameters the
-        // preceding conditions actually bound — IN binds one per element and
+        // preceding conditions actually bound. IN binds one per element and
         // IS binds none, so "one placeholder per condition" is not safe here.
         const comparison = buildComparison(
             column.columnName,

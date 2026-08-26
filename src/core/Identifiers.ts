@@ -44,9 +44,9 @@ export function assertOperator(operator: string, apiName: string): string {
 /**
  * Validate a row-limit argument (`skip()` / `take()`).
  *
- * These are the only query-API arguments that must be interpolated into SQL —
+ * These are the only query-API arguments that must be interpolated into SQL , 
  * `LIMIT`/`OFFSET`/`OFFSET ... FETCH NEXT` do not accept a bound parameter on
- * every supported driver — so they need a runtime guard of their own. The
+ * every supported driver. So they need a runtime guard of their own. The
  * check exists *because* TypeScript's `number` erases at runtime: an `as any`
  * cast, an untyped `req.query.limit`, or a JSON body puts a string here and it
  * used to land verbatim in the statement.
@@ -71,7 +71,7 @@ export function assertLimit(value: number, apiName: string): number {
  *
  * @param columnSql Already-validated column name (see assertColumn)
  * @param operator Raw operator string; validated against the closed set here
- * @param value Value to bind — an array for IN/NOT IN, null for IS/IS NOT
+ * @param value Value to bind. An array for IN/NOT IN, null for IS/IS NOT
  * @param provider Database provider used for placeholder syntax
  * @param nextParamIndex 1-based placeholder index this condition starts at
  * @param apiName Public API name used in error messages
@@ -136,7 +136,7 @@ export function assertColumn(
     const metadata = MetadataStorage.get().getEntity(entityType);
     if (!metadata) {
         throw new Error(
-            `${apiName}(): cannot validate column '${name}' — ${entityType.name} has no entity metadata`
+            `${apiName}(): cannot validate column '${name}'. ${entityType.name} has no entity metadata`
         );
     }
 
@@ -177,7 +177,7 @@ export function assertHavingExpression(
  * Validate an ORDER BY target on grouped queries, where the target may be a
  * mapped column or a projection alias that only exists in the SELECT list.
  * Aliases cannot be checked against metadata, so they must at least be shaped
- * like a plain identifier — which rules out every injection vector (quotes,
+ * like a plain identifier. Which rules out every injection vector (quotes,
  * whitespace, semicolons, comment markers).
  * @throws when the name is neither a mapped column/property nor a plain identifier
  */

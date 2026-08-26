@@ -1,12 +1,36 @@
 # rnxORM
 
-A lightweight TypeScript ORM for **PostgreSQL**, **SQL Server**, and **MariaDB**, inspired by Entity Framework Core.
+Entity Framework Core's programming model, in TypeScript. For **SQL Server** and **PostgreSQL**.
 
 [![npm version](https://img.shields.io/npm/v/rnxorm.svg)](https://www.npmjs.com/package/rnxorm)
 [![GitHub](https://img.shields.io/badge/github-BaryoDev%2FrnxORM-blue)](https://github.com/BaryoDev/rnxORM)
 [![CI](https://github.com/BaryoDev/rnxORM/actions/workflows/ci.yml/badge.svg)](https://github.com/BaryoDev/rnxORM/actions/workflows/ci.yml)
 [![Integration (real databases)](https://github.com/BaryoDev/rnxORM/actions/workflows/integration.yml/badge.svg)](https://github.com/BaryoDev/rnxORM/actions/workflows/integration.yml)
 [![Ko-fi](https://img.shields.io/badge/Support%20me%20on-Ko--fi-ff5f5f?logo=ko-fi&logoColor=white)](https://ko-fi.com/T6T01CQT4R)
+
+## Who this is for
+
+If you have written EF Core and now write TypeScript, your knowledge transfers here directly. `DbContext`, `DbSet`, `saveChanges`, `include`, `asNoTracking`, query filters, value converters, shadow properties and concurrency tokens all keep the names and the behaviour you already know.
+
+That is the whole idea. It is not a general recommendation over the popular TypeScript ORMs, and it would be dishonest to pretend otherwise.
+
+**How it differs from Drizzle, Kysely and Prisma.** Those are SQL-first: you write queries that read like SQL and you write your inserts and updates explicitly. There is no change tracker and no identity map, by design. rnxORM is object-first: load a graph, change it across several methods, call `saveChanges()`, and let the tracker work out the difference. Different model, different user. If the SQL-first approach suits you, they are excellent and far more mature.
+
+**How it differs from MikroORM.** It largely does not. MikroORM has the same unit of work, identity map and change tracking, is well maintained, and supports more databases. It speaks Doctrine's vocabulary: `EntityManager`, `em.flush()`, `wrap()`, `populate`. rnxORM speaks EF Core's. If that vocabulary is not worth anything to you, MikroORM is the more established choice and you should use it.
+
+**One thing no ORM can do.** TypeScript erases types and cannot overload operators, so `where(u => u.age > 18)` is not achievable without a compiler transform. Expression-tree translation is a C# feature, not a TypeScript one. Queries here use a typed builder, which is the same conclusion Drizzle and Kysely reached.
+
+## Database support
+
+| Database | Status |
+|---|---|
+| **SQL Server** | Focus. The alternatives are weakest here; Drizzle has no support at all. |
+| **PostgreSQL** | Focus. |
+| MariaDB | Maintained, not developed. Works and keeps its tests; new features land here only if they fall out for free. |
+| SQLite | Test substrate. Not a shipped provider. |
+| MySQL | Deferred. See [#8](https://github.com/BaryoDev/rnxORM/issues/8) for the reasoning. |
+
+Two providers done properly is a better use of one maintainer than five done thinly.
 
 ## Installation
 
@@ -44,7 +68,7 @@ Ensure you have `experimentalDecorators` and `emitDecoratorMetadata` enabled in 
 ## Usage
 
 > **Runnable examples**: [`examples/`](examples/) contains five self-contained
-> demos verified against real PostgreSQL — quickstart CRUD, relationships and
+> demos verified against real PostgreSQL. Quickstart CRUD, relationships and
 > eager loading, query filters + the injection-rejection showcase, identity
 > map + optimistic concurrency, and migrations. Each prints labeled output
 > and cleans up after itself; see [`examples/README.md`](examples/README.md).
@@ -165,7 +189,7 @@ This library is designed to be AI-friendly. If you are an AI agent, you can read
 
 Feature status is marked honestly: ✅ implemented, ⚠️ partial (works with documented limitations), ❌ planned (API may exist but is not functional yet).
 
-Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated tests in this repository — see the [feature verification map](#feature-verification) below for exactly which test suite proves each claim, and [Testing status](#testing-status) for how the suite runs against real databases in CI.
+Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated tests in this repository. See the [feature verification map](#feature-verification) below for exactly which test suite proves each claim, and [Testing status](#testing-status) for how the suite runs against real databases in CI.
 
 ### Implemented ✅
 
@@ -176,7 +200,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 - **Data Seeding**: Idempotent seeding via `hasData()` in ModelBuilder
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne` with foreign key and join table scaffolding
-- **Eager Loading**: `.include()` loads related entities via batched follow-up queries (`WHERE pk IN (...)`), not JOINs. Single-level only — no nested `thenInclude`
+- **Eager Loading**: `.include()` loads related entities via batched follow-up queries (`WHERE pk IN (...)`), not JOINs. Single-level only. No nested `thenInclude`
 - **Value Converters**: `hasConversion()` applied on both read and write paths
 - **Schema Scaffolding**: `ensureCreated()` creates tables, foreign keys, indexes, and constraints
 - **Schema Evolution**: `ensureCreated()` adds missing columns and attempts safe type migrations (best-effort; incompatible data leaves the column unchanged)
@@ -190,23 +214,23 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 - **Query Optimization**: `.asNoTracking()` skips change tracking for read-only queries
 - **Primary Key Lookup**: `.find(id)`
 - **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })` conditions are **translated to SQL WHERE clauses** on every query path (`toList`, `find`, `where()` chains, aggregates, projections, `groupBy()`), so filtered rows never leave the database. Bypass per-query with `ignoreQueryFilters()`. See [Global Query Filters](#global-query-filters)
-- **Identifier & operator validation**: `where()`/`orderBy()`/`having()` and query-filter conditions validate column names against entity metadata and operators against a closed set at runtime — injected strings throw before SQL is assembled. See [Query Operators](#query-operators) and [SECURITY.md](SECURITY.md)
+- **Identifier & operator validation**: `where()`/`orderBy()`/`having()` and query-filter conditions validate column names against entity metadata and operators against a closed set at runtime. Injected strings throw before SQL is assembled. See [Query Operators](#query-operators) and [SECURITY.md](SECURITY.md)
 - **Identity map**: loading the same row twice returns the **same tracked instance** (keyed by entity type + primary key), so re-queries can't create conflicting tracked copies and local unsaved modifications survive a re-query. This covers rows loaded through `find()`/`toList()`/`where()` chains, entities eagerly loaded with `include()`, and entities that entered tracking with a known key via `attach()`/`update()`/`add()`. `asNoTracking()` results are never identity-mapped, and neither are primary keys whose value converter produces a non-primitive (the map compares keys by value, so a fresh object per row never matches)
 - **Selector capture (no regex parsing)**: lambda selectors (`include`, aggregates, `select`, `groupBy`, ModelBuilder, decorators) are resolved by a recording Proxy; nested paths and computed expressions fail loudly instead of silently resolving to a wrong column
-- **Migration CLI**: `npx rnxorm migration:create|run|revert|status` — run/revert/status load a `rnxorm.config.js` exporting a `createMigrator()` factory. See [Migrations](#migrations)
+- **Migration CLI**: `npx rnxorm migration:create|run|revert|status`. Run/revert/status load a `rnxorm.config.js` exporting a `createMigrator()` factory. See [Migrations](#migrations)
 
 ### Partial ⚠️
 
-- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`) — TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. Nested paths (`u => u.address.city`) throw instead of silently resolving to the wrong column. See [LINQ-Style Query API](#linq-style-query-api)
-- **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched** — it is never translated to SQL. Prefer the structured-condition form, which is. See [Global Query Filters](#global-query-filters)
-- **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects — write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB. Global query filters on raw SQL results are evaluated in memory
+- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`). TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. Nested paths (`u => u.address.city`) throw instead of silently resolving to the wrong column. See [LINQ-Style Query API](#linq-style-query-api)
+- **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched**. It is never translated to SQL. Prefer the structured-condition form, which is. See [Global Query Filters](#global-query-filters)
+- **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects. Write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB. Global query filters on raw SQL results are evaluated in memory
 - **Keyless Entity Types**: `hasNoKey()` works for querying views; read-only behavior is not enforced (no error if you try to track one)
-- **Shadow Properties**: Columns are created and included in INSERTs, but defaults are sent as literal parameter values — SQL expressions like `CURRENT_TIMESTAMP` are **not** emitted as DDL `DEFAULT` clauses and will not evaluate. Use constant defaults only
+- **Shadow Properties**: Columns are created and included in INSERTs, but defaults are sent as literal parameter values. SQL expressions like `CURRENT_TIMESTAMP` are **not** emitted as DDL `DEFAULT` clauses and will not evaluate. Use constant defaults only
 
-### Planned ❌ (API exists but is not functional — do not rely on these)
+### Planned ❌ (API exists but is not functional. Do not rely on these)
 
 - **Explicit Loading**: `entry().reference()`/`collection()` throw "not implemented"
-- **Owned Entity Types**: `ownsOne()`/`ownsMany()` store configuration but nothing consumes it — no column flattening, no owned tables are created
+- **Owned Entity Types**: `ownsOne()`/`ownsMany()` store configuration but nothing consumes it. No column flattening, no owned tables are created
 - **Default Values**: `hasDefaultValue()` on regular columns stores metadata but is never emitted to DDL or used in inserts
 - **Computed Columns**: `hasComputedColumnSql()` stores metadata but no `GENERATED ALWAYS AS` DDL is emitted
 - **Lazy Loading**: Not implemented
@@ -245,14 +269,14 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Selector capture (Proxy, nested/computed classification, aggregates, `g.key`) | `test/unit/PropertyCapture.test.ts` (52 tests), renamed-column proof tests in `test/unit/SqlGeneration.test.ts` |
 | Identifier & operator validation (injection payloads rejected end-to-end) | `test/unit/Injection.test.ts` (90 tests) |
 | Query filters on every read path incl. `groupBy()`, having-placeholder ordering, legacy-lambda limitations | `test/unit/QueryFilterCoverage.test.ts` |
-| Row→entity mapping characterization (both paths, converters, shadow columns, tracking) | `test/unit/EntityMapper.test.ts` |
+| row to entity mapping characterization (both paths, converters, shadow columns, tracking) | `test/unit/EntityMapper.test.ts` |
 | Identity map (same instance on re-query, eager-loaded relations, `attach()`/`update()`, converted keys, eviction, no-tracking exclusion) | `test/unit/IdentityMap.test.ts` |
 
 If a claim in this README is not represented in this map or the linked suites, treat it as unverified and [open an issue](https://github.com/BaryoDev/rnxORM/issues).
 
 ### Testing status
 
-The test suite (534 tests, all passing) runs against an **in-memory mock provider** by default — it validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
+The test suite (534 tests, all passing) runs against an **in-memory mock provider** by default. It validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
 
 ## Type Mapping
 
@@ -285,9 +309,9 @@ price!: number;
 
 `BETWEEN` is **not** supported; express it as two conditions: `.where('age', '>=', 18).where('age', '<=', 65)`.
 
-`where()`, `orderBy()`, and `orderByDescending()` on `DbSet`, `QueryBuilder`, and `SelectQueryBuilder` carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. (Grouped `orderBy()` stays string-only: it also accepts projection aliases, which are not properties of `T`.) The plain-string forms remain supported for dynamic columns — now safe to use with untrusted input like `orderBy(req.query.sort)`, which throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
+`where()`, `orderBy()`, and `orderByDescending()` on `DbSet`, `QueryBuilder`, and `SelectQueryBuilder` carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. (Grouped `orderBy()` stays string-only: it also accepts projection aliases, which are not properties of `T`.) The plain-string forms remain supported for dynamic columns. Now safe to use with untrusted input like `orderBy(req.query.sort)`, which throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
 
-`skip()` and `take()` require a non-negative integer. They are the only query arguments interpolated into SQL rather than bound, so they are checked at runtime — TypeScript's `number` type does not survive to runtime.
+`skip()` and `take()` require a non-negative integer. They are the only query arguments interpolated into SQL rather than bound, so they are checked at runtime. TypeScript's `number` type does not survive to runtime.
 
 ```typescript
 // Examples
@@ -466,7 +490,7 @@ await db.saveChanges(); // Nothing happens
 
 rnxORM supports all major relationship types with automatic foreign key generation and eager loading.
 
-> **How eager loading works**: `.include()` issues batched follow-up queries (`SELECT ... WHERE fk IN (...)`) and stitches the related entities together in memory — it does not generate SQL JOINs. Only one level of include is supported (no nested `thenInclude`).
+> **How eager loading works**: `.include()` issues batched follow-up queries (`SELECT ... WHERE fk IN (...)`) and stitches the related entities together in memory. It does not generate SQL JOINs. Only one level of include is supported (no nested `thenInclude`).
 
 ### One-to-Many / Many-to-One
 
@@ -509,8 +533,7 @@ users[0].posts.forEach(post => console.log(post.title));
 
 > **Declaration order matters**: `@ManyToMany` derives its default join-table
 > name from the related class at decoration time, and TypeScript's
-> `emitDecoratorMetadata` embeds a direct reference to the property's type —
-> so declare a class **before** any class whose decorated properties
+> `emitDecoratorMetadata` embeds a direct reference to the property's type. > so declare a class **before** any class whose decorated properties
 > reference it, or you'll hit `ReferenceError: Cannot access 'X' before
 > initialization` at import time. See `examples/02-relationships.ts` for a
 > working ordering.
@@ -856,7 +879,7 @@ await db.ensureCreated(); // Seeds data automatically
 
 ## Default Values & Computed Columns *(Planned)*
 
-> **Note**: These APIs currently only **store configuration metadata — they have no runtime effect yet**. `hasDefaultValue()` is not emitted as a `DEFAULT` clause in `CREATE TABLE` and is not used during inserts; `hasComputedColumnSql()` does not generate `GENERATED ALWAYS AS` columns. Full support is planned. If you need defaults or computed columns today, define them in a migration with raw SQL (`builder.sql(...)`) or via `MigrationBuilder.createTable`, which does support `defaultValue`.
+> **Note**: These APIs currently only **store configuration metadata. They have no runtime effect yet**. `hasDefaultValue()` is not emitted as a `DEFAULT` clause in `CREATE TABLE` and is not used during inserts; `hasComputedColumnSql()` does not generate `GENERATED ALWAYS AS` columns. Full support is planned. If you need defaults or computed columns today, define them in a migration with raw SQL (`builder.sql(...)`) or via `MigrationBuilder.createTable`, which does support `defaultValue`.
 
 ### Default Values
 
@@ -938,16 +961,16 @@ Global query filters automatically apply to all queries for an entity, making th
 ### Defining Query Filters
 
 Use `hasQueryFilter()` in your `onModelCreating()` method. The **structured
-form** is preferred — its conditions are translated to parameterized SQL
+form** is preferred. Its conditions are translated to parameterized SQL
 `WHERE` clauses, so filtered rows never leave the database:
 
 ```typescript
 protected onModelCreating(modelBuilder: ModelBuilder): void {
-    // Soft delete filter — becomes "WHERE isDeleted = $1" in SQL
+    // Soft delete filter. Becomes "WHERE isDeleted = $1" in SQL
     modelBuilder.entity(User)
         .hasQueryFilter({ property: 'isDeleted', operator: '=', value: false });
 
-    // Multi-tenant filter — pass a function to resolve the value at query time
+    // Multi-tenant filter. Pass a function to resolve the value at query time
     modelBuilder.entity(Document)
         .hasQueryFilter({ property: 'tenantId', operator: '=', value: () => this.currentTenantId });
 
@@ -961,7 +984,7 @@ protected onModelCreating(modelBuilder: ModelBuilder): void {
 ```
 
 `property` is the entity property name (mapped to its column, with value
-converters applied — per element for `IN`/`NOT IN`), and `operator` must come
+converters applied. Per element for `IN`/`NOT IN`), and `operator` must come
 from the same validated set as `where()`: `=`, `!=`, `<>`, `>`, `<`, `>=`,
 `<=`, `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`. The operator
 is checked when `hasQueryFilter()` runs, so a typo fails at startup rather than
@@ -974,7 +997,7 @@ modelBuilder.entity(User).hasQueryFilter({ property: 'deletedAt', operator: 'IS'
 ```
 
 The **predicate form** is still supported for arbitrary JavaScript logic, but
-runs **in memory after rows are fetched** — the SQL is not modified, so
+runs **in memory after rows are fetched**. The SQL is not modified, so
 filtered-out rows still cross the wire:
 
 ```typescript
@@ -1003,7 +1026,7 @@ const activeCount = await db.set(User).count();
 > **Scope**: structured filters apply to `toList()`, `find()`, `where()`
 > chains, aggregates (`count`/`sum`/`average`/`min`/`max`), `select()`
 > projections, and `groupBy()` queries (injected into the WHERE clause ahead
-> of GROUP BY/HAVING). Raw SQL is the one path that is not rewritten — raw
+> of GROUP BY/HAVING). Raw SQL is the one path that is not rewritten. Raw
 > SQL results are filtered in memory instead. Filters are a convenience, not
 > a tenant-isolation boundary; see [SECURITY.md](SECURITY.md).
 >
@@ -1264,7 +1287,7 @@ export class User {
 
 **Current Behavior:**
 - Shadow properties are **included in CREATE TABLE** statements as plain columns
-- Their `defaultValue` is sent as a **literal parameter value in INSERT statements** — it is *not* emitted as a DDL `DEFAULT` clause
+- Their `defaultValue` is sent as a **literal parameter value in INSERT statements**. It is *not* emitted as a DDL `DEFAULT` clause
 - They're **excluded from entity mapping** (not set on TypeScript objects)
 
 > **Limitation**: Because defaults are bound as parameter values, SQL expressions like `'CURRENT_TIMESTAMP'` or `'NOW()'` are inserted as literal strings and will fail or store the wrong value on real databases. Use **constant defaults only** (numbers, strings, booleans) with shadow properties for now. DDL `DEFAULT` clause support is planned.
@@ -1393,7 +1416,7 @@ When you need to execute complex SQL that can't be expressed through the fluent 
 
 Execute raw SQL and map results to entity types.
 
-> **Placeholder syntax is provider-specific** — rnxORM does not translate placeholders in raw SQL. Use `$1, $2, ...` for PostgreSQL (as in the examples below), `@p0, @p1, ...` for SQL Server, and `?` for MariaDB/MySQL.
+> **Placeholder syntax is provider-specific**. RnxORM does not translate placeholders in raw SQL. Use `$1, $2, ...` for PostgreSQL (as in the examples below), `@p0, @p1, ...` for SQL Server, and `?` for MariaDB/MySQL.
 
 ```typescript
 // Simple raw query
@@ -1616,7 +1639,7 @@ const stats = await db.set(OrderStatistics)
 
 ## Owned Entity Types *(Planned)*
 
-> **Note**: `ownsOne()` and `ownsMany()` currently only **store configuration metadata — they have no runtime effect yet**. No flattened columns are added to the owner's table, no separate table is created for owned collections, and owned objects are not persisted or hydrated. The documentation below describes the planned design. Until it ships, model value objects as regular columns (e.g. with a JSON value converter via `hasConversion()`).
+> **Note**: `ownsOne()` and `ownsMany()` currently only **store configuration metadata. They have no runtime effect yet**. No flattened columns are added to the owner's table, no separate table is created for owned collections, and owned objects are not persisted or hydrated. The documentation below describes the planned design. Until it ships, model value objects as regular columns (e.g. with a JSON value converter via `hasConversion()`).
 
 Owned entity types are entities that don't have their own identity and are always accessed through their owner entity. They're perfect for value objects like addresses, money, or other complex types that belong to a parent entity.
 
@@ -1941,7 +1964,7 @@ async function updateWithRetry(product: Product, changes: Partial<Product>) {
 
 For read-only queries, use `asNoTracking()` to improve performance. Entities returned from no-tracking queries are not registered in the change tracker, so modifying them has no effect on `saveChanges()`.
 
-> **Note**: No-tracking entities are ordinary mutable objects — they are *not* frozen. Modifications simply won't be persisted.
+> **Note**: No-tracking entities are ordinary mutable objects. They are *not* frozen. Modifications simply won't be persisted.
 
 ```typescript
 // Read-only query - entities are not tracked
@@ -2141,8 +2164,8 @@ builder.sql('UPDATE users SET status = $1 WHERE created_at < $2', ['inactive', n
 ### Running Migrations from the CLI
 
 `migration:run`, `migration:revert`, and `migration:status` load a config
-module — `rnxorm.config.js` in the working directory by default, or any path
-passed via `--config` — that exports a `createMigrator()` factory:
+module. `rnxorm.config.js` in the working directory by default, or any path
+passed via `--config`. That exports a `createMigrator()` factory:
 
 ```javascript
 // rnxorm.config.js

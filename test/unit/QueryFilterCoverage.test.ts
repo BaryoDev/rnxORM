@@ -11,7 +11,7 @@ import { SqlCaptureProvider, CaptureDialect } from '../mocks/SqlCaptureProvider'
  *
  * The original shipped bug was that count() silently ignored query filters.
  * This file pins that count() (and every other SQL read path) now includes the
- * filter — groupBy() included, since 2.2.0 closed that last gap.
+ * filter. GroupBy() included, since 2.2.0 closed that last gap.
  *
  * What is still NOT applied in SQL, and is pinned here as such: the legacy
  * predicate form of hasQueryFilter(), which runs in memory over materialized

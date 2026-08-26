@@ -13,4 +13,4 @@ Closes #
 ## Docs
 
 - [ ] README / CHANGELOG updated if behavior or claims changed
-      (README claims must stay evidence-based — link the proving test)
+      (README claims must stay evidence-based. Link the proving test)

@@ -253,12 +253,12 @@ describe('Identity Map (issue #5)', () => {
 });
 
 /**
- * Entities that enter tracking with a primary key already set — attach(),
- * update(), add() with an explicit id — must be identity-mapped too, or a
+ * Entities that enter tracking with a primary key already set. Attach(),
+ * update(), add() with an explicit id. Must be identity-mapped too, or a
  * later find() of the same key mints a second tracked instance (issue #5
  * through a third door).
  */
-describe('Identity Map — entities tracked without a round trip', () => {
+describe('Identity Map. Entities tracked without a round trip', () => {
     it('attach() then find(samePk) returns the attached instance', async () => {
         const { db, provider } = makeDb();
 
@@ -329,7 +329,7 @@ describe('Identity Map — entities tracked without a round trip', () => {
     });
 });
 
-describe('Identity Map — value-converted primary keys', () => {
+describe('Identity Map. Value-converted primary keys', () => {
     it('insert backfill and row mapping key the identity map identically', async () => {
         const { db, provider } = makeDb('postgresql');
 

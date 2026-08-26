@@ -46,7 +46,7 @@ class SgAccount {
 
 // Soft-delete-shaped entity for the set/null operators. @Column defaults the
 // column name to the LOWERCASED property name, so `deletedAt` maps to
-// `deletedat` — the assertions below spell the column, not the property.
+// `deletedat`. The assertions below spell the column, not the property.
 @Entity('sqlgen_docs')
 class SgDoc {
     @PrimaryKey()
@@ -604,7 +604,7 @@ describe('short-circuit selectors fall back to in-memory projection (I2)', () =>
         const results = await db.set(SgDoc).select(selector).toList();
 
         expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs');
-        // '' is falsy, so `||` yields 'live' — and `??` yields '' (only nullish
+        // '' is falsy, so `||` yields 'live'. And `??` yields '' (only nullish
         // falls through). Asserting both proves the selector ran in JS with real
         // values rather than being resolved to a single column at capture time.
         expect(results).toEqual([_label === '||' ? 'live' : '']);

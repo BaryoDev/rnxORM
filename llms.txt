@@ -10,7 +10,7 @@ Implemented:
 - **Relationships**: `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`
 - **Change Tracking & SaveChanges()**: EF Core-style automatic change detection, single transaction
 - **Fluent API / ModelBuilder**: Configure entities programmatically via `onModelCreating()`
-- **Eager Loading**: `.include()` — batched follow-up queries (WHERE pk IN (...)), NOT JOINs; single-level only
+- **Eager Loading**: `.include()`. Batched follow-up queries (WHERE pk IN (...)), NOT JOINs; single-level only
 - **Data Seeding**: `hasData()`, idempotent by primary key
 - **Migrations (library API)**: `MigrationBuilder` and `Migrator` with per-dialect SQL and history tracking
 - **Aggregations**: `sum`, `average`, `min`, `max`, `count` as real SQL aggregates
@@ -19,24 +19,24 @@ Implemented:
 - **Bulk Operations**: `addRange`, `updateRange`, `removeRange` (per-row statements, one transaction)
 - **Schema Evolution**: `ensureCreated()` adds missing columns, best-effort type migration
 - **Query Optimization**: `.asNoTracking()` skips change tracking (entities are NOT frozen)
-- **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })` — translated to SQL WHERE clauses on toList/find/where-chains/aggregates/select; `value` may be a function resolved at query time; bypass with `ignoreQueryFilters()`
+- **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })`. Translated to SQL WHERE clauses on toList/find/where-chains/aggregates/select; `value` may be a function resolved at query time; bypass with `ignoreQueryFilters()`
 - **Migration CLI**: `migration:create` scaffolds; `migration:run`/`revert`/`status` load a `rnxorm.config.js` (or `--config <path>`) exporting `createMigrator()`
 
 Partial (works with limitations):
 - **LINQ-Style Projections**: `select`/`groupBy` lambdas are resolved by a recording Proxy (no regex, no toString parsing); simple property/object-literal shapes and `g.key`/aggregates translate to SQL with mapped column names; an unmapped projected property throws; computed selectors (template strings, arithmetic, `||`/`??`/ternary between columns) fall back to in-memory projection where a fallback exists, otherwise throw
-- **Global Query Filters (predicate form)**: `hasQueryFilter(u => ...)` predicates run in memory after fetching — never translated to SQL; prefer the structured form, which IS translated on every read path including groupBy(). Raw SQL results are filtered in memory by both forms
-- **Raw SQL**: `fromSqlRaw()`/`executeSqlRaw()` — placeholders are provider-native ($1 postgres, @p0 mssql, ? mariadb), not translated
+- **Global Query Filters (predicate form)**: `hasQueryFilter(u => ...)` predicates run in memory after fetching. Never translated to SQL; prefer the structured form, which IS translated on every read path including groupBy(). Raw SQL results are filtered in memory by both forms
+- **Raw SQL**: `fromSqlRaw()`/`executeSqlRaw()`. Placeholders are provider-native ($1 postgres, @p0 mssql, ? mariadb), not translated
 - **Keyless Entity Types**: `hasNoKey()` queries views; read-only not enforced
-- **Shadow Properties**: columns created, but defaults are bound as literal parameter values — SQL expressions like CURRENT_TIMESTAMP do not work
+- **Shadow Properties**: columns created, but defaults are bound as literal parameter values. SQL expressions like CURRENT_TIMESTAMP do not work
 
-NOT implemented (API accepts config but has no runtime effect — do not rely on):
+NOT implemented (API accepts config but has no runtime effect. Do not rely on):
 - **Owned Entity Types** (`ownsOne()`/`ownsMany()`)
 - **Default Values** (`hasDefaultValue()` on regular columns)
 - **Computed Columns** (`hasComputedColumnSql()`)
 - **Explicit Loading** (`entry().reference()`/`collection()` throw)
 - **Lazy Loading**
 
-Testing: the suite (534 tests) runs against an in-memory mock provider by default and against real PostgreSQL/MariaDB/SQL Server containers in CI on every PR and push to main. The README Features section carries a feature→test verification map; treat claims outside it as unverified.
+Testing: the suite (534 tests) runs against an in-memory mock provider by default and against real PostgreSQL/MariaDB/SQL Server containers in CI on every PR and push to main. The README Features section carries a feature-to-test verification map; treat claims outside it as unverified.
 
 ## Installation
 
@@ -141,9 +141,9 @@ Each provider implements `IDatabaseProvider` with a `getDialect()` method return
 - `first()` / `firstOrThrow()`: Get first result
 - `single()` / `singleOrDefault()`: Get exactly one result
 - `count()`: Count matching entities
-- `where(col, op, val)`: Filter entities. `op` comes from a closed, runtime-validated set: `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`. `IN`/`NOT IN` take an array (empty array => `1 = 0` / `1 = 1`); `IS`/`IS NOT` take `null`. `BETWEEN` is unsupported — use two `where()` calls
+- `where(col, op, val)`: Filter entities. `op` comes from a closed, runtime-validated set: `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`. `IN`/`NOT IN` take an array (empty array => `1 = 0` / `1 = 1`); `IS`/`IS NOT` take `null`. `BETWEEN` is unsupported. Use two `where()` calls
 - `orderBy(col)` / `orderByDescending(col)`: Sort results. Column names are validated against entity metadata
-- `skip(n)` / `take(n)`: Pagination. `n` must be a non-negative integer (validated at runtime — these are interpolated, not bound)
+- `skip(n)` / `take(n)`: Pagination. `n` must be a non-negative integer (validated at runtime. These are interpolated, not bound)
 - `include(selector)`: Eager load related entities (tracked and identity-mapped unless `asNoTracking()`)
 - `select(selector)`: Project to a different shape
 - `groupBy(selector)`: Group results
@@ -159,16 +159,16 @@ Each provider implements `IDatabaseProvider` with a `getDialect()` method return
 - `.hasIndex(selector)` / `.hasCompositeIndex(selectors)`: Add indexes
 - `.hasUnique(selector)`: Add unique constraint
 - `.hasData(seedArray)`: Seed initial data
-- `.hasQueryFilter(conditions | predicate)`: Add global query filter — structured conditions ({ property, operator, value }) are translated to SQL; predicates run in memory
+- `.hasQueryFilter(conditions | predicate)`: Add global query filter. Structured conditions ({ property, operator, value }) are translated to SQL; predicates run in memory
 - `.hasNoKey()`: Mark as keyless entity
-- `.ownsOne(selector, Type)` / `.ownsMany(selector, Type)`: Configure owned entities (planned — no runtime effect yet)
+- `.ownsOne(selector, Type)` / `.ownsMany(selector, Type)`: Configure owned entities (planned. No runtime effect yet)
 - `.shadowProperty(name, type, options)`: Add database-only column
 - `.property(selector)`: Configure a property
   - `.isRequired()` / `.isOptional()`: Nullability
   - `.hasMaxLength(n)`: Max string length
   - `.hasColumnName(name)` / `.hasColumnType(type)`: Column mapping
-  - `.hasDefaultValue(val)`: Default value (planned — no runtime effect yet)
-  - `.hasComputedColumnSql(sql)`: Computed column (planned — no runtime effect yet)
+  - `.hasDefaultValue(val)`: Default value (planned. No runtime effect yet)
+  - `.hasComputedColumnSql(sql)`: Computed column (planned. No runtime effect yet)
   - `.hasConversion(toDB, fromDB)`: Value converter
   - `.isConcurrencyToken()`: Optimistic concurrency
 
