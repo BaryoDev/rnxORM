@@ -1,12 +1,12 @@
 # Contributing
 
-Thanks for contributing to rnxORM.
+Thanks for contributing to arnexORM.
 
 ## Setup
 
 ```bash
 git clone https://github.com/BaryoDev/rnxORM.git
-cd rnxORM
+cd arnexORM
 npm ci
 npm test
 ```
@@ -52,7 +52,7 @@ npm run format    # prettier, if you have touched formatting
 
 ## Contributor terms
 
-rnxORM is [MPL-2.0](LICENSE). Your contribution ships under that licence and you keep your
+arnexORM is [MPL-2.0](LICENSE). Your contribution ships under that licence and you keep your
 copyright. There is nothing to sign.
 
 ## Conduct

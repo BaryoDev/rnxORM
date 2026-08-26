@@ -1,11 +1,11 @@
 {
-  "name": "rnxorm",
+  "name": "arnexorm",
   "version": "2.2.0",
   "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core. See CHANGELOG.md for release notes.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "rnxorm": "dist/migrations/cli.js"
+    "arnexorm": "dist/migrations/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -24,7 +24,8 @@
     "mariadb",
     "mysql",
     "database",
-    "entity-framework"
+    "entity-framework",
+    "rnxorm"
   ],
   "author": "Arnel Robles",
   "license": "MPL-2.0",

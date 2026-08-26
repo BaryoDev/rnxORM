@@ -1,13 +1,13 @@
-# rnxORM examples
+# arnexORM examples
 
-Runnable showcase scripts for rnxORM. Each file is self-contained: it drops
+Runnable showcase scripts for arnexORM. Each file is self-contained: it drops
 and recreates its own uniquely-prefixed tables (`ex1_`, `ex2_`, ...) at the
 top of `main()`, so you can run any example any number of times without
 manual cleanup, and running one example never touches another's tables.
 
 These examples import from `../src` (the package source) so they run
-directly against this checkout. In your own app, install `rnxorm` and import
-from the package name instead, e.g. `import { DbContext } from "rnxorm";` —
+directly against this checkout. In your own app, install `arnexorm` and import
+from the package name instead, e.g. `import { DbContext } from "arnexorm";` —
 each file's header comment shows the equivalent import.
 
 ## Running
@@ -41,7 +41,7 @@ docker compose -f ../docker-compose.test.yml down -v
 | `02-relationships.ts` | `OneToMany`/`ManyToOne` (Author/Book), `include()` eager loading, `ManyToMany` (Book/Genre) through a join table. |
 | `03-query-filters-and-security.ts` | Structured `hasQueryFilter()` soft-delete filtering respected by `count()`, pagination, and `groupBy()`; `ignoreQueryFilters()`; then a security demo where `orderBy()` rejects an injection-shaped column string, caught in a `try`/`catch`. |
 | `04-concurrency-and-identity.ts` | The identity map (`find()` twice on one context returns the same instance, printed via `===`), and optimistic concurrency (two contexts racing to update the same row; the loser's `saveChanges()` throws). |
-| `05-migrations.ts` | A programmatic `Migrator` with `createTable`/`addColumn` migrations (each with a matching `down()`), `migrate()` then `status()`, plus comments showing the CLI equivalents (`npx rnxorm migration:create ...`, `migration:run`, and the `rnxorm.config.js` shape). |
+| `05-migrations.ts` | A programmatic `Migrator` with `createTable`/`addColumn` migrations (each with a matching `down()`), `migrate()` then `status()`, plus comments showing the CLI equivalents (`npx arnexorm migration:create ...`, `migration:run`, and the `arnexorm.config.js` shape). |
 
 ## Environment variables
 

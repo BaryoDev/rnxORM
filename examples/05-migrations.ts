@@ -1,25 +1,25 @@
 /**
- * rnxORM Migrations
+ * arnexORM Migrations
  *
  * A programmatic Migrator with two migrations (createTable, then addColumn,
  * each with a matching down()), applied with migrate() and inspected with
  * status().
  *
- * In your app: import { DbContext, PostgreSQLProvider, Migration, MigrationBuilder, Migrator } from "rnxorm";
+ * In your app: import { DbContext, PostgreSQLProvider, Migration, MigrationBuilder, Migrator } from "arnexorm";
  * Here we import from "../src" so the example runs against the repo's source.
  *
  * --- CLI equivalents ---
  *
  * Scaffold a migration file:
- *   npx rnxorm migration:create create-widgets-table
+ *   npx arnexorm migration:create create-widgets-table
  *
- * Apply/inspect migrations, driven by a rnxorm.config.js in your project root:
- *   npx rnxorm migration:run
- *   npx rnxorm migration:status
+ * Apply/inspect migrations, driven by a arnexorm.config.js in your project root:
+ *   npx arnexorm migration:run
+ *   npx arnexorm migration:status
  *
- * rnxorm.config.js shape (loaded by migration:run/revert/status):
+ * arnexorm.config.js shape (loaded by migration:run/revert/status):
  *
- *   const { DbContext, PostgreSQLProvider, Migrator } = require("rnxorm");
+ *   const { DbContext, PostgreSQLProvider, Migrator } = require("arnexorm");
  *   const migrations = require("./dist/migrations");
  *
  *   module.exports = {

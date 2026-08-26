@@ -48,8 +48,8 @@ describe('migration CLI', () => {
             expect(() => resolveConfigPath()).toThrow(/No config file found/);
         });
 
-        it('finds rnxorm.config.js in the working directory', () => {
-            const configPath = path.join(tempDir, 'rnxorm.config.js');
+        it('finds arnexorm.config.js in the working directory', () => {
+            const configPath = path.join(tempDir, 'arnexorm.config.js');
             fs.writeFileSync(configPath, 'module.exports = {};');
 
             expect(resolveConfigPath()).toBe(configPath);

@@ -1,4 +1,4 @@
-# rnxORM
+# arnexORM
 
 A lightweight TypeScript ORM for **PostgreSQL**, **SQL Server**, and **MariaDB/MySQL**, inspired by Entity Framework Core.
 
@@ -20,7 +20,7 @@ Implemented:
 - **Schema Evolution**: `ensureCreated()` adds missing columns, best-effort type migration
 - **Query Optimization**: `.asNoTracking()` skips change tracking (entities are NOT frozen)
 - **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })` — translated to SQL WHERE clauses on toList/find/where-chains/aggregates/select; `value` may be a function resolved at query time; bypass with `ignoreQueryFilters()`
-- **Migration CLI**: `migration:create` scaffolds; `migration:run`/`revert`/`status` load a `rnxorm.config.js` (or `--config <path>`) exporting `createMigrator()`
+- **Migration CLI**: `migration:create` scaffolds; `migration:run`/`revert`/`status` load a `arnexorm.config.js` (or `--config <path>`) exporting `createMigrator()`
 
 Partial (works with limitations):
 - **LINQ-Style Projections**: `select`/`groupBy` lambdas are resolved by a recording Proxy (no regex, no toString parsing); simple property/object-literal shapes and `g.key`/aggregates translate to SQL with mapped column names; an unmapped projected property throws; computed selectors (template strings, arithmetic, `||`/`??`/ternary between columns) fall back to in-memory projection where a fallback exists, otherwise throw
@@ -42,19 +42,19 @@ Testing: the suite (534 tests) runs against an in-memory mock provider by defaul
 
 ```bash
 # PostgreSQL
-npm install rnxorm pg reflect-metadata
+npm install arnexorm pg reflect-metadata
 
 # SQL Server
-npm install rnxorm mssql reflect-metadata
+npm install arnexorm mssql reflect-metadata
 
 # MariaDB/MySQL
-npm install rnxorm mariadb reflect-metadata
+npm install arnexorm mariadb reflect-metadata
 ```
 
 ## Usage Example
 
 ```typescript
-import { Entity, Column, PrimaryKey, DbContext, PostgreSQLProvider } from "rnxorm";
+import { Entity, Column, PrimaryKey, DbContext, PostgreSQLProvider } from "arnexorm";
 
 @Entity("users")
 class User {
@@ -107,7 +107,7 @@ async function main() {
 ## Database Providers
 
 ```typescript
-import { PostgreSQLProvider, MSSQLProvider, MariaDBProvider } from "rnxorm";
+import { PostgreSQLProvider, MSSQLProvider, MariaDBProvider } from "arnexorm";
 
 // PostgreSQL
 new DbContext(new PostgreSQLProvider({ host, port, user, password, database }));

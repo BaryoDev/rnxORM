@@ -14,7 +14,7 @@ What can't you do today, or what is painful?
 ```
 
 **How EF Core (or another ORM) handles this**
-rnxORM follows EF Core's model where sensible — prior art helps scope the design.
+arnexORM follows EF Core's model where sensible — prior art helps scope the design.
 
 **Scope notes**
 Current provider focus is SQL Server + PostgreSQL (see issues #8/#12 for the

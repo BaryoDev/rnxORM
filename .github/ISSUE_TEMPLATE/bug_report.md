@@ -15,7 +15,7 @@ labels: bug
 ```
 
 **Environment**
-- rnxorm version:
+- arnexorm version:
 - Database + version (PostgreSQL / SQL Server / MariaDB):
 - Node version:
 

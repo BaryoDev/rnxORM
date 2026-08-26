@@ -1,5 +1,5 @@
 /**
- * rnxORM Query Filters & Security
+ * arnexORM Query Filters & Security
  *
  * Part 1: a structured hasQueryFilter() soft-delete filter, and how count(),
  * pagination, and groupBy() all respect it automatically — plus
@@ -10,7 +10,7 @@
  * it ever touches SQL, so a string that looks like an injection payload is
  * rejected with a thrown error instead of being interpolated.
  *
- * In your app: import { Entity, PrimaryKey, Column, DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
+ * In your app: import { Entity, PrimaryKey, Column, DbContext, ModelBuilder, PostgreSQLProvider } from "arnexorm";
  * Here we import from "../src" so the example runs against the repo's source.
  */
 import "reflect-metadata";
