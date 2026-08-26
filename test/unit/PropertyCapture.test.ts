@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { capture, captureAggregates, OpaqueReason, resolveColumn, resolvePropertyName } from '../../src/core/expressions/PropertyCapture';
 import { Entity, PrimaryKey, Column } from '../../src/decorators';
 
-describe('capture — single property', () => {
+describe('capture. Single property', () => {
     it('captures an arrow selector', () => {
         expect(capture((u: any) => u.name)).toEqual({ kind: 'property', path: 'name' });
     });
@@ -28,7 +28,7 @@ describe('capture — single property', () => {
     });
 });
 
-describe('capture — projections', () => {
+describe('capture. Projections', () => {
     it('captures an object-literal projection', () => {
         expect(capture((u: any) => ({ n: u.name, a: u.age })))
             .toEqual({ kind: 'projection', aliases: { n: 'name', a: 'age' } });
@@ -48,14 +48,14 @@ describe('capture — projections', () => {
     });
 });
 
-describe('capture — opaque detection', () => {
+describe('capture. Opaque detection', () => {
     // Each case's expected reason is asserted deterministically from the
     // implementation's control flow, not by running the code and copying
     // whatever came out:
     //  - string concatenation / template literal / arithmetic all force a
     //    coercion of a marker (ToPrimitive/ToString/ToNumber), which the
     //    marker's `get` trap flags via `coerced = true` before any value is
-    //    returned to `capture` — so these are always 'computed'.
+    //    returned to `capture`. So these are always 'computed'.
     //  - a throwing selector is always 'computed' because `capture`'s catch
     //    block hardcodes that reason regardless of why the throw happened.
     //  - `constant` and `array return` never touch the coercion path at all
@@ -65,7 +65,7 @@ describe('capture — opaque detection', () => {
     //    nor a plain object.
     //  - `the root itself` returns the root proxy unchanged. `pathOf(root)` is
     //    always undefined (only markers carry the PATH symbol), so `capture`
-    //    treats it as a plain-object projection candidate — but the target
+    //    treats it as a plain-object projection candidate. But the target
     //    object has no own properties, so the projection ends up with zero
     //    aliases, which is explicitly 'unsupported'.
     const cases: Array<[string, (u: any) => any, OpaqueReason]> = [
@@ -116,7 +116,7 @@ describe('capture — opaque detection', () => {
  */
 const FALLBACK = 'anonymous';
 
-describe('capture — short-circuit and branching selectors are opaque (I2)', () => {
+describe('capture. Short-circuit and branching selectors are opaque (I2)', () => {
     it.each([
         ['|| between two columns', (u: any) => u.nickname || u.name],
         ['?? between two columns', (u: any) => u.nickname ?? u.name],
@@ -144,7 +144,7 @@ describe('capture — short-circuit and branching selectors are opaque (I2)', ()
     it('is opaque when a reused marker hides a short-circuit', () => {
         // Compensating shape: aliasing a marker into a local means the extra
         // operand costs no additional root access, so the access count alone
-        // would let it through — the nullish probe is what catches it.
+        // would let it through. The nullish probe is what catches it.
         expect(capture((u: any) => {
             const nick = u.nickname;
             return { a: nick, b: nick || u.name };
@@ -173,7 +173,7 @@ describe('capture — short-circuit and branching selectors are opaque (I2)', ()
     });
 });
 
-describe('capture — safety', () => {
+describe('capture. Safety', () => {
     it('invokes the selector at most twice (normal pass + nullish probe)', () => {
         // The probe pass is what makes `||`/`??` detectable at all (see the I2
         // block above), so capture is no longer single-invocation. Selectors are
@@ -213,14 +213,14 @@ describe('captureAggregates', () => {
     });
 
     it('is opaque when a non-function argument is passed to an aggregate', () => {
-        // g.sum(5) must not be silently treated the same as g.sum() — a
+        // g.sum(5) must not be silently treated the same as g.sum(). A
         // non-function argument can't be resolved to a column path, so it
         // has to be flagged rather than guessed at.
         expect(captureAggregates((g: any) => ({ x: g.sum(5) })))
             .toEqual({ kind: 'opaque', reason: 'unsupported' });
     });
 
-    it('captures average — the documented IGrouping.average() method name', () => {
+    it('captures average. The documented IGrouping.average() method name', () => {
         // IGrouping.average() and the class's own @example blocks use
         // "average", not "avg". A capture that only recognized "avg" would
         // make the typed, documented public API silently unusable.
@@ -258,7 +258,7 @@ describe('captureAggregates', () => {
 
     it('is opaque for a genuinely unsupported selector shape', () => {
         // Not g.key, not a recognized aggregate call, not a plain object at
-        // all — a computed expression built from the group. This must stay
+        // all. A computed expression built from the group. This must stay
         // opaque; it is not something the g.key fix should start accepting.
         expect(captureAggregates((g: any) => g.key + 1))
             .toEqual({ kind: 'opaque', reason: 'unsupported' });

@@ -10,19 +10,19 @@
   column spelling; renamed properties resolve to their mapped column) and the
   operator against a closed set (`=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`,
   `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`). Structured
-  query-filter operators pass through the same set. Injected strings —
-  including the `orderBy(req.query.sort)` pattern — now throw before any SQL is
+  query-filter operators pass through the same set. Injected strings , 
+  including the `orderBy(req.query.sort)` pattern. Now throw before any SQL is
   assembled. Previously column and operator were interpolated verbatim. Added
   `SECURITY.md` documenting the protection boundary.
   Grouped `orderBy()` is the one documented exception: it also accepts a
   projection alias that exists only in the SELECT list, which metadata cannot
-  verify, so such aliases are required to be plain identifiers — which still
+  verify, so such aliases are required to be plain identifiers. Which still
   rejects every injection-shaped string (quotes, whitespace, semicolons,
   comment markers).
 - **`skip()` / `take()` validate their argument.** Row limits are the only
   query-API arguments that must be interpolated into SQL (`LIMIT`/`OFFSET` and
   `OFFSET ... FETCH NEXT` take no bound parameter on every driver), and
-  TypeScript's `number` type erases at runtime — an `as any` cast or an untyped
+  TypeScript's `number` type erases at runtime. An `as any` cast or an untyped
   `req.query.limit` used to land verbatim in the statement
   (`take("10; DELETE FROM users --")` emitted the payload). All four builders
   now require a non-negative integer and throw before any SQL is assembled.
@@ -50,7 +50,7 @@
   correctly on every dialect. Passing a non-array to `IN`, or a non-null value
   to `IS`, throws.
 - **Eager-loaded entities are change-tracked and identity-mapped.** See
-  Changed — `include()` previously returned untracked, unmapped copies.
+  Changed. `include()` previously returned untracked, unmapped copies.
 - **Query-filter operators are validated at registration time.**
   `ModelBuilder.hasQueryFilter()` (structured form) checks each condition's
   operator when `onModelCreating()` runs, so a configuration typo fails once at
@@ -64,7 +64,7 @@
   ahead of GROUP BY/HAVING with placeholder ordering preserved;
   `ignoreQueryFilters()` respected. Caveat: because `having()` bakes its
   placeholder indices from the parameter count at call time, grouped queries
-  must inject the filter first — so a **function-valued** filter value is
+  must inject the filter first. So a **function-valued** filter value is
   resolved when `groupBy()` is called, not when the query executes. Every other
   read path resolves it at execution. Build grouped queries after the value
   (e.g. the current tenant) is in place.
@@ -74,12 +74,12 @@
 
 ### Changed
 
-- **Operators outside the supported set now throw** — breaking for
+- **Operators outside the supported set now throw**. Breaking for
   *documented* 2.1 usage, not just undefined behavior: 2.1's README showed
   arbitrary SQL comparison operators. The closed set now covers everything
   that was realistically in use (`IN`/`NOT IN`/`IS`/`IS NOT` are restored
   above), leaving `BETWEEN` as the one documented operator with no
-  replacement — express it as two `where()` calls
+  replacement. Express it as two `where()` calls
   (`.where('age','>=',18).where('age','<=',65)`).
 - `where()`/`orderBy()`/`having()` now **throw** on unmapped columns instead of
   emitting them into SQL. Code passing invalid identifiers was generating
@@ -93,7 +93,7 @@
   column selector (`g.sum()`) throws too, where it previously rendered
   `SUM(undefined)` into the statement.
 - **`g.key` now aliases the group column.** A selector containing `g.key`
-  emits `<group column> AS <alias>` — so `select(g => ({ dept: g.key, ... }))`
+  emits `<group column> AS <alias>`. So `select(g => ({ dept: g.key, ... }))`
   changes both the emitted SQL and the result-row keys (previously the bare
   group column was emitted and rows came back keyed by the column name, e.g.
   `department`, not `dept`). Selectors that never reference `g.key` keep their
@@ -121,20 +121,20 @@
   `SELECT *` plus in-memory projection (correct results, full rows fetched),
   and APIs with no fallback (`include`, `sum`, `average`, `min`, `max`,
   `groupBy` aggregates) throw. Previously the first column reached silently
-  became the whole expression. `capture()` now evaluates the selector twice —
+  became the whole expression. `capture()` now evaluates the selector twice , 
   a second "nullish probe" pass is the only way to observe a short-circuited
-  operand — so selectors must be pure.
+  operand. So selectors must be pure.
 
 ### Added (from the earlier unreleased 2.2.0 work)
 
 - **SQL-translated global query filters.** `hasQueryFilter()` now accepts
-  structured conditions — `{ property, operator, value }` or an array of them —
+  structured conditions. `{ property, operator, value }` or an array of them , 
   that are compiled into parameterized SQL `WHERE` clauses on every query path
   (`toList()`, `find()`, `where()` chains, `count`/`sum`/`average`/`min`/`max`,
   and `select()` projections), so filtered rows never leave the database.
   `operator` must come from the same validated set as `where()` (see Security),
   `value` may be a function resolved at query time (e.g. a current tenant id),
-  and value converters are applied — per element for `IN`/`NOT IN`. The
+  and value converters are applied. Per element for `IN`/`NOT IN`. The
   predicate form remains supported and
   still runs in memory. Raw SQL results are now filtered in memory by both
   forms. `DbSet` gained `ignoreQueryFilters()` for parity with query chains.
@@ -161,7 +161,7 @@
 ### Documentation
 
 - **The README is now evidence-based.** The Features section carries a
-  feature→test verification map linking every implemented claim to the test
+  feature-to-test verification map linking every implemented claim to the test
   suite that proves it. Claims that had no automated evidence got tests
   (`asNoTracking`, `saveChanges` transaction wrapping and rollback,
   `executeSqlRaw`, shadow-column inserts, schema evolution, the provider
@@ -199,7 +199,7 @@
 Stabilization release: the suite now runs against real PostgreSQL 16, MariaDB 11,
 and SQL Server 2022 (via `docker-compose.test.yml` / `npm run test:integration`),
 and the documentation was rewritten to state feature status honestly
-(implemented / partial / planned) — see the Features section of the README.
+(implemented / partial / planned). See the Features section of the README.
 
 ### Fixed
 

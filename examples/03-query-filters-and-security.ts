@@ -2,7 +2,7 @@
  * rnxORM Query Filters & Security
  *
  * Part 1: a structured hasQueryFilter() soft-delete filter, and how count(),
- * pagination, and groupBy() all respect it automatically — plus
+ * pagination, and groupBy() all respect it automatically. Plus
  * ignoreQueryFilters() to bypass it deliberately.
  *
  * Part 2: the security showcase. orderBy() (like where() and having())

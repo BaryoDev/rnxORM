@@ -7,8 +7,7 @@ manual cleanup, and running one example never touches another's tables.
 
 These examples import from `../src` (the package source) so they run
 directly against this checkout. In your own app, install `rnxorm` and import
-from the package name instead, e.g. `import { DbContext } from "rnxorm";` —
-each file's header comment shows the equivalent import.
+from the package name instead, e.g. `import { DbContext } from "rnxorm";`. Each file's header comment shows the equivalent import.
 
 ## Running
 

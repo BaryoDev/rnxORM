@@ -94,7 +94,7 @@ function createRecorder(): Recorder {
 
 /**
  * Result of re-running a selector against a root whose every property reads as
- * `undefined` — the "nullish probe" described in capture().
+ * `undefined`. The "nullish probe" described in capture().
  */
 interface NullishProbe {
     accesses: number;
@@ -142,14 +142,14 @@ function probeReturnedOnlyUndefined(returned: any, aliases?: string[]): boolean 
  *
  * 1. **Root-access count.** A faithful selector performs exactly one root
  *    property access per marker it returns, so a bare return with more than one
- *    access — or a projection with more accesses than alias entries — is
+ *    access. Or a projection with more accesses than alias entries. Is
  *    computing something. This is what catches ternaries and `&&`, whose
  *    condition operand costs an extra access. (Duplicate columns are fine:
  *    `{a: u.x, b: u.x}` is 2 accesses over 2 entries.)
  *
  * 2. **Nullish probe.** `||` and `??` short-circuit on their left operand, and a
  *    marker is always truthy and non-nullish, so the recorder never observes the
- *    right operand at all — no proxy trap can see it, and the access count is 1.
+ *    right operand at all. No proxy trap can see it, and the access count is 1.
  *    Re-running the selector against a root whose properties all read
  *    `undefined` forces the other branch: any extra root access, any thrown
  *    error, or any returned value that is not `undefined` (respectively an
@@ -160,7 +160,7 @@ function probeReturnedOnlyUndefined(returned: any, aliases?: string[]): boolean 
  * are required to be pure column pickers, so that is safe.
  *
  * RESIDUAL BLIND SPOT: a discarded operand that both costs no root access and
- * evaluates to `undefined` — `u => u.a || undefined`, `u => u.a ?? undefined`,
+ * evaluates to `undefined`. `u => u.a || undefined`, `u => u.a ?? undefined`,
  * or a closed-over variable that happens to hold `undefined`. Such an
  * expression is a semantic no-op (its result is always `u.a`), so resolving it
  * to column `a` is the correct answer anyway. Conversely, a selector that is

@@ -82,7 +82,7 @@ export interface OwnedEntityMetadata {
 /**
  * A structured global query filter condition that can be translated to SQL.
  * `property` is the entity property name (mapped to its column), `operator`
- * is a SQL comparison operator, and `value` is the comparison value — pass a
+ * is a SQL comparison operator, and `value` is the comparison value. Pass a
  * function to resolve the value at query time (e.g. a current tenant id).
  */
 export interface QueryFilterCondition {

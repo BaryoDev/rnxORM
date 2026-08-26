@@ -17,7 +17,7 @@ import { PostgreSQLProvider } from "../src/providers";
 // its related-entity function eagerly (to derive the default join table
 // name). Both effectively require the referenced class to already exist, so
 // Genre and Author are declared before Book. Only one side of a ManyToMany
-// needs the decorator — the join table itself is symmetric.
+// needs the decorator. The join table itself is symmetric.
 @Entity("ex2_genres")
 class Genre {
     @PrimaryKey()
@@ -121,7 +121,7 @@ async function main() {
     genres.addRange([fantasy, classics]);
     await db.saveChanges();
 
-    // There is no fluent "add to collection" API for many-to-many yet — the
+    // There is no fluent "add to collection" API for many-to-many yet. The
     // join table is a plain table, so it's populated directly.
     await db.executeSqlRaw(
         "INSERT INTO ex2_book_genres (bookid, genreid) VALUES ($1, $2), ($1, $3)",

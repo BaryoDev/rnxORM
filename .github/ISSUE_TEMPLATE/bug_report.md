@@ -20,5 +20,4 @@ labels: bug
 - Node version:
 
 **Generated SQL (if relevant)**
-If you can, capture the SQL the ORM emitted (e.g. by logging in your provider)
-— wrong-SQL bugs are fixed much faster with the actual statement.
+If you can, capture the SQL the ORM emitted (e.g. by logging in your provider). Wrong-SQL bugs are fixed much faster with the actual statement.

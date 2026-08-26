@@ -516,7 +516,7 @@ export class EntityTypeBuilder<T> {
      * The filter is automatically applied to all queries; bypass it per-query
      * with ignoreQueryFilters().
      *
-     * Preferred form — structured conditions, translated to SQL WHERE clauses
+     * Preferred form. Structured conditions, translated to SQL WHERE clauses
      * so filtered rows never leave the database. Pass a function as `value`
      * to resolve it at query time (e.g. the current tenant id):
      * @example
@@ -528,7 +528,7 @@ export class EntityTypeBuilder<T> {
      * modelBuilder.entity(Order)
      *     .hasQueryFilter({ property: 'tenantId', operator: '=', value: () => currentTenantId });
      *
-     * Legacy form — a predicate function, evaluated in memory after rows are
+     * Legacy form. A predicate function, evaluated in memory after rows are
      * fetched. Correct, but filtered-out rows still cross the wire:
      * @example
      * modelBuilder.entity(User).hasQueryFilter(u => u.isDeleted === false);

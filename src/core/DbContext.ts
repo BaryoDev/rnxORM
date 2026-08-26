@@ -211,7 +211,7 @@ export class DbContext {
 
         // A generated key comes back in the database's own representation, so
         // it goes through the column's convertFromDb before landing on the
-        // entity — the same conversion the row-mapping path applies. Otherwise
+        // entity. The same conversion the row-mapping path applies. Otherwise
         // a converted key would sit on the entity in its raw form and the
         // identity map would key insert-then-find differently.
         const fromDb = (value: any) =>
@@ -525,7 +525,7 @@ export class DbContext {
                             const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
                             await this.query(alterColumnSql);
                         } catch {
-                            // Type migration failed — data may be incompatible
+                            // Type migration failed. Data may be incompatible
                         }
                     }
                 }
