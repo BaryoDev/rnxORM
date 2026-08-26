@@ -1,5 +1,5 @@
 /**
- * arnexORM Concurrency & Identity
+ * rnxORM Concurrency & Identity
  *
  * The identity map: loading the same row twice through the same DbContext
  * returns the exact same tracked instance.
@@ -8,7 +8,7 @@
  * every update and checked in the WHERE clause, so a second context saving
  * against a stale version throws instead of silently overwriting.
  *
- * In your app: import { Entity, PrimaryKey, Column, DbContext, ModelBuilder, PostgreSQLProvider } from "arnexorm";
+ * In your app: import { Entity, PrimaryKey, Column, DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
  * Here we import from "../src" so the example runs against the repo's source.
  */
 import "reflect-metadata";

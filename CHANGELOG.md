@@ -1,14 +1,6 @@
 # Changelog
 
-## 2.2.0 (2026-08-26)
-
-> **Renamed: this package is now `arnexorm` (display name arnexORM), formerly
-> `rnxorm`.** The rnxorm registry entry became publish-blocked server-side
-> (npm support case pending), so 2.2.0 ships under the new name. Migrate with
-> `npm uninstall rnxorm && npm install arnexorm` and update imports from
-> "rnxorm" to "arnexorm" — the API is otherwise exactly the 2.2.0 API below.
-> Entries for 2.1.0 and earlier refer to the old rnxorm releases.
-
+## 2.2.0 (2026-08-25)
 
 ### Security
 
@@ -146,8 +138,8 @@
   predicate form remains supported and
   still runs in memory. Raw SQL results are now filtered in memory by both
   forms. `DbSet` gained `ignoreQueryFilters()` for parity with query chains.
-- **Working migration CLI.** `arnexorm migration:run`, `migration:revert`, and
-  `migration:status` are now functional: they load a `arnexorm.config.js`
+- **Working migration CLI.** `rnxorm migration:run`, `migration:revert`, and
+  `migration:status` are now functional: they load a `rnxorm.config.js`
   (or `--config <path>`, or a `.ts` config when ts-node is installed) that
   exports a `createMigrator()` factory, execute the command, and disconnect.
   Previously these commands only printed instructions.

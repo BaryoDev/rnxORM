@@ -1,36 +1,30 @@
-# arnexORM
+# rnxORM
 
 A lightweight TypeScript ORM for **PostgreSQL**, **SQL Server**, and **MariaDB**, inspired by Entity Framework Core.
 
-[![npm version](https://img.shields.io/npm/v/arnexorm.svg)](https://www.npmjs.com/package/arnexorm)
+[![npm version](https://img.shields.io/npm/v/rnxorm.svg)](https://www.npmjs.com/package/rnxorm)
 [![GitHub](https://img.shields.io/badge/github-BaryoDev%2FrnxORM-blue)](https://github.com/BaryoDev/rnxORM)
-[![CI](https://github.com/BaryoDev/rnxORM/actions/workflows/ci.yml/badge.svg)](https://github.com/BaryoDev/rnxORM/actions/workflows/ci.yml)
-[![Integration (real databases)](https://github.com/BaryoDev/rnxORM/actions/workflows/integration.yml/badge.svg)](https://github.com/BaryoDev/rnxORM/actions/workflows/integration.yml)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/BaryoDev/rnxORM/actions)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/BaryoDev/rnxORM/actions)
 [![Ko-fi](https://img.shields.io/badge/Support%20me%20on-Ko--fi-ff5f5f?logo=ko-fi&logoColor=white)](https://ko-fi.com/T6T01CQT4R)
-
-> **Formerly `rnxorm`.** Versions up to 2.1.0 were published under that name;
-> from 2.2.0 the package is **`arnexorm`** (the old registry entry is
-> publish-blocked server-side). Migrate: `npm uninstall rnxorm && npm install
-> arnexorm`, then change imports from `"rnxorm"` to `"arnexorm"` — the API is
-> unchanged beyond the documented 2.2.0 changes in the CHANGELOG.
 
 ## Installation
 
 **For PostgreSQL:**
 ```bash
-npm install arnexorm pg reflect-metadata
+npm install rnxorm pg reflect-metadata
 npm install -D typescript @types/node @types/pg
 ```
 
 **For SQL Server:**
 ```bash
-npm install arnexorm mssql reflect-metadata
+npm install rnxorm mssql reflect-metadata
 npm install -D typescript @types/node @types/mssql
 ```
 
 **For MariaDB/MySQL:**
 ```bash
-npm install arnexorm mariadb reflect-metadata
+npm install rnxorm mariadb reflect-metadata
 npm install -D typescript @types/node
 ```
 
@@ -58,7 +52,7 @@ Ensure you have `experimentalDecorators` and `emitDecoratorMetadata` enabled in 
 ### 1. Define your Entity
 
 ```typescript
-import { Entity, Column, PrimaryKey } from "arnexorm";
+import { Entity, Column, PrimaryKey } from "rnxorm";
 
 @Entity("users")
 export class User {
@@ -75,11 +69,11 @@ export class User {
 
 ### 2. Connect to Database
 
-arnexORM supports multiple databases through provider pattern:
+rnxORM supports multiple databases through provider pattern:
 
 **PostgreSQL:**
 ```typescript
-import { DbContext, PostgreSQLProvider } from "arnexorm";
+import { DbContext, PostgreSQLProvider } from "rnxorm";
 
 const db = new DbContext(new PostgreSQLProvider({
   host: "localhost",
@@ -92,7 +86,7 @@ const db = new DbContext(new PostgreSQLProvider({
 
 **SQL Server:**
 ```typescript
-import { DbContext, MSSQLProvider } from "arnexorm";
+import { DbContext, MSSQLProvider } from "rnxorm";
 
 const db = new DbContext(new MSSQLProvider({
   host: "localhost",
@@ -105,7 +99,7 @@ const db = new DbContext(new MSSQLProvider({
 
 **MariaDB/MySQL:**
 ```typescript
-import { DbContext, MariaDBProvider } from "arnexorm";
+import { DbContext, MariaDBProvider } from "rnxorm";
 
 const db = new DbContext(new MariaDBProvider({
   host: "localhost",
@@ -118,7 +112,7 @@ const db = new DbContext(new MariaDBProvider({
 
 ### 3. Basic CRUD Operations with Change Tracking
 
-arnexORM automatically tracks changes to entities loaded from the database. Use `saveChanges()` to persist all changes at once:
+rnxORM automatically tracks changes to entities loaded from the database. Use `saveChanges()` to persist all changes at once:
 
 ```typescript
 import { User } from "./User";
@@ -199,7 +193,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 - **Identifier & operator validation**: `where()`/`orderBy()`/`having()` and query-filter conditions validate column names against entity metadata and operators against a closed set at runtime — injected strings throw before SQL is assembled. See [Query Operators](#query-operators) and [SECURITY.md](SECURITY.md)
 - **Identity map**: loading the same row twice returns the **same tracked instance** (keyed by entity type + primary key), so re-queries can't create conflicting tracked copies and local unsaved modifications survive a re-query. This covers rows loaded through `find()`/`toList()`/`where()` chains, entities eagerly loaded with `include()`, and entities that entered tracking with a known key via `attach()`/`update()`/`add()`. `asNoTracking()` results are never identity-mapped, and neither are primary keys whose value converter produces a non-primitive (the map compares keys by value, so a fresh object per row never matches)
 - **Selector capture (no regex parsing)**: lambda selectors (`include`, aggregates, `select`, `groupBy`, ModelBuilder, decorators) are resolved by a recording Proxy; nested paths and computed expressions fail loudly instead of silently resolving to a wrong column
-- **Migration CLI**: `npx arnexorm migration:create|run|revert|status` — run/revert/status load a `arnexorm.config.js` exporting a `createMigrator()` factory. See [Migrations](#migrations)
+- **Migration CLI**: `npx rnxorm migration:create|run|revert|status` — run/revert/status load a `rnxorm.config.js` exporting a `createMigrator()` factory. See [Migrations](#migrations)
 
 ### Partial ⚠️
 
@@ -262,7 +256,7 @@ The test suite (534 tests, all passing) runs against an **in-memory mock provide
 
 ## Type Mapping
 
-arnexORM automatically maps TypeScript types to database-specific types. You can override this using the `@Column({ type: '...' })` option. This table is pinned by `test/unit/ProviderTypeMapping.test.ts`:
+rnxORM automatically maps TypeScript types to database-specific types. You can override this using the `@Column({ type: '...' })` option. This table is pinned by `test/unit/ProviderTypeMapping.test.ts`:
 
 | TypeScript Type | PostgreSQL | SQL Server | MariaDB/MySQL |
 |----------------|------------|------------|---------------|
@@ -308,7 +302,7 @@ users.take("10; DELETE FROM users" as any);    // throws: not a non-negative int
 
 ## Change Tracking & SaveChanges()
 
-arnexORM implements EF Core-style change tracking, automatically detecting modifications to entities and persisting all changes with a single `saveChanges()` call.
+rnxORM implements EF Core-style change tracking, automatically detecting modifications to entities and persisting all changes with a single `saveChanges()` call.
 
 ### How It Works
 
@@ -470,14 +464,14 @@ await db.saveChanges(); // Nothing happens
 
 ## Relationships
 
-arnexORM supports all major relationship types with automatic foreign key generation and eager loading.
+rnxORM supports all major relationship types with automatic foreign key generation and eager loading.
 
 > **How eager loading works**: `.include()` issues batched follow-up queries (`SELECT ... WHERE fk IN (...)`) and stitches the related entities together in memory — it does not generate SQL JOINs. Only one level of include is supported (no nested `thenInclude`).
 
 ### One-to-Many / Many-to-One
 
 ```typescript
-import { Entity, Column, PrimaryKey, OneToMany, ManyToOne } from "arnexorm";
+import { Entity, Column, PrimaryKey, OneToMany, ManyToOne } from "rnxorm";
 
 @Entity("users")
 export class User {
@@ -522,7 +516,7 @@ users[0].posts.forEach(post => console.log(post.title));
 > working ordering.
 
 ```typescript
-import { Entity, PrimaryKey, Column, ManyToMany } from "arnexorm";
+import { Entity, PrimaryKey, Column, ManyToMany } from "rnxorm";
 
 @Entity("students")
 export class Student {
@@ -561,7 +555,7 @@ const students = await db.set(Student)
 ### One-to-One
 
 ```typescript
-import { Entity, PrimaryKey, Column, OneToOne } from "arnexorm";
+import { Entity, PrimaryKey, Column, OneToOne } from "rnxorm";
 
 @Entity("users")
 export class User {
@@ -602,9 +596,9 @@ author!: User;
 
 ## LINQ-Style Query API
 
-arnexORM provides a LINQ-style API for querying data.
+rnxORM provides a LINQ-style API for querying data.
 
-> **How lambda selectors are translated**: arnexORM does not have an expression-tree parser. Selectors like `u => u.age` or `u => ({ name: u.name })` are matched against the lambda's source text with regexes. Simple property accesses and object literals translate to SQL (`SELECT col AS alias`, `GROUP BY`, SQL aggregates); anything the parser doesn't recognize (computed values, template strings, method calls) makes the query **fall back to fetching all rows and evaluating the selector in memory**. Results stay correct, but check performance on large tables.
+> **How lambda selectors are translated**: rnxORM does not have an expression-tree parser. Selectors like `u => u.age` or `u => ({ name: u.name })` are matched against the lambda's source text with regexes. Simple property accesses and object literals translate to SQL (`SELECT col AS alias`, `GROUP BY`, SQL aggregates); anything the parser doesn't recognize (computed values, template strings, method calls) makes the query **fall back to fetching all rows and evaluating the selector in memory**. Results stay correct, but check performance on large tables.
 
 ### Aggregations
 
@@ -696,7 +690,7 @@ const allAdults = await users.all(u => u.age >= 18);
 Configure entities programmatically by overriding `onModelCreating()` in your DbContext:
 
 ```typescript
-import { DbContext, ModelBuilder, PostgreSQLProvider } from "arnexorm";
+import { DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
 
 export class AppDbContext extends DbContext {
   constructor() {
@@ -770,7 +764,7 @@ export class AppDbContext extends DbContext {
 ### Using Decorators
 
 ```typescript
-import { Entity, Column, PrimaryKey, Index, Unique } from "arnexorm";
+import { Entity, Column, PrimaryKey, Index, Unique } from "rnxorm";
 
 @Entity("users")
 @Index(["email"], { unique: true })
@@ -806,14 +800,14 @@ modelBuilder.entity(User)
 
 ## Data Seeding
 
-arnexORM supports seeding initial data into your database using the Fluent API. Seed data is inserted during `ensureCreated()` and is idempotent (won't duplicate existing records).
+rnxORM supports seeding initial data into your database using the Fluent API. Seed data is inserted during `ensureCreated()` and is idempotent (won't duplicate existing records).
 
 ### Defining Seed Data
 
 Use `hasData()` in your `onModelCreating()` method:
 
 ```typescript
-import { DbContext, ModelBuilder, PostgreSQLProvider } from "arnexorm";
+import { DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
 
 export class AppDbContext extends DbContext {
     constructor() {
@@ -1327,7 +1321,7 @@ modelBuilder.entity(User)
 
 ## Bulk Operations
 
-For better performance when working with multiple entities, arnexORM provides bulk operation methods that track multiple entities at once.
+For better performance when working with multiple entities, rnxORM provides bulk operation methods that track multiple entities at once.
 
 ### AddRange - Bulk Insert
 
@@ -1393,13 +1387,13 @@ console.log(`Deleted ${inactiveUsers.length} inactive users`);
 
 ## Raw SQL Queries
 
-When you need to execute complex SQL that can't be expressed through the fluent API, arnexORM provides raw SQL query support with full entity mapping.
+When you need to execute complex SQL that can't be expressed through the fluent API, rnxORM provides raw SQL query support with full entity mapping.
 
 ### FromSqlRaw - Query Entities
 
 Execute raw SQL and map results to entity types.
 
-> **Placeholder syntax is provider-specific** — arnexORM does not translate placeholders in raw SQL. Use `$1, $2, ...` for PostgreSQL (as in the examples below), `@p0, @p1, ...` for SQL Server, and `?` for MariaDB/MySQL.
+> **Placeholder syntax is provider-specific** — rnxORM does not translate placeholders in raw SQL. Use `$1, $2, ...` for PostgreSQL (as in the examples below), `@p0, @p1, ...` for SQL Server, and `?` for MariaDB/MySQL.
 
 ```typescript
 // Simple raw query
@@ -1824,7 +1818,7 @@ for (const user of users) {
 
 🔄 **Compare with:**
 - **Eager Loading**: Load everything upfront (use `.include()`)
-- **Lazy Loading**: Automatic on-access loading (not yet implemented in arnexORM)
+- **Lazy Loading**: Automatic on-access loading (not yet implemented in rnxORM)
 
 ## Concurrency Tokens
 
@@ -1994,7 +1988,7 @@ const notFound = await users.find(99999); // null
 
 ## Schema Evolution
 
-arnexORM supports basic schema evolution to keep your database in sync with your TypeScript entities.
+rnxORM supports basic schema evolution to keep your database in sync with your TypeScript entities.
 
 ### Adding Columns
 
@@ -2019,7 +2013,7 @@ class User {
 
 ### Type Migration
 
-If you change the type of a property (e.g., from `string` to `number`), arnexORM attempts to migrate the column type safely.
+If you change the type of a property (e.g., from `string` to `number`), rnxORM attempts to migrate the column type safely.
 
 1.  **Detection**: It checks if the database column type matches the TypeScript type.
 2.  **Auto-Fix**: It attempts to migrate the column using `ALTER COLUMN ... TYPE ... USING ...`.
@@ -2027,7 +2021,7 @@ If you change the type of a property (e.g., from `string` to `number`), arnexORM
 
 ## Migrations
 
-arnexORM provides a powerful migration system for versioning and managing database schema changes over time, similar to Entity Framework Core migrations.
+rnxORM provides a powerful migration system for versioning and managing database schema changes over time, similar to Entity Framework Core migrations.
 
 ### Why Use Migrations?
 
@@ -2042,7 +2036,7 @@ While `ensureCreated()` is great for development, migrations provide:
 Use the CLI to generate a new migration file:
 
 ```bash
-npx arnexorm migration:create add-users-table
+npx rnxorm migration:create add-users-table
 ```
 
 To apply migrations you can use the CLI with a config file (see
@@ -2052,7 +2046,7 @@ To apply migrations you can use the CLI with a config file (see
 This creates a timestamped migration file in the `migrations/` directory:
 
 ```typescript
-import { Migration, MigrationBuilder } from "arnexorm";
+import { Migration, MigrationBuilder } from "rnxorm";
 
 export class AddUsersTable extends Migration {
     constructor() {
@@ -2147,12 +2141,12 @@ builder.sql('UPDATE users SET status = $1 WHERE created_at < $2', ['inactive', n
 ### Running Migrations from the CLI
 
 `migration:run`, `migration:revert`, and `migration:status` load a config
-module — `arnexorm.config.js` in the working directory by default, or any path
+module — `rnxorm.config.js` in the working directory by default, or any path
 passed via `--config` — that exports a `createMigrator()` factory:
 
 ```javascript
-// arnexorm.config.js
-const { DbContext, PostgreSQLProvider, Migrator } = require('arnexorm');
+// rnxorm.config.js
+const { DbContext, PostgreSQLProvider, Migrator } = require('rnxorm');
 const migrations = require('./dist/migrations');
 
 module.exports = {
@@ -2176,13 +2170,13 @@ module.exports = {
 Then:
 
 ```bash
-npx arnexorm migration:run                              # apply all pending migrations
-npx arnexorm migration:revert                           # revert the last applied migration
-npx arnexorm migration:status                           # show applied and pending migrations
-npx arnexorm migration:run --config ./config/orm.js     # use a custom config path
+npx rnxorm migration:run                              # apply all pending migrations
+npx rnxorm migration:revert                           # revert the last applied migration
+npx rnxorm migration:status                           # show applied and pending migrations
+npx rnxorm migration:run --config ./config/orm.js     # use a custom config path
 ```
 
-A TypeScript config (`arnexorm.config.ts`) also works when `ts-node` is
+A TypeScript config (`rnxorm.config.ts`) also works when `ts-node` is
 installed in the project. The CLI disconnects the context when the command
 finishes and exits non-zero on failure.
 
@@ -2191,7 +2185,7 @@ finishes and exits non-zero on failure.
 Alternatively, create a migration runner script (e.g., `migrate.ts`):
 
 ```typescript
-import { DbContext, PostgreSQLProvider, Migrator } from "arnexorm";
+import { DbContext, PostgreSQLProvider, Migrator } from "rnxorm";
 import { AddUsersTable } from "./migrations/20240115120000_add-users-table";
 import { CreatePostsTable } from "./migrations/20240115130000_create-posts-table";
 
@@ -2273,7 +2267,7 @@ await migrator.revertTo('20240115120000');
 
 ### Migration History
 
-arnexORM automatically creates a `__MigrationHistory` table to track applied migrations:
+rnxORM automatically creates a `__MigrationHistory` table to track applied migrations:
 
 | migration_id      | migration_name          | applied_at            |
 |------------------|-------------------------|-----------------------|
@@ -2310,8 +2304,8 @@ arnexORM automatically creates a `__MigrationHistory` table to track applied mig
 -   **Changing Types**: If a type changes (and data is compatible), it is updated.
 
 ### What is NOT handled?
--   **Renaming Columns**: If you rename a property, arnexORM sees it as a "missing" column (the new name) and adds it. The old column remains in the database. It does **not** rename the existing column.
--   **Deleting Columns**: If you remove a property from your class, the column remains in the database. arnexORM does **not** delete columns to prevent accidental data loss.
+-   **Renaming Columns**: If you rename a property, rnxORM sees it as a "missing" column (the new name) and adds it. The old column remains in the database. It does **not** rename the existing column.
+-   **Deleting Columns**: If you remove a property from your class, the column remains in the database. rnxORM does **not** delete columns to prevent accidental data loss.
 -   **Data Migrations**: Complex data transformations during schema changes must be handled manually.
 
 ## Custom Database Providers
@@ -2319,7 +2313,7 @@ arnexORM automatically creates a `__MigrationHistory` table to track applied mig
 You can create a custom database provider by implementing the `IDatabaseProvider` interface. Every provider must implement `getDialect()` which returns a string identifier used internally for dialect-specific SQL generation (e.g., pagination, migrations).
 
 ```typescript
-import { IDatabaseProvider } from "arnexorm";
+import { IDatabaseProvider } from "rnxorm";
 
 class SQLiteProvider implements IDatabaseProvider {
     getDialect(): string {
@@ -2336,7 +2330,7 @@ Built-in dialect identifiers: `'postgresql'`, `'mssql'`, `'mariadb'`.
 When writing tests, use `MetadataStorage.reset()` to clear all registered entity metadata between test cases, ensuring test isolation:
 
 ```typescript
-import { MetadataStorage } from "arnexorm";
+import { MetadataStorage } from "rnxorm";
 
 beforeEach(() => {
     MetadataStorage.reset();
@@ -2346,7 +2340,7 @@ beforeEach(() => {
 ## Repository
 
 - **GitHub**: [https://github.com/BaryoDev/rnxORM](https://github.com/BaryoDev/rnxORM)
-- **npm**: [https://www.npmjs.com/package/arnexorm](https://www.npmjs.com/package/arnexorm)
+- **npm**: [https://www.npmjs.com/package/rnxorm](https://www.npmjs.com/package/rnxorm)
 - **Issues**: [https://github.com/BaryoDev/rnxORM/issues](https://github.com/BaryoDev/rnxORM/issues)
 
 ## License

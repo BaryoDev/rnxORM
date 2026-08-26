@@ -1,10 +1,10 @@
 /**
- * arnexORM Relationships
+ * rnxORM Relationships
  *
  * OneToMany/ManyToOne (Author/Book), include() eager loading, and a
  * ManyToMany relation (Book/Genre) backed by a join table.
  *
- * In your app: import { Entity, PrimaryKey, Column, ManyToOne, OneToMany, ManyToMany, DbContext, PostgreSQLProvider } from "arnexorm";
+ * In your app: import { Entity, PrimaryKey, Column, ManyToOne, OneToMany, ManyToMany, DbContext, PostgreSQLProvider } from "rnxorm";
  * Here we import from "../src" so the example runs against the repo's source.
  */
 import "reflect-metadata";

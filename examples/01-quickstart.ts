@@ -1,10 +1,10 @@
 /**
- * arnexORM Quickstart
+ * rnxORM Quickstart
  *
  * Decorators, connecting, ensureCreated(), change-tracked CRUD, and the
  * fluent query API (where/orderBy/skip/take).
  *
- * In your app: import { Entity, PrimaryKey, Column, DbContext, PostgreSQLProvider } from "arnexorm";
+ * In your app: import { Entity, PrimaryKey, Column, DbContext, PostgreSQLProvider } from "rnxorm";
  * Here we import from "../src" so the example runs against the repo's source.
  */
 import "reflect-metadata";

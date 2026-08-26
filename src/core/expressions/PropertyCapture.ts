@@ -1,6 +1,6 @@
 import { MetadataStorage } from "../MetadataStorage";
 
-const PATH = Symbol('arnexorm.capturePath');
+const PATH = Symbol('rnxorm.capturePath');
 
 export type OpaqueReason = 'computed' | 'nested' | 'unsupported';
 
@@ -233,7 +233,7 @@ const AGGREGATE_FN_ALIASES: Record<string, AggregateFn> = {
     min: 'min',
     max: 'max',
 };
-const AGG = Symbol('arnexorm.aggregate');
+const AGG = Symbol('rnxorm.aggregate');
 
 export function captureAggregates(selector: (group: any) => any): AggregateCaptureResult {
     let unsupported = false;
@@ -318,7 +318,7 @@ export function resolveColumn(
         if (result.reason === "nested") {
             throw new Error(
                 `${apiName}() does not support nested property access; ` +
-                `related-path selectors arrive in arnexORM 3.0`
+                `related-path selectors arrive in rnxORM 3.0`
             );
         }
         throw new Error(`${apiName}() requires a selector that names a single column, e.g. x => x.total`);
@@ -343,7 +343,7 @@ export function resolvePropertyName(selector: (entity: any) => any, apiName: str
     if (result.kind === "opaque" && result.reason === "nested") {
         throw new Error(
             `${apiName}() does not support nested property access; ` +
-            `related-path selectors arrive in arnexORM 3.0`
+            `related-path selectors arrive in rnxORM 3.0`
         );
     }
     throw new Error(`${apiName}() requires a selector that names a single property, e.g. x => x.author`);

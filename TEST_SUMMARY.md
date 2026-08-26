@@ -1,4 +1,4 @@
-# arnexORM Test Suite Summary
+# rnxORM Test Suite Summary
 
 ## Current state: 534 tests passing — mock by default, real databases via docker and CI
 

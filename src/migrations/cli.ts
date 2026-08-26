@@ -5,14 +5,14 @@ import * as path from 'path';
 import { Migrator } from './Migrator';
 
 /**
- * CLI tool for managing arnexORM migrations.
+ * CLI tool for managing rnxORM migrations.
  *
  * migration:create scaffolds a migration file. migration:run/revert/status
- * load a config module (arnexorm.config.js by default, or --config <path>)
+ * load a config module (rnxorm.config.js by default, or --config <path>)
  * that exports a createMigrator() factory, and delegate to the Migrator.
  */
 
-const DEFAULT_CONFIG_FILES = ['arnexorm.config.js', 'arnexorm.config.cjs', 'arnexorm.config.ts'];
+const DEFAULT_CONFIG_FILES = ['rnxorm.config.js', 'rnxorm.config.cjs', 'rnxorm.config.ts'];
 
 function migrationsDir(): string {
     return path.join(process.cwd(), 'migrations');
@@ -48,7 +48,7 @@ function toPascalCase(name: string): string {
  */
 export function createMigration(name: string): string {
     if (!name) {
-        throw new Error('Migration name is required. Usage: arnexorm migration:create <migration-name>');
+        throw new Error('Migration name is required. Usage: rnxorm migration:create <migration-name>');
     }
 
     const dir = migrationsDir();
@@ -62,7 +62,7 @@ export function createMigration(name: string): string {
     const fileName = `${migrationId}_${name}.ts`;
     const filePath = path.join(dir, fileName);
 
-    const template = `import { Migration, MigrationBuilder } from "arnexorm";
+    const template = `import { Migration, MigrationBuilder } from "rnxorm";
 
 /**
  * Migration: ${name}
@@ -96,7 +96,7 @@ export class ${className} extends Migration {
     console.log('');
     console.log('Next steps:');
     console.log('  1. Edit the migration file and define up() and down() logic');
-    console.log('  2. Run: arnexorm migration:run');
+    console.log('  2. Run: rnxorm migration:run');
 
     return filePath;
 }
@@ -123,8 +123,8 @@ export function resolveConfigPath(configArg?: string): string {
     throw new Error(
         `No config file found. Create one of [${DEFAULT_CONFIG_FILES.join(', ')}] ` +
         `in the project root or pass --config <path>.\n\n` +
-        `Example arnexorm.config.js:\n\n` +
-        `  const { DbContext, PostgreSQLProvider, Migrator } = require('arnexorm');\n` +
+        `Example rnxorm.config.js:\n\n` +
+        `  const { DbContext, PostgreSQLProvider, Migrator } = require('rnxorm');\n` +
         `  const migrations = require('./dist/migrations');\n\n` +
         `  module.exports = {\n` +
         `      async createMigrator() {\n` +
@@ -215,19 +215,19 @@ export async function runMigrationCommand(command: 'run' | 'revert' | 'status', 
  */
 function showHelp(): void {
     console.log(`
-arnexORM Migration CLI
+rnxORM Migration CLI
 
 Usage:
-  arnexorm migration:create <name>              Create a new migration file
-  arnexorm migration:run [--config <path>]      Apply all pending migrations
-  arnexorm migration:revert [--config <path>]   Revert the last migration
-  arnexorm migration:status [--config <path>]   Show migration status
-  arnexorm migration:help                       Show this help message
+  rnxorm migration:create <name>              Create a new migration file
+  rnxorm migration:run [--config <path>]      Apply all pending migrations
+  rnxorm migration:revert [--config <path>]   Revert the last migration
+  rnxorm migration:status [--config <path>]   Show migration status
+  rnxorm migration:help                       Show this help message
 
-migration:run/revert/status load a config module (default: arnexorm.config.js
+migration:run/revert/status load a config module (default: rnxorm.config.js
 in the current directory) that exports a createMigrator() factory:
 
-  const { DbContext, PostgreSQLProvider, Migrator } = require('arnexorm');
+  const { DbContext, PostgreSQLProvider, Migrator } = require('rnxorm');
   const migrations = require('./dist/migrations');
 
   module.exports = {
@@ -244,9 +244,9 @@ in the current directory) that exports a createMigrator() factory:
   };
 
 Examples:
-  arnexorm migration:create add-users-table
-  arnexorm migration:run
-  arnexorm migration:status --config ./config/arnexorm.config.js
+  rnxorm migration:create add-users-table
+  rnxorm migration:run
+  rnxorm migration:status --config ./config/rnxorm.config.js
 `);
 }
 
@@ -304,7 +304,7 @@ async function main(): Promise<void> {
 
         default:
             console.error(`Unknown command: ${command || '(none)'}`);
-            console.log('Run "arnexorm migration:help" for usage information.');
+            console.log('Run "rnxorm migration:help" for usage information.');
             process.exit(1);
     }
 }
