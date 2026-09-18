@@ -11,6 +11,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "jest",
+    "test:quiet": "jest --silent --noStackTrace",
+    "test:cov": "jest --coverage",
     "test:integration": "USE_REAL_DB=true TEST_PROVIDERS=postgres,mariadb,mssql POSTGRES_PORT=5433 MARIADB_PORT=3307 MSSQL_PORT=11433 jest",
     "lint": "eslint src test",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
