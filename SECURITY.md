@@ -61,8 +61,8 @@ Honest scope, so you can threat-model correctly:
   `MigrationBuilder` used to concatenate every argument it was given straight
   into DDL, including string defaults that land inside quotes. Table, column,
   index, and constraint names must now be plain identifiers (optionally
-  `schema.name`) and are quoted for the dialect; string defaults have their
-  embedded quotes doubled; column types must match a type grammar; and
+  `schema.name`) and are quoted where the dialect needs it; string defaults
+  have their embedded quotes doubled; column types must match a type grammar; and
   `ON DELETE` must be one of the four referential actions. On 2.2.0 and
   earlier, an app that built migration operations from request data (the
   "custom fields per tenant" shape) had an injection point: a default value of

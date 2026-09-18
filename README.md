@@ -2169,11 +2169,27 @@ export class AddUsersTable extends Migration {
 
 The `MigrationBuilder` provides a fluent API for schema operations.
 
-**Identifiers are validated and quoted.** Table, column, index, and constraint
-names must be plain identifiers (optionally `schema.name`) and are quoted for
-the dialect, so `createTable('order', ...)` emits `CREATE TABLE "order"` on
-PostgreSQL, `[order]` on SQL Server, and `` `order` `` on MariaDB. Reserved
-words work as names; anything with a space, quote, or semicolon throws.
+**Identifiers are validated and quoted where the dialect needs it.** Table,
+column, index, and constraint names must be plain identifiers (optionally
+`schema.name`). Anything with a space, quote, or semicolon throws.
+
+SQL Server and MariaDB quote unconditionally (`[users]`, `` `users` ``).
+PostgreSQL quotes only names that need it, because it folds unquoted
+identifiers to lower case and leaves quoted ones alone. So a lower-case name
+is emitted bare and means the same thing it always did, while a reserved word
+or a mixed-case name is quoted:
+
+```typescript
+builder.createTable('users', ...)         // CREATE TABLE users (...)
+builder.createTable('order', ...)         // CREATE TABLE "order" (...)
+builder.createTable('UserAccounts', ...)  // CREATE TABLE "UserAccounts" (...)
+```
+
+The PostgreSQL manual's advice is to "always quote a particular name or never
+quote it", so quoting a name that was previously emitted bare would point it at
+a different table. Note that a mixed-case name creates a case-sensitive table
+(`UserAccounts`, not `useraccounts`), and the string query API does not quote,
+so stick to lower-case names unless you have a reason not to.
 
 String defaults have their embedded quotes doubled, so a default value cannot
 close the literal it sits in. Column types must look like a type
