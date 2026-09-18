@@ -13,13 +13,97 @@ export class DbContext {
     protected provider: IDatabaseProvider;
     private _changeTracker: ChangeTracker;
 
+    /**
+     * This context's model: a copy of the decorator registry with this
+     * context type's `onModelCreating` applied.
+     *
+     * Built once per context *type* and cached, the way EF Core caches a model
+     * per context type. Two instances of one context share a model; two
+     * different context types never do, so one cannot retarget the other's
+     * tables or filters (issue #32).
+     */
+    private builtModel: MetadataStorage | null = null;
+
+    private static readonly modelCache = new Map<unknown, MetadataStorage>();
+
     constructor(provider: IDatabaseProvider) {
         this.provider = provider;
         this._changeTracker = new ChangeTracker();
+    }
 
-        // Configure the model using Fluent API
-        const modelBuilder = new ModelBuilder();
-        this.onModelCreating(modelBuilder);
+    /**
+     * Build or fetch the cached model for this context's type.
+     *
+     * Built lazily on first use rather than in the constructor, because
+     * `new ModelBuilder().entity(X)...` is also supported standalone, outside
+     * `onModelCreating`, and those registrations land in the shared registry
+     * after a context may already have been constructed. Copying at first use
+     * picks them up.
+     *
+     * `onModelCreating` runs against the scoped copy, so it configures this
+     * context type's model without writing back into the shared registry that
+     * decorators populate.
+     */
+    private static buildModel(context: DbContext): MetadataStorage {
+        const contextType = context.constructor;
+
+        // A context that does not override onModelCreating has no
+        // configuration of its own, so there is nothing to scope or cache: it
+        // reads the shared registry directly and sees every later
+        // `new ModelBuilder()` registration, which is the standalone form the
+        // fluent API also supports.
+        if (!DbContext.overridesOnModelCreating(contextType)) {
+            return MetadataStorage.shared();
+        }
+
+        const cached = DbContext.modelCache.get(contextType);
+        if (cached) return cached;
+
+        const model = MetadataStorage.createScopedModel();
+        MetadataStorage.withModel(model, () => {
+            const modelBuilder = new ModelBuilder();
+            context.onModelCreating(modelBuilder);
+        });
+        DbContext.modelCache.set(contextType, model);
+        return model;
+    }
+
+    /**
+     * Whether a context type declares its own `onModelCreating`, rather than
+     * inheriting the no-op on DbContext.
+     */
+    private static overridesOnModelCreating(contextType: unknown): boolean {
+        const proto = (contextType as { prototype?: object }).prototype;
+        if (!proto) return false;
+        return (proto as Record<string, unknown>).onModelCreating !== DbContext.prototype.onModelCreating;
+    }
+
+    /**
+     * Run an operation with this context's model active.
+     *
+     * Every entry point that touches metadata goes through here, including the
+     * async query methods on DbSet and QueryBuilder, so a query resolves
+     * against the model of the context it was issued on even when two contexts
+     * interleave their awaits.
+     * @internal
+     */
+    withModel<T>(fn: () => T): T {
+        return MetadataStorage.withModel(this.metadata, fn);
+    }
+
+    /**
+     * This context's model.
+     *
+     * Query builders resolve metadata through here rather than through the
+     * ambient `MetadataStorage.get()`, so a query reads the model of the
+     * context it was issued on no matter when it resolves (issue #32).
+     * @internal
+     */
+    get metadata(): MetadataStorage {
+        if (!this.builtModel) {
+            this.builtModel = DbContext.buildModel(this);
+        }
+        return this.builtModel;
     }
 
     /**
@@ -96,6 +180,10 @@ export class DbContext {
      * @returns The number of state entries written to the database
      */
     async saveChanges(): Promise<number> {
+        return this.withModel(() => this.saveChangesInternal());
+    }
+
+    private async saveChangesInternal(): Promise<number> {
         // Detect changes if auto-detect is enabled
         if (this._changeTracker.autoDetectChangesEnabled) {
             this._changeTracker.detectChanges();
@@ -570,6 +658,10 @@ export class DbContext {
      * Attach an entity to the context with the specified state
      */
     attach<T>(entity: T, state: EntityState = EntityState.Unchanged): EntityEntry<T> {
+        return this.withModel(() => this.attachInternal(entity, state));
+    }
+
+    private attachInternal<T>(entity: T, state: EntityState = EntityState.Unchanged): EntityEntry<T> {
         return this._changeTracker.track(entity, state);
     }
 
@@ -577,6 +669,10 @@ export class DbContext {
      * Get the entry for an entity, or create one if it doesn't exist
      */
     entry<T>(entity: T): EntityEntry<T> {
+        return this.withModel(() => this.entryInternal(entity));
+    }
+
+    private entryInternal<T>(entity: T): EntityEntry<T> {
         let entry = this._changeTracker.entry(entity);
 
         if (!entry) {
@@ -587,6 +683,10 @@ export class DbContext {
     }
 
     async ensureCreated(): Promise<void> {
+        return this.withModel(() => this.ensureCreatedInternal());
+    }
+
+    private async ensureCreatedInternal(): Promise<void> {
         const { MetadataStorage } = await import("./MetadataStorage");
         const entities = MetadataStorage.get().getEntities();
 
@@ -802,6 +902,10 @@ export class DbContext {
     }
 
     set<T>(entityType: new () => T): DbSet<T> {
+        return this.withModel(() => this.setInternal(entityType));
+    }
+
+    private setInternal<T>(entityType: new () => T): DbSet<T> {
         return new DbSet(entityType, this);
     }
 

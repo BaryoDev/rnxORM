@@ -24,7 +24,7 @@ export class DbSet<T> {
     private columns: string[];
 
     constructor(private entityType: new () => T, private context: DbContext) {
-        const metadata = MetadataStorage.get().getEntity(entityType);
+        const metadata = this.context.metadata.getEntity(entityType);
         if (!metadata) {
             throw new Error(`Entity ${entityType.name} not found in metadata.`);
         }
@@ -91,7 +91,7 @@ export class DbSet<T> {
 
     async toList(): Promise<T[]> {
         const provider = this.context.getProvider();
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
 
         // Structured query filters are translated to SQL so filtered rows
         // never leave the database; use ignoreQueryFilters() to bypass.
@@ -188,7 +188,7 @@ export class DbSet<T> {
      * @returns The entity if found, null otherwise
      */
     async find(id: any): Promise<T | null> {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         if (!metadata) return null;
 
         const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
@@ -226,7 +226,7 @@ export class DbSet<T> {
      * or an empty clause when none are configured.
      */
     private compileFilterWhere(): { where: string; params?: any[] } {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         const filter = compileQueryFilter(metadata, this.context.getProvider(), 1);
         if (filter.clauses.length === 0) {
             return { where: '' };
@@ -337,7 +337,7 @@ export class DbSet<T> {
     }
 
     private mapRowToEntity(row: any, track: boolean = false): T {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
 
         // Identity map lookup: if this row's (converted) primary key is already
         // tracked, return the SAME instance rather than mapping a new one -
@@ -410,7 +410,9 @@ export class DbSet<T> {
         noTracking: boolean = false,
         context?: DbContext
     ): T {
-        const metadata = MetadataStorage.get().getEntity(entityType);
+        // Static, so it reads the caller's context model when there is one and
+        // falls back to the ambient model otherwise (issue #32).
+        const metadata = (context?.metadata ?? MetadataStorage.get()).getEntity(entityType);
         const track = !noTracking && !!context;
 
         // Identity map lookup (see the instance mapRowToEntity for rationale).
@@ -500,7 +502,7 @@ export class QueryBuilder<T> {
      */
     include(relation: (entity: T) => any): this {
         const propertyName = resolvePropertyName(relation, 'include');
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
 
         if (!metadata) {
             throw new Error(`Entity ${this.entityType.name} not found in metadata`);
@@ -584,7 +586,7 @@ export class QueryBuilder<T> {
         if (this.ignoreFilters) {
             return { clauses: [], params: [] };
         }
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         return compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
     }
 
@@ -604,7 +606,7 @@ export class QueryBuilder<T> {
         if (this.ignoreFilters) return;
         if (this.skipCount === undefined && this.takeCount === undefined) return;
 
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         if (!metadata?.queryFilter) return;
 
         throw new Error(
@@ -675,7 +677,7 @@ export class QueryBuilder<T> {
         // Predicate-form query filters are evaluated in memory (unless ignored)
         let filteredEntities = entities;
         if (!this.ignoreFilters) {
-            const metadata = MetadataStorage.get().getEntity(this.entityType);
+            const metadata = this.context.metadata.getEntity(this.entityType);
             if (metadata?.queryFilter) {
                 filteredEntities = entities.filter(metadata.queryFilter);
             }
@@ -875,14 +877,14 @@ export class QueryBuilder<T> {
     private async loadIncludes(entities: T[]): Promise<void> {
         if (entities.length === 0) return;
 
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         if (!metadata) return;
 
         for (const include of this.includes) {
             const relationMetadata = metadata.relations.find(r => r.propertyName === include.propertyName);
             if (!relationMetadata) continue;
 
-            const relatedMetadata = MetadataStorage.get().getEntity(include.relatedEntityType);
+            const relatedMetadata = this.context.metadata.getEntity(include.relatedEntityType);
             if (!relatedMetadata) continue;
 
             const relatedPkColumn = relatedMetadata.columns.find(c => c.isPrimaryKey);
@@ -945,7 +947,7 @@ export class QueryBuilder<T> {
         relationMetadata: any,
         relatedMetadata: any
     ): Promise<void> {
-        const entityMetadata = MetadataStorage.get().getEntity(this.entityType);
+        const entityMetadata = this.context.metadata.getEntity(this.entityType);
         if (!entityMetadata) return;
 
         const pkColumn = entityMetadata.columns.find(c => c.isPrimaryKey);
@@ -997,7 +999,7 @@ export class QueryBuilder<T> {
     ): Promise<void> {
         if (!relationMetadata.joinTable) return;
 
-        const entityMetadata = MetadataStorage.get().getEntity(this.entityType);
+        const entityMetadata = this.context.metadata.getEntity(this.entityType);
         if (!entityMetadata) return;
 
         const pkColumn = entityMetadata.columns.find(c => c.isPrimaryKey);
@@ -1099,7 +1101,7 @@ export class SelectQueryBuilder<T, TResult> {
         if (this.ignoreFilters) {
             return { clauses: [], params: [] };
         }
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         return compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
     }
 
@@ -1287,7 +1289,7 @@ export class SelectQueryBuilder<T, TResult> {
             return null;
         }
 
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         const columnFor = (propertyName: string): string => {
             const column = metadata?.columns.find(c => c.propertyName === propertyName);
             if (!column) {
@@ -1334,7 +1336,7 @@ export class RawSqlQueryBuilder<T> {
 
         // Raw SQL cannot be rewritten, so global query filters (both forms)
         // are evaluated in memory here
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         return entities.filter((e: T) => matchesQueryFilter(metadata, e));
     }
 
@@ -1351,7 +1353,7 @@ export class RawSqlQueryBuilder<T> {
 
         // Raw SQL cannot be rewritten, so global query filters (both forms)
         // are evaluated in memory here
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         return entities.filter((e: T) => matchesQueryFilter(metadata, e));
     }
 
@@ -1422,7 +1424,7 @@ export class GroupedQueryBuilder<T, TKey> {
             return this;
         }
         this.queryFilterApplied = true;
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         const filter = compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
         this.conditions.push(...filter.clauses);
         this.params.push(...filter.params);
@@ -1585,7 +1587,7 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
      * Execute the grouped query with aggregations
      */
     async toList(): Promise<TResult[]> {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         const groupColumn = metadata?.columns.find(c => c.propertyName === this.groupByProperty);
 
         if (!groupColumn) {
@@ -1678,7 +1680,7 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
      * referenced `g.key`.
      */
     private captureAggregations(groupColumnName: string): string[] {
-        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        const metadata = this.context.metadata.getEntity(this.entityType);
         const columnFor = (propertyName: string): string => {
             const column = metadata?.columns.find(c => c.propertyName === propertyName);
             if (!column) {
