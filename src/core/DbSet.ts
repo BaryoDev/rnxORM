@@ -3,7 +3,7 @@ import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
-import { assertColumn, assertColumnOrAlias, assertHavingExpression, assertLimit, buildComparison } from "./Identifiers";
+import { assertAlias, assertColumn, assertColumnOrAlias, assertHavingExpression, assertLimit, buildComparison, convertValueToDb, findColumn } from "./Identifiers";
 
 /** Renders a captured aggregate into its SQL function call. `col` is undefined for count(). */
 const AGG_SQL: Record<AggregateFn, (col?: string) => string> = {
@@ -196,7 +196,10 @@ export class DbSet<T> {
         const provider = this.context.getProvider();
         const placeholder = provider.getParameterPlaceholder(1);
         let sql = `SELECT * FROM ${this.tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
-        const params: any[] = [id];
+        // A converted key is stored in its converted form, so the caller's
+        // domain value has to go through the converter before it is bound, the
+        // way updateEntity()/deleteEntity() already do it (issue #35).
+        const params: any[] = [convertValueToDb(pkColumn, id)];
 
         // Structured query filters are appended to the SQL WHERE clause
         const filter = compileQueryFilter(metadata, provider, 2);
@@ -483,7 +486,8 @@ export class QueryBuilder<T> {
         //. The next condition numbers from the updated params length.
         const sqlColumn = assertColumn(this.entityType, column, 'where');
         const comparison = buildComparison(
-            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where'
+            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where',
+            findColumn(this.entityType, column)
         );
         this.conditions.push(comparison.clause);
         this.params.push(...comparison.params);
@@ -583,7 +587,37 @@ export class QueryBuilder<T> {
         return compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
     }
 
+    /**
+     * Refuse a row-limited query whose entity has a predicate-form query filter.
+     *
+     * The predicate runs in memory, after LIMIT/OFFSET has already been applied
+     * by the database, so it drops rows out of an already-truncated page: a
+     * `take(20)` comes back with however many of those 20 survived, and
+     * `first()` (take(1)) returns null while matching rows sit unread. There is
+     * no ordering of the two that gives the right answer, so the combination
+     * fails loudly instead of returning a wrong one quietly (issue #45).
+     *
+     * The structured filter form compiles to SQL and is unaffected.
+     */
+    private assertNoInMemoryFilterWithRowLimit(): void {
+        if (this.ignoreFilters) return;
+        if (this.skipCount === undefined && this.takeCount === undefined) return;
+
+        const metadata = MetadataStorage.get().getEntity(this.entityType);
+        if (!metadata?.queryFilter) return;
+
+        throw new Error(
+            `${this.entityType.name} has an in-memory query filter (the predicate form of ` +
+            `hasQueryFilter), which is applied after the database has already applied ` +
+            `LIMIT/OFFSET, so skip()/take()/first()/single() would return a wrong result. ` +
+            `Use the structured filter form ({ property, operator, value }), which compiles ` +
+            `to SQL, or call ignoreQueryFilters() to opt out of filtering for this query.`
+        );
+    }
+
     async toList(): Promise<T[]> {
+        this.assertNoInMemoryFilterWithRowLimit();
+
         const provider = this.context.getProvider();
         const dialect = provider.getDialect();
 
@@ -923,8 +957,11 @@ export class QueryBuilder<T> {
 
         const foreignKeyColumn = relatedRelation.foreignKeyColumn;
 
-        // Get all primary key values
-        const pkValues = entities.map(e => (e as any)[pkColumn.propertyName]);
+        // Get all primary key values. These come off the entity in domain form,
+        // but the FK column stores the converted form, so a converted key has
+        // to be converted before it is bound or the IN () matches nothing and
+        // the collection silently comes back empty (issue #35).
+        const pkValues = entities.map(e => convertValueToDb(pkColumn, (e as any)[pkColumn.propertyName]));
 
         // Load all related entities
         const placeholders = pkValues.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
@@ -945,7 +982,9 @@ export class QueryBuilder<T> {
 
         // Attach collections to main entities
         entities.forEach(entity => {
-            const pkValue = (entity as any)[pkColumn.propertyName];
+            // The map is keyed by the row's FK value (database form), so the
+            // entity's key is converted the same way before the lookup.
+            const pkValue = convertValueToDb(pkColumn, (entity as any)[pkColumn.propertyName]);
             (entity as any)[relationMetadata.propertyName] = relatedEntitiesMap.get(pkValue) || [];
         });
     }
@@ -963,7 +1002,8 @@ export class QueryBuilder<T> {
         const pkColumn = entityMetadata.columns.find(c => c.isPrimaryKey);
         if (!pkColumn) return;
 
-        const pkValues = entities.map(e => (e as any)[pkColumn.propertyName]);
+        // Converted keys are stored converted in the join table too (issue #35).
+        const pkValues = entities.map(e => convertValueToDb(pkColumn, (e as any)[pkColumn.propertyName]));
 
         // Query join table
         const placeholders = pkValues.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
@@ -1014,7 +1054,8 @@ export class QueryBuilder<T> {
 
         // Attach to entities
         entities.forEach(entity => {
-            const pkValue = (entity as any)[pkColumn.propertyName];
+            // relationMap is keyed by the join row's source id (database form).
+            const pkValue = convertValueToDb(pkColumn, (entity as any)[pkColumn.propertyName]);
             (entity as any)[relationMetadata.propertyName] = relationMap.get(pkValue) || [];
         });
     }
@@ -1069,7 +1110,8 @@ export class SelectQueryBuilder<T, TResult> {
     where(column: string, operator: string, value: any): this {
         const sqlColumn = assertColumn(this.entityType, column, 'where');
         const comparison = buildComparison(
-            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where'
+            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where',
+            findColumn(this.entityType, column)
         );
         this.conditions.push(comparison.clause);
         this.params.push(...comparison.params);
@@ -1180,7 +1222,18 @@ export class SelectQueryBuilder<T, TResult> {
 
         // Apply selector to each row
         if (projectedColumns && projectedColumns.length > 0) {
-            // Direct column projection - just return the rows
+            if (this.projectsSingleProperty) {
+                // `u => u.age` is typed TResult[] (number[]), so the caller gets
+                // the values, not the one-key driver rows they arrive in. The
+                // key is the *column* name, which differs from the property
+                // whenever @Column renames it, so read the row's only value
+                // rather than looking the property up by name (issue #45).
+                return res.rows.map((row: any) => {
+                    const values = Object.values(row);
+                    return (values.length === 1 ? values[0] : row) as TResult;
+                });
+            }
+            // Object-literal projection: the aliases already shape the row.
             return res.rows as TResult[];
         } else {
             // Map rows to entities first, then apply selector
@@ -1212,6 +1265,13 @@ export class SelectQueryBuilder<T, TResult> {
     }
 
     /**
+     * True when the selector was a single bare property (`u => u.age`) rather
+     * than an object literal. Set by extractProjectedColumns(); read by
+     * toList() to decide whether rows need unwrapping to scalars.
+     */
+    private projectsSingleProperty = false;
+
+    /**
      * Try to extract projected column names from the selector for SQL optimization.
      * Returns null if the selector is too complex for SQL projection (e.g. it computes
      * a value rather than naming columns) - callers fall back to in-memory projection.
@@ -1238,11 +1298,12 @@ export class SelectQueryBuilder<T, TResult> {
         };
 
         if (result.kind === "property") {
+            this.projectsSingleProperty = true;
             return [columnFor(result.path)];
         }
 
         return Object.entries(result.aliases).map(
-            ([alias, propertyName]) => `${columnFor(propertyName)} AS ${alias}`
+            ([alias, propertyName]) => `${columnFor(propertyName)} AS ${assertAlias(alias, 'select')}`
         );
     }
 }
@@ -1638,7 +1699,7 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
         const entries = Object.entries(result.aggregates);
         const clauseFor = ([alias, entry]: [string, AggregateSelectorEntry]): string => {
             if ('kind' in entry) {
-                return `${groupColumnName} AS ${alias}`;
+                return `${groupColumnName} AS ${assertAlias(alias, 'groupBy().select')}`;
             }
             // count() is the only aggregate that is meaningful without a column
             // (it renders COUNT(*)). Every other one needs a selector, or the
@@ -1650,7 +1711,7 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
                 );
             }
             const column = entry.path ? columnFor(entry.path) : undefined;
-            return `${AGG_SQL[entry.fn](column)} as ${alias}`;
+            return `${AGG_SQL[entry.fn](column)} as ${assertAlias(alias, 'groupBy().select')}`;
         };
 
         const hasKey = entries.some(([, entry]) => 'kind' in entry);

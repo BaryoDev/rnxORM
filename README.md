@@ -222,7 +222,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 ### Partial ⚠️
 
 - **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`). TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. Nested paths (`u => u.address.city`) throw instead of silently resolving to the wrong column. See [LINQ-Style Query API](#linq-style-query-api)
-- **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched**. It is never translated to SQL. Prefer the structured-condition form, which is. See [Global Query Filters](#global-query-filters)
+- **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched**. It is never translated to SQL, and cannot be combined with `skip()`/`take()`/`first()`/`single()`, which throw rather than return a wrong answer. Prefer the structured-condition form, which compiles to SQL and paginates correctly. See [Global Query Filters](#global-query-filters)
 - **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects. Write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB. Global query filters on raw SQL results are evaluated in memory
 - **Keyless Entity Types**: `hasNoKey()` works for querying views; read-only behavior is not enforced (no error if you try to track one)
 - **Shadow Properties**: Columns are created and included in INSERTs, but defaults are sent as literal parameter values. SQL expressions like `CURRENT_TIMESTAMP` are **not** emitted as DDL `DEFAULT` clauses and will not evaluate. Use constant defaults only
@@ -685,7 +685,8 @@ const popularAges = await users
 ### Distinct
 
 ```typescript
-// Get unique ages
+// Get unique ages, as numbers: a single-property selector returns the values,
+// not the rows they arrive in
 const uniqueAges = await users
   .select(u => u.age)
   .distinct()
@@ -1002,6 +1003,23 @@ filtered-out rows still cross the wire:
 
 ```typescript
 modelBuilder.entity(User).hasQueryFilter(u => !u.isDeleted);
+```
+
+Because it runs after the database has already applied `LIMIT`/`OFFSET`, the
+predicate form cannot be combined with a row limit. `skip()`, `take()`,
+`first()`, `single()` and `singleOrDefault()` throw on an entity that has one,
+rather than returning a short page or a null that hides matching rows. Use the
+structured form for paginated queries, or `ignoreQueryFilters()` to opt out:
+
+```typescript
+// throws: the filter would drop rows out of an already-truncated page
+await db.set(User).where('role', '=', 'admin').take(20).toList();
+
+// fine: no row limit
+await db.set(User).where('role', '=', 'admin').toList();
+
+// fine: filtering is off for this query
+await db.set(User).ignoreQueryFilters().take(20).toList();
 ```
 
 ### Automatic Filtering

@@ -370,3 +370,70 @@ describe('legacy lambda form of hasQueryFilter (issue #23 remaining limitation)'
         expect(count).toBe(10);
     });
 });
+
+describe('legacy lambda form + row limits (#45)', () => {
+    /**
+     * The predicate runs in memory *after* LIMIT/OFFSET has already been
+     * applied by the database, so any row-limited query built on it returns a
+     * wrong answer rather than a slow one. Refusing the combination is the
+     * only honest option while the predicate form still exists; the structured
+     * form compiles to SQL and is unaffected.
+     */
+    it('first() throws instead of returning null when a row exists', async () => {
+        const { db, provider } = makeDb();
+        await expect(db.set(QfcLegacyUser).where('id', '>', 0).first()).rejects.toThrow(/in-memory query filter/);
+        expect(provider.calls).toHaveLength(0);
+    });
+
+    it('single() throws rather than miscounting', async () => {
+        const { db } = makeDb();
+        await expect(db.set(QfcLegacyUser).where('id', '>', 0).single()).rejects.toThrow(/in-memory query filter/);
+    });
+
+    it('singleOrDefault() throws rather than miscounting', async () => {
+        const { db } = makeDb();
+        await expect(db.set(QfcLegacyUser).where('id', '>', 0).singleOrDefault()).rejects.toThrow(/in-memory query filter/);
+    });
+
+    it('take() throws at execution time', async () => {
+        const { db } = makeDb();
+        await expect(db.set(QfcLegacyUser).take(20).toList()).rejects.toThrow(/in-memory query filter/);
+    });
+
+    it('skip() throws at execution time', async () => {
+        const { db } = makeDb();
+        await expect(db.set(QfcLegacyUser).skip(10).toList()).rejects.toThrow(/in-memory query filter/);
+    });
+
+    it('the error names ignoreQueryFilters() as the way out', async () => {
+        const { db } = makeDb();
+        await expect(db.set(QfcLegacyUser).take(5).toList())
+            .rejects.toThrow(/ignoreQueryFilters/);
+    });
+
+    it('ignoreQueryFilters() allows the row-limited query through', async () => {
+        const { db, provider } = makeDb();
+        provider.nextResult({
+            rows: [{ id: 2, name: 'Dropped', isdeleted: true }],
+            rowCount: 1,
+        });
+
+        const users = await db.set(QfcLegacyUser).ignoreQueryFilters().take(1).toList();
+
+        // (Double space: the pre-existing shape of a query with no WHERE clause.)
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_legacy_users  LIMIT 1');
+        expect(users).toHaveLength(1);
+    });
+
+    it('unlimited toList() is unaffected', async () => {
+        const { db } = makeDb();
+        const users = await db.set(QfcLegacyUser).toList();
+        expect(users).toEqual([]);
+    });
+
+    it('the structured filter form still paginates normally', async () => {
+        const { db, provider } = makeDb();
+        await db.set(QfcUser).take(10).toList();
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users WHERE isdeleted = $1 LIMIT 10');
+    });
+});

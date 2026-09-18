@@ -44,15 +44,9 @@ export function compileQueryFilter(
         // check stays because metadata can also be populated directly.
         const operator = assertOperator(condition.operator, 'hasQueryFilter');
 
-        let value = typeof condition.value === 'function' ? condition.value() : condition.value;
-        const convert = (v: any) =>
-            column.hasConversion && column.convertToDb && v !== undefined && v !== null
-                ? column.convertToDb(v)
-                : v;
-        // A set operator binds each element, so the converter applies per element.
-        value = (operator === 'IN' || operator === 'NOT IN') && Array.isArray(value)
-            ? value.map(convert)
-            : convert(value);
+        const value = typeof condition.value === 'function' ? condition.value() : condition.value;
+        // buildComparison applies the column's converter to whatever it binds
+        // (per element for IN/NOT IN), so the value is passed through raw.
 
         // Placeholder numbering continues from however many parameters the
         // preceding conditions actually bound. IN binds one per element and
@@ -63,7 +57,8 @@ export function compileQueryFilter(
             value,
             provider,
             startIndex + compiled.params.length,
-            'hasQueryFilter'
+            'hasQueryFilter',
+            column
         );
         compiled.clauses.push(comparison.clause);
         compiled.params.push(...comparison.params);

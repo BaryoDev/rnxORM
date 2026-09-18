@@ -669,3 +669,51 @@ describe('Raw SQL passthrough', () => {
         expect(affected).toBe(5);
     });
 });
+
+describe('select(u => u.prop) result shape (#45)', () => {
+    /**
+     * A single-property selector is typed TResult[] (number[], string[]) but
+     * used to return the raw driver rows, so the value was [{ age: 30 }] while
+     * the compiler insisted it was [30]. The cast made the types agree with a
+     * shape that never existed at runtime. Worse with a renamed column, where
+     * the key is the column name rather than the property.
+     */
+    it('returns scalars, not row objects', async () => {
+        const { db, provider } = makeDb('postgresql');
+        provider.nextResult({ rows: [{ age: 30 }, { age: 41 }], rowCount: 2 });
+
+        const ages = await db.set(SgUser).select(u => u.age).toList();
+
+        expect(provider.lastCall!.sql).toBe('SELECT age FROM sqlgen_users');
+        expect(ages).toEqual([30, 41]);
+    });
+
+    it('unwraps a renamed column to the scalar value', async () => {
+        const { db, provider } = makeDb('postgresql');
+        provider.nextResult({ rows: [{ full_name: 'Ada' }, { full_name: 'Grace' }], rowCount: 2 });
+
+        const names = await db.set(SgAccount).select(a => a.fullName).toList();
+
+        expect(provider.lastCall!.sql).toBe('SELECT full_name FROM sqlgen_accounts');
+        expect(names).toEqual(['Ada', 'Grace']);
+    });
+
+    it('preserves null values', async () => {
+        const { db, provider } = makeDb('postgresql');
+        provider.nextResult({ rows: [{ age: null }, { age: 7 }], rowCount: 2 });
+
+        const ages = await db.set(SgUser).select(u => u.age).toList();
+
+        expect(ages).toEqual([null, 7]);
+    });
+
+    it('object-literal projections still return objects', async () => {
+        const { db, provider } = makeDb('postgresql');
+        provider.nextResult({ rows: [{ userName: 'Ada', userAge: 30 }], rowCount: 1 });
+
+        const rows = await db.set(SgUser)
+            .select(u => ({ userName: u.name, userAge: u.age })).toList();
+
+        expect(rows).toEqual([{ userName: 'Ada', userAge: 30 }]);
+    });
+});
