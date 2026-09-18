@@ -1,6 +1,7 @@
 import { DbSet } from "./DbSet";
 import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
 import { RelationType, MetadataStorage } from "./MetadataStorage";
+import { toCount, toExactNumber } from "./Numerics";
 import { ModelBuilder } from "./ModelBuilder";
 import { ChangeTracker } from "./ChangeTracker";
 import { EntityEntry, EntityState } from "./EntityEntry";
@@ -108,9 +109,16 @@ export class DbContext {
 
         let savedCount = 0;
 
+        // A caller-opened transaction owns the unit of work: saveChanges()
+        // enlists in it rather than wrapping its own. Committing here would end
+        // the caller's transaction early and make their later rollback a no-op
+        // (issue #38).
+        const ownsTransaction = !this.provider.isInTransaction();
+
         try {
-            // Begin transaction
-            await this.beginTransaction();
+            if (ownsTransaction) {
+                await this.beginTransaction();
+            }
 
             // Process all changes
             for (const entry of changedEntries) {
@@ -154,16 +162,21 @@ export class DbContext {
                 }
             }
 
-            // Commit transaction
-            await this.commitTransaction();
+            if (ownsTransaction) {
+                await this.commitTransaction();
+            }
 
             // Accept all changes
             this._changeTracker.acceptAllChanges();
 
             return savedCount;
         } catch (error) {
-            // Rollback on error
-            await this.rollbackTransaction();
+            // Only roll back a transaction this call opened. The error
+            // propagates either way, so a caller who owns the transaction can
+            // roll back their whole unit of work.
+            if (ownsTransaction) {
+                await this.rollbackTransaction();
+            }
             throw error;
         }
     }
@@ -399,7 +412,7 @@ export class DbContext {
             } else if (result.rows?.length > 0) {
                 const returned = result.rows[0][pkColumn.columnName];
                 if (returned !== undefined && returned !== null) {
-                    entity[pkColumn.propertyName] = fromDb(typeof returned === 'bigint' ? Number(returned) : returned);
+                    entity[pkColumn.propertyName] = fromDb(toExactNumber(returned));
                 }
             }
         } else if (pkColumn && result.insertId !== undefined) {
@@ -803,7 +816,7 @@ export class DbContext {
                         const placeholder = this.provider.getParameterPlaceholder(1);
                         const checkSql = `SELECT COUNT(*) as count FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
                         const result = await this.query(checkSql, [pkValue]);
-                        const exists = parseInt(result.rows[0].count) > 0;
+                        const exists = toCount(result.rows[0]?.count) > 0;
 
                         if (!exists) {
                             // Insert seed data

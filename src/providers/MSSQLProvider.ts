@@ -15,15 +15,25 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     constructor(config: DatabaseConfig) {
+        // Encrypt unless the caller explicitly turns it off, and validate the
+        // certificate unless they explicitly opt out. The previous defaults
+        // (encrypt false, trust any certificate) put every query and result set
+        // on the wire in cleartext (issue #43).
+        const { driverOptions, ...rest } = config;
+        const encrypt = rest.ssl === undefined ? true : rest.ssl !== false;
+
         this.config = {
+            ...(driverOptions as mssql.config | undefined),
             server: config.host,
             port: config.port,
             user: config.user,
             password: config.password,
             database: config.database,
             options: {
-                encrypt: false, // Use true for Azure
-                trustServerCertificate: true,
+                ...(typeof rest.ssl === 'object' ? rest.ssl : {}),
+                ...((driverOptions?.options as Record<string, unknown>) ?? {}),
+                encrypt,
+                trustServerCertificate: rest.trustServerCertificate ?? false,
             },
             pool: {
                 max: config.max || 10,
@@ -34,7 +44,15 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     async connect(): Promise<void> {
-        this.pool = await mssql.connect(this.config);
+        // Idempotent: a second call used to build another pool and overwrite
+        // the field, leaving the first one open with its sockets held until
+        // process exit.
+        if (this.pool) return;
+
+        // A dedicated pool, not the module-global mssql.connect() one: two
+        // providers with different configs used to share a single global pool,
+        // so disconnect() on either closed it for both (issue #38).
+        this.pool = await new mssql.ConnectionPool(this.config).connect();
     }
 
     async disconnect(): Promise<void> {
@@ -69,6 +87,16 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     async beginTransaction(): Promise<void> {
+        // Overwriting this.transaction orphaned the previous one: never
+        // committed, never rolled back, holding its pooled connection and its
+        // locks until the pool timed it out (issue #38).
+        if (this.transaction) {
+            throw new Error(
+                'A transaction is already open on this provider. Nested transactions are ' +
+                'not supported; commit or roll back the current one first, or use a ' +
+                'separate DbContext.'
+            );
+        }
         if (!this.pool) await this.connect();
         this.transaction = new mssql.Transaction(this.pool!);
         await this.transaction.begin();
@@ -86,6 +114,10 @@ export class MSSQLProvider implements IDatabaseProvider {
             await this.transaction.rollback();
             this.transaction = null;
         }
+    }
+
+    isInTransaction(): boolean {
+        return this.transaction !== null;
     }
 
     mapType(tsType: string): string {

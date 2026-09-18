@@ -121,6 +121,64 @@ const db = new DbContext(new MSSQLProvider({
 }));
 ```
 
+**TLS:**
+
+Every provider takes `ssl` (`true`, or an options object passed to the driver)
+and `driverOptions` for anything the ORM does not model:
+
+```typescript
+new PostgreSQLProvider({
+  host: "db.example.com",
+  port: 5432,
+  user: "app",
+  password: process.env.DB_PASSWORD!,
+  database: "mydb",
+  ssl: { rejectUnauthorized: true, ca: process.env.DB_CA_CERT },
+});
+```
+
+SQL Server **encrypts by default and validates the certificate**. For a local
+server with a self-signed certificate, opt out explicitly:
+
+```typescript
+new MSSQLProvider({
+  // ...
+  ssl: false,
+  trustServerCertificate: true,   // local development only
+});
+```
+
+### Transactions
+
+`saveChanges()` opens a transaction, writes, and commits. If you already opened
+one, it enlists in yours instead: it will not commit or roll back a transaction
+it did not open, so your unit of work stays yours.
+
+```typescript
+await db.beginTransaction();
+try {
+  db.set(Order).add(order);
+  await db.saveChanges();        // enlists, does not commit
+
+  db.set(Invoice).add(invoice);
+  await db.saveChanges();        // same transaction
+
+  await db.commitTransaction();  // one atomic unit
+} catch (e) {
+  await db.rollbackTransaction();
+  throw e;
+}
+```
+
+Nesting is not supported: a second `beginTransaction()` throws rather than
+silently ending the first (which is what MariaDB and SQL Server would otherwise
+do).
+
+**One `DbContext` per request.** Transaction state lives on the provider
+instance, so two concurrent requests sharing a context share its transaction,
+and one request's commit ends the other's unit of work. Build a context per
+request and dispose it when the request finishes.
+
 **MariaDB/MySQL:**
 ```typescript
 import { DbContext, MariaDBProvider } from "rnxorm";
@@ -195,7 +253,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 
 - **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL providers
 - **Change Tracking & SaveChanges()**: EF Core-style automatic change detection and batch persistence
-- **Transactions**: Automatic transaction wrapping for `saveChanges()`
+- **Transactions**: `saveChanges()` wraps its writes in a transaction, or enlists in one you opened with `beginTransaction()` rather than nesting. Transaction state lives on the provider, so a `DbContext` in a transaction must not be shared across concurrent requests: use one context per request. See [Transactions](#transactions)
 - **Concurrency Tokens**: Optimistic concurrency control via `isConcurrencyToken()` (token check in UPDATE WHERE clause, auto-increment on save, conflict detection)
 - **Data Seeding**: Idempotent seeding via `hasData()` in ModelBuilder
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
@@ -2109,7 +2167,39 @@ export class AddUsersTable extends Migration {
 
 ### Migration Builder API
 
-The `MigrationBuilder` provides a fluent API for schema operations:
+The `MigrationBuilder` provides a fluent API for schema operations.
+
+**Identifiers are validated and quoted where the dialect needs it.** Table,
+column, index, and constraint names must be plain identifiers (optionally
+`schema.name`). Anything with a space, quote, or semicolon throws.
+
+SQL Server and MariaDB quote unconditionally (`[users]`, `` `users` ``).
+PostgreSQL quotes only names that need it, because it folds unquoted
+identifiers to lower case and leaves quoted ones alone. So a lower-case name
+is emitted bare and means the same thing it always did, while a reserved word
+or a mixed-case name is quoted:
+
+```typescript
+builder.createTable('users', ...)         // CREATE TABLE users (...)
+builder.createTable('order', ...)         // CREATE TABLE "order" (...)
+builder.createTable('UserAccounts', ...)  // CREATE TABLE "UserAccounts" (...)
+```
+
+The PostgreSQL manual's advice is to "always quote a particular name or never
+quote it", so quoting a name that was previously emitted bare would point it at
+a different table. Note that a mixed-case name creates a case-sensitive table
+(`UserAccounts`, not `useraccounts`), and the string query API does not quote,
+so stick to lower-case names unless you have a reason not to.
+
+String defaults have their embedded quotes doubled, so a default value cannot
+close the literal it sits in. Column types must look like a type
+(`integer`, `varchar(100)`, `decimal(18,4)`), and `ON DELETE` must be one of
+`CASCADE`, `SET NULL`, `RESTRICT`, `NO ACTION`.
+
+This matters when migration operations are built from input rather than
+hand-written, which is the shape of a "custom fields per tenant" feature. Use
+`builder.sql()` when you genuinely need DDL this API will not express, and
+parameterize it yourself.
 
 **Table Operations:**
 ```typescript

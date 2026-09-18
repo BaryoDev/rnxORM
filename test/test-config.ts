@@ -21,7 +21,11 @@ const testDatabaseConfigs = {
         port: parseInt(process.env.MSSQL_PORT || '1433'),
         user: process.env.MSSQL_USER || 'sa',
         password: process.env.MSSQL_PASSWORD || 'YourStrong@Passw0rd',
-        database: process.env.MSSQL_DB || 'rnxorm_test'
+        database: process.env.MSSQL_DB || 'rnxorm_test',
+        // The test container presents a self-signed certificate. Since the
+        // provider encrypts and validates by default, a local server has to
+        // opt out the same way the README tells users to (issue #43).
+        trustServerCertificate: true
     },
     mariadb: {
         host: process.env.MARIADB_HOST || 'localhost',

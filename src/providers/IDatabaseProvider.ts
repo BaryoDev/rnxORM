@@ -13,6 +13,32 @@ export interface DatabaseConfig {
     max?: number;
     min?: number;
     idleTimeoutMillis?: number;
+
+    /**
+     * Enable TLS for the connection.
+     *
+     * `true` turns it on with driver defaults; an object is passed through to
+     * the driver's own TLS options (`rejectUnauthorized`, `ca`, and so on).
+     * Omitted means the driver default, except on SQL Server, which encrypts
+     * unless this is explicitly `false`.
+     */
+    ssl?: boolean | Record<string, unknown>;
+
+    /**
+     * Trust the server certificate without validating it (SQL Server).
+     *
+     * Only meaningful for local development against a self-signed certificate.
+     * Defaults to false: a connection that cannot validate its peer is not
+     * protected against an interceptor.
+     */
+    trustServerCertificate?: boolean;
+
+    /**
+     * Options passed straight through to the underlying driver, merged under
+     * everything this interface sets. An escape hatch for driver features the
+     * ORM does not model.
+     */
+    driverOptions?: Record<string, unknown>;
 }
 
 /**
@@ -21,7 +47,13 @@ export interface DatabaseConfig {
 export interface QueryResult {
     rows: any[];
     rowCount: number;
-    insertId?: number; // For auto-increment primary keys
+    /**
+     * Generated key for an auto-increment primary key.
+     *
+     * A string when the value is outside the range a JS number represents
+     * exactly, so a key above 2^53 is not silently rounded (issue #39).
+     */
+    insertId?: number | string;
 }
 
 /**
@@ -64,6 +96,16 @@ export interface IDatabaseProvider {
      * Rollback a transaction
      */
     rollbackTransaction(): Promise<void>;
+
+    /**
+     * Whether a transaction is currently open on this provider.
+     *
+     * Lets a caller-opened transaction take precedence over the one
+     * `saveChanges()` would otherwise wrap around its writes. Without it,
+     * `saveChanges()` committed the caller's transaction early and the
+     * caller's later rollback rolled back nothing (issue #38).
+     */
+    isInTransaction(): boolean;
 
     /**
      * Map TypeScript type to database-specific type

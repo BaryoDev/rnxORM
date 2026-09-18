@@ -41,6 +41,8 @@ export class SqlCaptureProvider implements IDatabaseProvider {
     reset(): void {
         this.calls = [];
         this.resultQueue = [];
+        this.transactionCalls = [];
+        this.transactionDepth = 0;
     }
 
     getDialect(): string {
@@ -60,16 +62,28 @@ export class SqlCaptureProvider implements IDatabaseProvider {
         return this.resultQueue.length > 0 ? this.resultQueue.shift()! : this.defaultResult;
     }
 
+    /** Transaction lifecycle calls, in order, so tests can assert nesting. */
+    public transactionCalls: ('begin' | 'commit' | 'rollback')[] = [];
+
+    private transactionDepth = 0;
+
     async beginTransaction(): Promise<void> {
-        // no-op
+        this.transactionCalls.push('begin');
+        this.transactionDepth++;
     }
 
     async commitTransaction(): Promise<void> {
-        // no-op
+        this.transactionCalls.push('commit');
+        this.transactionDepth = Math.max(0, this.transactionDepth - 1);
     }
 
     async rollbackTransaction(): Promise<void> {
-        // no-op
+        this.transactionCalls.push('rollback');
+        this.transactionDepth = Math.max(0, this.transactionDepth - 1);
+    }
+
+    isInTransaction(): boolean {
+        return this.transactionDepth > 0;
     }
 
     getParameterPlaceholder(index: number): string {

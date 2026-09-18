@@ -4,6 +4,45 @@
 
 ### Security
 
+- **Migration DDL is validated and quoted** (issue #44). `MigrationBuilder`
+  concatenated every argument into DDL, including string defaults that land
+  inside quotes, so an app building migration operations from request data had
+  an injection point: a default of `x'; DROP TABLE users; --` closed the
+  literal and ran, and the SQL Server `sp_rename` path broke out of its string
+  literal the same way. Identifiers are now validated as plain identifiers
+  (optionally `schema.name`) and quoted per dialect, string defaults have their
+  quotes doubled, column types must match a type grammar, and `ON DELETE` must
+  be one of the four referential actions.
+  Quoting is unconditional on SQL Server and MariaDB, whose quote characters
+  affect reserved words and special characters but not case resolution. On
+  PostgreSQL it is conditional: a lower-case name is emitted bare, exactly as
+  before, and only a reserved word or a mixed-case name is quoted. PostgreSQL
+  folds unquoted identifiers to lower case and leaves quoted ones alone, so
+  quoting a name that used to be bare would point it at a different table; the
+  manual's advice is to "always quote a particular name or never quote it".
+  This follows what the Npgsql provider does rather than EF Core's
+  unconditional base behavior.
+  **Behavior change:** reserved words now work as table and column names
+  (`createTable('order', ...)` was previously invalid SQL). SQL Server and
+  MariaDB DDL strings gain quote characters. PostgreSQL DDL for lower-case
+  names is unchanged. Identifiers that were never valid unquoted (anything with
+  a space, a quote, or a semicolon) now throw.
+- **`migration:create` validates the migration name** (issue #44). The name was
+  interpolated into both the output path and the generated source, so
+  `../../../../tmp/pwned` wrote a file outside the migrations directory and a
+  name containing `")` broke out of the `super("id", "name")` literal. Names
+  are now restricted to letters, numbers, hyphens, and underscores, and the
+  resolved path is asserted to stay under the migrations directory.
+- **TLS is configurable, and SQL Server encrypts by default** (issue #43).
+  `DatabaseConfig` gained `ssl` (`true` or a driver options object),
+  `trustServerCertificate`, and a `driverOptions` passthrough, forwarded by all
+  three providers. There was previously no supported way to enable TLS on any
+  provider, and the SQL Server provider hardcoded `encrypt: false` with
+  `trustServerCertificate: true`, putting its traffic on the wire in cleartext
+  and accepting any certificate presented. **Behavior change:** SQL Server now
+  defaults to `encrypt: true, trustServerCertificate: false`. A local server
+  with a self-signed certificate needs `ssl: false` (or
+  `trustServerCertificate: true`) set explicitly.
 - **Projection aliases are validated** (issue #31). The keys of an
   object-literal projection in `select()` and `groupBy().select()` reached SQL
   as aliases with no validation, while every other identifier position was
@@ -16,6 +55,28 @@
 
 ### Fixed
 
+- **Transactions no longer collide** (issue #38). Transaction state is a single
+  slot on the provider instance, so `saveChanges()` and a caller-opened
+  transaction fought over it: `saveChanges()` committed the caller's
+  transaction early and the caller's later rollback rolled back nothing. On
+  PostgreSQL, commit also released a pooled client the caller had acquired
+  through `connect()`, after which every later query silently drew an arbitrary
+  connection. `saveChanges()` now enlists in an open transaction instead of
+  wrapping its own, and only commits or rolls back one it opened. A nested
+  `beginTransaction()` throws rather than silently ending the outer transaction
+  (which is what MariaDB does with a second START TRANSACTION, and what SQL
+  Server did by orphaning the first Transaction object). The SQL Server
+  provider also builds its own connection pool rather than the module-global
+  one, so two providers with different configs no longer share a pool that
+  either one's `disconnect()` closes.
+- **Generated keys and exact-numeric aggregates keep their precision**
+  (issue #39). The three drivers return three different JS types for BIGINT and
+  DECIMAL, and the ORM funnelled all of them through `Number()`/`parseFloat()`,
+  which silently rounds anything a double cannot represent: a generated key
+  above 2^53 came back wrong, and a DECIMAL sum lost its cents. Values that
+  convert exactly are still numbers; values that do not keep their exact string
+  form. `count()` also parses with an explicit radix and returns 0 for an empty
+  result set rather than NaN. `QueryResult.insertId` is now `number | string`.
 - **Change detection compares values, not references** (issue #40). The
   original-values snapshot was a shallow `{ ...entity }` compared with `!==`,
   which was wrong in both directions: two `Date` objects holding the same

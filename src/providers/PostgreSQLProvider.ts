@@ -8,13 +8,26 @@ import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 export class PostgreSQLProvider implements IDatabaseProvider {
     private pool: Pool;
     private client: PoolClient | null = null;
+    /**
+     * Whether this provider currently holds an open transaction, and whether
+     * the client it runs on was acquired for that transaction. A client the
+     * caller acquired through connect() must outlive the transaction: commit
+     * used to release it, after which every later query silently drew an
+     * arbitrary pool connection (issue #38).
+     */
+    private transactionOpen = false;
+    private clientOwnedByTransaction = false;
 
     getDialect(): string {
         return 'postgresql';
     }
 
+    /** The driver config this provider built, kept for inspection and tests. */
+    private readonly poolConfig: Record<string, unknown>;
+
     constructor(config: DatabaseConfig) {
-        this.pool = new Pool({
+        this.poolConfig = {
+            ...config.driverOptions,
             host: config.host,
             port: config.port,
             user: config.user,
@@ -23,7 +36,11 @@ export class PostgreSQLProvider implements IDatabaseProvider {
             max: config.max,
             min: config.min,
             idleTimeoutMillis: config.idleTimeoutMillis,
-        });
+            // Only set ssl when the caller asked for it, so the driver's own
+            // default (and PGSSLMODE) still applies when they did not.
+            ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
+        };
+        this.pool = new Pool(this.poolConfig);
     }
 
     async connect(): Promise<void> {
@@ -50,23 +67,60 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     }
 
     async beginTransaction(): Promise<void> {
-        if (!this.client) await this.connect();
-        await this.client?.query('BEGIN');
-    }
-
-    async commitTransaction(): Promise<void> {
-        if (this.client) {
-            await this.client.query('COMMIT');
-            this.client.release();
-            this.client = null;
+        if (this.transactionOpen) {
+            throw new Error(
+                'A transaction is already open on this provider. Nested transactions are ' +
+                'not supported; commit or roll back the current one first, or use a ' +
+                'separate DbContext.'
+            );
+        }
+        // Claim the slot before the first await. Setting it only after BEGIN
+        // left a window where two concurrent callers both passed the guard
+        // above and then collided on the same provider state.
+        this.transactionOpen = true;
+        try {
+            if (!this.client) {
+                await this.connect();
+                this.clientOwnedByTransaction = true;
+            }
+            await this.client?.query('BEGIN');
+        } catch (error) {
+            // Starting failed, so release the claim and any client it took.
+            this.transactionOpen = false;
+            if (this.clientOwnedByTransaction && this.client) {
+                this.client.release();
+                this.client = null;
+                this.clientOwnedByTransaction = false;
+            }
+            throw error;
         }
     }
 
+    async commitTransaction(): Promise<void> {
+        if (!this.transactionOpen || !this.client) return;
+        await this.client.query('COMMIT');
+        this.endTransaction();
+    }
+
     async rollbackTransaction(): Promise<void> {
-        if (this.client) {
-            await this.client.query('ROLLBACK');
+        if (!this.transactionOpen || !this.client) return;
+        await this.client.query('ROLLBACK');
+        this.endTransaction();
+    }
+
+    isInTransaction(): boolean {
+        return this.transactionOpen;
+    }
+
+    /**
+     * Release the transaction's client only if the transaction acquired it.
+     */
+    private endTransaction(): void {
+        this.transactionOpen = false;
+        if (this.clientOwnedByTransaction && this.client) {
             this.client.release();
             this.client = null;
+            this.clientOwnedByTransaction = false;
         }
     }
 
