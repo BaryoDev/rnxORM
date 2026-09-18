@@ -1,6 +1,6 @@
 import { DbContext } from "./DbContext";
 import { MetadataStorage, RelationType } from "./MetadataStorage";
-import { EntityState } from "./EntityEntry";
+import { EntityState, snapshotEntity } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
 import { assertAlias, assertColumn, assertColumnOrAlias, assertHavingExpression, assertLimit, buildComparison, convertValueToDb, findColumn } from "./Identifiers";
@@ -367,7 +367,7 @@ export class DbSet<T> {
 
         // Track the entity if requested
         if (track) {
-            const originalValues = { ...entity };
+            const originalValues = snapshotEntity(entity);
             this.context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
             if (pk) {
                 this.context.changeTracker.registerIdentity(this.entityType, pk.pkValue, entity);
@@ -438,7 +438,7 @@ export class DbSet<T> {
 
         // Track the entity if tracking is enabled and context is provided
         if (track) {
-            const originalValues = { ...entity };
+            const originalValues = snapshotEntity(entity);
             context!.changeTracker.track(entity, EntityState.Unchanged, originalValues);
             if (pk) {
                 context!.changeTracker.registerIdentity(entityType, pk.pkValue, entity);

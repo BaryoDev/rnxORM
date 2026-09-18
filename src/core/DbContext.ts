@@ -100,7 +100,7 @@ export class DbContext {
             this._changeTracker.detectChanges();
         }
 
-        const changedEntries = this._changeTracker.getChangedEntries();
+        const changedEntries = this.orderByDependency(this._changeTracker.getChangedEntries());
 
         if (changedEntries.length === 0) {
             return 0;
@@ -134,16 +134,21 @@ export class DbContext {
                 switch (entry.state) {
                     case EntityState.Added:
                         await this.insertEntity(entity, metadata, tableName);
+                        this.propagateGeneratedKey(entity);
                         savedCount++;
                         break;
 
                     case EntityState.Modified:
-                        await this.updateEntity(entity, entry, metadata, tableName, pkColumn);
-                        savedCount++;
+                        // Count statements actually executed: an entry whose
+                        // properties all match its baseline emits no SQL and
+                        // must not report as saved (issue #33).
+                        if (await this.updateEntity(entity, entry, metadata, tableName, pkColumn)) {
+                            savedCount++;
+                        }
                         break;
 
                     case EntityState.Deleted:
-                        await this.deleteEntity(entity, metadata, tableName, pkColumn);
+                        await this.deleteEntity(entity, entry, metadata, tableName, pkColumn);
                         savedCount++;
                         break;
                 }
@@ -160,6 +165,174 @@ export class DbContext {
             // Rollback on error
             await this.rollbackTransaction();
             throw error;
+        }
+    }
+
+
+    /**
+     * Order entries so a row is never written before the row it points at.
+     *
+     * Entries used to be processed in Map insertion order, so adding a child
+     * before its parent sent the child INSERT first and hit the FK constraint.
+     * Inserts are sorted principal-first by a topological sort over the
+     * ManyToOne/OneToOne relations between the entity types being saved;
+     * deletes take the reverse order, since the dependent row has to go before
+     * the row it references (issue #36).
+     *
+     * A cycle (two types referencing each other) is left in its original order
+     * rather than throwing: it cannot be satisfied by ordering alone, and the
+     * database will report it more precisely than this could.
+     */
+    private orderByDependency(entries: EntityEntry<any>[]): EntityEntry<any>[] {
+        if (entries.length < 2) return entries;
+
+        const inserts = entries.filter(e => e.state === EntityState.Added);
+        const updates = entries.filter(e => e.state === EntityState.Modified);
+        const deletes = entries.filter(e => e.state === EntityState.Deleted);
+
+        // A relation whose principal is the same type as its dependent (a category
+        // under a category) carries no type-level edge: the edge is between two
+        // rows, not two tables. The type sort cannot see it, so the order within
+        // one type is settled here, by following each entry's own navigation to
+        // the instance it points at.
+        const sortWithinType = (group: EntityEntry<any>[]): EntityEntry<any>[] => {
+            if (group.length < 2) return group;
+
+            const type = group[0].entity.constructor;
+            const metadata = MetadataStorage.get().getEntity(type);
+            const selfRelations = (metadata?.relations ?? []).filter(r =>
+                (r.relationType === RelationType.ManyToOne || r.relationType === RelationType.OneToOne) &&
+                r.relatedEntity() === type);
+            if (selfRelations.length === 0) return group;
+
+            const byEntity = new Map<any, EntityEntry<any>>();
+            for (const entry of group) byEntity.set(entry.entity, entry);
+
+            // Edge from dependent entry to the principal entry it references, kept
+            // only when that principal is in this same batch. A parent that is
+            // already stored has its key and needs no ordering.
+            const dependsOn = new Map<EntityEntry<any>, Set<EntityEntry<any>>>();
+            for (const entry of group) {
+                const deps = new Set<EntityEntry<any>>();
+                for (const relation of selfRelations) {
+                    const target = (entry.entity as any)[relation.propertyName];
+                    const principal = target && byEntity.get(target);
+                    if (principal && principal !== entry) deps.add(principal);
+                }
+                dependsOn.set(entry, deps);
+            }
+
+            const ordered: EntityEntry<any>[] = [];
+            const done = new Set<EntityEntry<any>>();
+            const remaining = [...group];
+            while (remaining.length > 0) {
+                const ready = remaining.filter(e => [...dependsOn.get(e)!].every(d => done.has(d)));
+                if (ready.length === 0) {
+                    // A cycle between rows, same as the type-level case: leave the
+                    // rest alone and let the database report it.
+                    ordered.push(...remaining);
+                    break;
+                }
+                for (const entry of ready) {
+                    ordered.push(entry);
+                    done.add(entry);
+                    remaining.splice(remaining.indexOf(entry), 1);
+                }
+            }
+            return ordered;
+        };
+
+        const sortPrincipalFirst = (group: EntityEntry<any>[]): EntityEntry<any>[] => {
+            if (group.length < 2) return group;
+
+            // Edge from dependent type to the principal type it references.
+            const dependsOn = new Map<any, Set<any>>();
+            const types = new Set(group.map(e => e.entity.constructor));
+            for (const type of types) {
+                const metadata = MetadataStorage.get().getEntity(type);
+                const deps = new Set<any>();
+                for (const relation of metadata?.relations ?? []) {
+                    if (relation.relationType !== RelationType.ManyToOne &&
+                        relation.relationType !== RelationType.OneToOne) {
+                        continue;
+                    }
+                    const related = relation.relatedEntity();
+                    if (types.has(related) && related !== type) {
+                        deps.add(related);
+                    }
+                }
+                dependsOn.set(type, deps);
+            }
+
+            const ordered: EntityEntry<any>[] = [];
+            const done = new Set<any>();
+            const remaining = [...types];
+            while (remaining.length > 0) {
+                const ready = remaining.filter(t => [...dependsOn.get(t)!].every(d => done.has(d)));
+                if (ready.length === 0) {
+                    // Cycle: emit what is left in its original order.
+                    for (const type of remaining) {
+                        ordered.push(...group.filter(e => e.entity.constructor === type));
+                    }
+                    break;
+                }
+                for (const type of ready) {
+                    ordered.push(...sortWithinType(group.filter(e => e.entity.constructor === type)));
+                    done.add(type);
+                    remaining.splice(remaining.indexOf(type), 1);
+                }
+            }
+            return ordered;
+        };
+
+        return [
+            ...sortPrincipalFirst(inserts),
+            ...updates,
+            ...sortPrincipalFirst(deletes).reverse(),
+        ];
+    }
+
+    /**
+     * Copy a just-inserted principal's key onto the foreign-key property of any
+     * tracked dependent whose navigation points at it.
+     *
+     * Setting `post.author = user` says nothing about `post.authorid`, and
+     * insertEntity() only reads column properties, so the INSERT used to bind
+     * undefined into a NOT NULL column. This is EF Core's relationship fixup,
+     * run after each principal INSERT so the dependent that follows sees the
+     * generated key (issue #36).
+     */
+    private propagateGeneratedKey(principal: any): void {
+        const principalType = principal.constructor;
+        const principalMetadata = MetadataStorage.get().getEntity(principalType);
+        const principalPk = principalMetadata?.columns.find((c: any) => c.isPrimaryKey);
+        if (!principalPk) return;
+
+        const keyValue = principal[principalPk.propertyName];
+        if (keyValue === undefined || keyValue === null) return;
+
+        for (const entry of this._changeTracker.getChangedEntries()) {
+            const dependent = entry.entity;
+            if (dependent === principal) continue;
+
+            const metadata = MetadataStorage.get().getEntity(dependent.constructor);
+            if (!metadata) continue;
+
+            for (const relation of metadata.relations) {
+                if (relation.relationType !== RelationType.ManyToOne &&
+                    relation.relationType !== RelationType.OneToOne) {
+                    continue;
+                }
+                if (!relation.foreignKeyColumn) continue;
+                if (dependent[relation.propertyName] !== principal) continue;
+
+                // An explicitly set foreign key wins: the caller said what it
+                // wanted and fixup should not overwrite it.
+                if (dependent[relation.foreignKeyColumn] === undefined ||
+                    dependent[relation.foreignKeyColumn] === null) {
+                    dependent[relation.foreignKeyColumn] = keyValue;
+                }
+            }
         }
     }
 
@@ -249,11 +422,21 @@ export class DbContext {
     /**
      * Update an existing entity
      */
-    private async updateEntity(entity: any, entry: EntityEntry<any>, metadata: any, tableName: string, pkColumn: any): Promise<void> {
-        const modifiedProperties = entry.getModifiedProperties();
+    private async updateEntity(entity: any, entry: EntityEntry<any>, metadata: any, tableName: string, pkColumn: any): Promise<boolean> {
+        // An entry with no baseline (update()/attach(e, Modified) on an entity
+        // this context never read) has original values copied from the entity
+        // itself, so property comparison reports nothing modified. EF Core's
+        // Update() marks every property modified and writes all columns; doing
+        // the same here is what makes the disconnected-update pattern work
+        // instead of silently emitting no SQL (issue #33).
+        const modifiedProperties = entry.hasBaseline
+            ? entry.getModifiedProperties()
+            : metadata.columns
+                .filter((c: any) => !c.isPrimaryKey && !c.isConcurrencyToken && !c.isShadowProperty)
+                .map((c: any) => c.propertyName);
 
         if (modifiedProperties.length === 0) {
-            return; // Nothing to update
+            return false; // Nothing to update
         }
 
         const setClause: string[] = [];
@@ -279,18 +462,36 @@ export class DbContext {
             }
         }
 
-        // Auto-increment concurrency tokens
+        // Auto-increment concurrency tokens. The new value is staged and only
+        // written onto the entity once the statement succeeds: mutating first
+        // left a failed or rolled-back save with version + 1 on the entity and
+        // the old value in originalValues, so a retry sent the wrong expected
+        // version (issue #41).
+        const stagedTokenValues: { propertyName: string; value: number }[] = [];
         for (const token of concurrencyTokens) {
             const currentValue = entity[token.propertyName];
-            const newValue = typeof currentValue === 'number' ? currentValue + 1 : 1;
+            // A disconnected entity may carry no token value at all. There is
+            // no baseline to check against either, so the token is left out of
+            // the statement rather than invented (issue #33 meets #41).
+            if (currentValue === undefined || currentValue === null) {
+                continue;
+            }
+            if (typeof currentValue !== 'number') {
+                throw new Error(
+                    `${metadata.target.name}.${token.propertyName} is a concurrency token with a ` +
+                    `non-numeric value (${typeof currentValue}). Tokens are incremented client-side ` +
+                    `and must be numeric; database-generated tokens (timestamp, rowversion, GUID) ` +
+                    `are not supported.`
+                );
+            }
+            const newValue = currentValue + 1;
             setClause.push(`${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
             values.push(newValue);
-            // Update the entity with new token value
-            entity[token.propertyName] = newValue;
+            stagedTokenValues.push({ propertyName: token.propertyName, value: newValue });
         }
 
         if (setClause.length === 0) {
-            return; // No non-PK columns to update
+            return false; // No non-PK columns to update
         }
 
         let pkValue = entity[pkColumn.propertyName];
@@ -305,9 +506,15 @@ export class DbContext {
         // Build WHERE clause with PK
         let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
 
-        // Add concurrency token checks to WHERE clause
+        // Add concurrency token checks to WHERE clause. A token the entity
+        // does not carry is skipped, matching the SET clause above.
         for (const token of concurrencyTokens) {
-            const originalValue = entry.originalValues[token.propertyName];
+            const originalValue = entry.hasBaseline
+                ? entry.originalValues[token.propertyName]
+                : entity[token.propertyName];
+            if (originalValue === undefined || originalValue === null) {
+                continue;
+            }
             whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
             values.push(originalValue);
         }
@@ -333,12 +540,18 @@ export class DbContext {
 
             throw new Error(errorMessage);
         }
+
+        for (const staged of stagedTokenValues) {
+            entity[staged.propertyName] = staged.value;
+        }
+
+        return true;
     }
 
     /**
      * Delete an entity
      */
-    private async deleteEntity(entity: any, metadata: any, tableName: string, pkColumn: any): Promise<void> {
+    private async deleteEntity(entity: any, entry: EntityEntry<any>, metadata: any, tableName: string, pkColumn: any): Promise<void> {
         let pkValue = entity[pkColumn.propertyName];
 
         // Apply value conversion to primary key if needed
@@ -346,11 +559,50 @@ export class DbContext {
             pkValue = pkColumn.convertToDb(pkValue);
         }
 
-        const placeholder = this.provider.getParameterPlaceholder(1);
+        let paramIndex = 1;
+        const values: any[] = [pkValue];
+        let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
 
-        const sql = `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
+        // A delete competes for the row the same way an update does, so it
+        // carries the same token check. Without it, deleting a row another
+        // user already changed succeeded silently (issue #41).
+        const concurrencyTokens = metadata.columns.filter((c: any) => c.isConcurrencyToken);
+        for (const token of concurrencyTokens) {
+            const originalValue = entry.hasBaseline
+                ? entry.originalValues[token.propertyName]
+                : entity[token.propertyName];
+            if (originalValue === undefined || originalValue === null) {
+                continue;
+            }
+            whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
+            values.push(originalValue);
+        }
 
-        await this.provider.query(sql, [pkValue]);
+        const sql = `DELETE FROM ${tableName} WHERE ${whereClause}`;
+
+        const result = await this.provider.query(sql, values);
+
+        // EF Core throws when a DELETE affects no rows, token or not: the row
+        // was already deleted or changed out from under this context.
+        if (result.rowCount === 0) {
+            const entityName = metadata.target.name;
+            let errorMessage = `Concurrency violation detected for ${entityName} ` +
+                `(${pkColumn.propertyName}=${entity[pkColumn.propertyName]}): ` +
+                `The entity has been modified or deleted by another user.`;
+
+            if (concurrencyTokens.length > 0) {
+                const tokenInfo = concurrencyTokens.map((token: any) => {
+                    const current = entity[token.propertyName];
+                    const original = entry.hasBaseline
+                        ? entry.originalValues[token.propertyName]
+                        : current;
+                    return `${token.propertyName}: expected=${original}, current=${current}`;
+                }).join(', ');
+                errorMessage += ` Concurrency tokens: ${tokenInfo}`;
+            }
+
+            throw new Error(errorMessage);
+        }
     }
 
     /**
