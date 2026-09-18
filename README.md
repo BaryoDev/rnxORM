@@ -2167,7 +2167,23 @@ export class AddUsersTable extends Migration {
 
 ### Migration Builder API
 
-The `MigrationBuilder` provides a fluent API for schema operations:
+The `MigrationBuilder` provides a fluent API for schema operations.
+
+**Identifiers are validated and quoted.** Table, column, index, and constraint
+names must be plain identifiers (optionally `schema.name`) and are quoted for
+the dialect, so `createTable('order', ...)` emits `CREATE TABLE "order"` on
+PostgreSQL, `[order]` on SQL Server, and `` `order` `` on MariaDB. Reserved
+words work as names; anything with a space, quote, or semicolon throws.
+
+String defaults have their embedded quotes doubled, so a default value cannot
+close the literal it sits in. Column types must look like a type
+(`integer`, `varchar(100)`, `decimal(18,4)`), and `ON DELETE` must be one of
+`CASCADE`, `SET NULL`, `RESTRICT`, `NO ACTION`.
+
+This matters when migration operations are built from input rather than
+hand-written, which is the shape of a "custom fields per tenant" feature. Use
+`builder.sql()` when you genuinely need DDL this API will not express, and
+parameterize it yourself.
 
 **Table Operations:**
 ```typescript

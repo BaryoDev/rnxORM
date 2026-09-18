@@ -46,9 +46,22 @@ function toPascalCase(name: string): string {
 /**
  * Create a new migration file
  */
+const MIGRATION_NAME = /^[A-Za-z0-9_-]+$/;
+
 export function createMigration(name: string): string {
     if (!name) {
         throw new Error('Migration name is required. Usage: rnxorm migration:create <migration-name>');
+    }
+
+    // The name becomes part of a filename and is interpolated into the
+    // generated source. Unchecked, `../../../../tmp/pwned` wrote outside the
+    // migrations directory and a name containing `")` broke out of the
+    // super("id", "name") literal (issue #44).
+    if (!MIGRATION_NAME.test(name)) {
+        throw new Error(
+            `Invalid migration name '${name}'. ` +
+            `Migration names may contain letters, numbers, hyphens, and underscores only.`
+        );
     }
 
     const dir = migrationsDir();
@@ -61,6 +74,14 @@ export function createMigration(name: string): string {
     const className = toPascalCase(name);
     const fileName = `${migrationId}_${name}.ts`;
     const filePath = path.join(dir, fileName);
+
+    // Belt and braces: the name pattern already rules out traversal, but the
+    // resolved path is asserted to stay under the migrations directory so a
+    // future change to the pattern cannot silently reopen it.
+    const resolvedDir = path.resolve(dir);
+    if (!path.resolve(filePath).startsWith(resolvedDir + path.sep)) {
+        throw new Error(`Invalid migration name '${name}': resolved outside ${resolvedDir}`);
+    }
 
     const template = `import { Migration, MigrationBuilder } from "rnxorm";
 

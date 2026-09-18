@@ -4,6 +4,26 @@
 
 ### Security
 
+- **Migration DDL is validated and quoted** (issue #44). `MigrationBuilder`
+  concatenated every argument into DDL, including string defaults that land
+  inside quotes, so an app building migration operations from request data had
+  an injection point: a default of `x'; DROP TABLE users; --` closed the
+  literal and ran, and the SQL Server `sp_rename` path broke out of its string
+  literal the same way. Identifiers are now validated as plain identifiers
+  (optionally `schema.name`) and quoted per dialect, string defaults have their
+  quotes doubled, column types must match a type grammar, and `ON DELETE` must
+  be one of the four referential actions.
+  **Behavior change:** DDL now quotes identifiers (`CREATE TABLE "users"` on
+  PostgreSQL, `[users]` on SQL Server, `` `users` `` on MariaDB). This makes
+  reserved words usable as table and column names, and it changes the exact
+  DDL string existing migrations emit. Identifiers that were never valid
+  unquoted (anything with a space, a quote, or a semicolon) now throw.
+- **`migration:create` validates the migration name** (issue #44). The name was
+  interpolated into both the output path and the generated source, so
+  `../../../../tmp/pwned` wrote a file outside the migrations directory and a
+  name containing `")` broke out of the `super("id", "name")` literal. Names
+  are now restricted to letters, numbers, hyphens, and underscores, and the
+  resolved path is asserted to stay under the migrations directory.
 - **TLS is configurable, and SQL Server encrypts by default** (issue #43).
   `DatabaseConfig` gained `ssl` (`true` or a driver options object),
   `trustServerCertificate`, and a `driverOptions` passthrough, forwarded by all
