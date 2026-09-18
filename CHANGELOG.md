@@ -60,7 +60,12 @@
   cleartext password to an interceptor despite `ssl: true`, which defeats the
   TLS support added in #43, and a SQL injection under the big5/gbk/sjis/cp932/
   gb18030 client charsets. `dotenv` was a production dependency that nothing in
-  `src/` imports. `npm audit --omit=dev` now reports zero vulnerabilities.
+  `src/` imports.
+  Three moderate advisories remain, all transitive (`uuid` under
+  `@azure/identity`, pulled in by `tedious` under `mssql`). Fixing them
+  requires `@azure/identity` 4.13.3, which needs Node 20, so they are left in
+  place while Node 18 is supported. None is reachable from the ORM's own code
+  paths.
 - **Transactions no longer collide** (issue #38). Transaction state is a single
   slot on the provider instance, so `saveChanges()` and a caller-opened
   transaction fought over it: `saveChanges()` committed the caller's
