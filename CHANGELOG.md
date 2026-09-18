@@ -61,11 +61,14 @@
   TLS support added in #43, and a SQL injection under the big5/gbk/sjis/cp932/
   gb18030 client charsets. `dotenv` was a production dependency that nothing in
   `src/` imports.
+  Pinned to 3.4.7, which carries the fix and still supports Node 14+. The 3.5.x
+  line requires Node 20 and calls `process.exit(1)` on import below that, so it
+  would have dropped Node 18 silently.
   Three moderate advisories remain, all transitive (`uuid` under
   `@azure/identity`, pulled in by `tedious` under `mssql`). Fixing them
-  requires `@azure/identity` 4.13.3, which needs Node 20, so they are left in
-  place while Node 18 is supported. None is reachable from the ORM's own code
-  paths.
+  requires `@azure/identity` 4.13.3, which also needs Node 20, so they are left
+  in place while Node 18 is supported. None is reachable from the ORM's own
+  code paths.
 - **Transactions no longer collide** (issue #38). Transaction state is a single
   slot on the provider instance, so `saveChanges()` and a caller-opened
   transaction fought over it: `saveChanges()` committed the caller's
