@@ -55,6 +55,12 @@
 
 ### Fixed
 
+- **mariadb upgraded and dotenv removed** (issue #42). The pinned mariadb
+  connector carried three advisories, including one where it leaks the
+  cleartext password to an interceptor despite `ssl: true`, which defeats the
+  TLS support added in #43, and a SQL injection under the big5/gbk/sjis/cp932/
+  gb18030 client charsets. `dotenv` was a production dependency that nothing in
+  `src/` imports. `npm audit --omit=dev` now reports zero vulnerabilities.
 - **Transactions no longer collide** (issue #38). Transaction state is a single
   slot on the provider instance, so `saveChanges()` and a caller-opened
   transaction fought over it: `saveChanges()` committed the caller's
