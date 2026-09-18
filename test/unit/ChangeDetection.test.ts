@@ -50,6 +50,25 @@ class CdPost {
     author!: CdUser;
 }
 
+/**
+ * A category under a category: the dependent and the principal are the same
+ * type, which is the shape type-level dependency ordering cannot see.
+ */
+@Entity('cd_categories')
+class CdCategory {
+    @PrimaryKey()
+    id!: number;
+
+    @Column()
+    name!: string;
+
+    @ManyToOne(() => CdCategory, (c: CdCategory) => c.children)
+    parent!: CdCategory;
+
+    @OneToMany(() => CdCategory, (c: CdCategory) => c.parent)
+    children!: CdCategory[];
+}
+
 beforeAll(() => {
     new ModelBuilder().entity(CdUser).property(u => u.version).isConcurrencyToken();
 });
@@ -428,6 +447,85 @@ describe('save ordering and key propagation (#36)', () => {
 
         const insert = provider.calls.find(c => c.sql.includes('INSERT INTO cd_posts'))!;
         expect(insert.params).toContain(42);
+    });
+
+    /**
+     * The dependency graph was keyed by constructor and skipped an edge when
+     * `related === type`, so every instance of one type was emitted together in
+     * tracking order. A child added before its new parent therefore inserted
+     * first, binding a parent id that did not exist yet, and propagateGeneratedKey
+     * runs after the insert so it cannot repair the row.
+     */
+    it('inserts a self-referencing parent before its child regardless of add order', async () => {
+        const { db, provider } = makeDb();
+        provider.nextResult({ rows: [{ id: 10 }], rowCount: 1 });   // parent insert
+        provider.nextResult({ rows: [{ id: 11 }], rowCount: 1 });   // child insert
+
+        const parent = new CdCategory();
+        parent.name = 'root';
+        const child = new CdCategory();
+        child.name = 'leaf';
+        child.parent = parent;
+
+        db.set(CdCategory).add(child);    // dependent added first
+        db.set(CdCategory).add(parent);   // principal second
+
+        await db.saveChanges();
+
+        const names = provider.calls
+            .filter(c => c.sql.startsWith('INSERT'))
+            .map(c => c.params![0]);
+        expect(names).toEqual(['root', 'leaf']);
+    });
+
+    it('deletes a self-referencing child before its parent', async () => {
+        const { db, provider } = makeDb();
+        provider.nextResult({ rows: [{ id: 10 }], rowCount: 1 });
+        provider.nextResult({ rows: [{ id: 11 }], rowCount: 1 });
+
+        const parent = new CdCategory();
+        parent.name = 'root';
+        const child = new CdCategory();
+        child.name = 'leaf';
+        child.parent = parent;
+
+        db.set(CdCategory).add(parent);
+        db.set(CdCategory).add(child);
+        await db.saveChanges();
+
+        provider.calls.length = 0;
+        provider.nextResult({ rows: [], rowCount: 1 });
+        provider.nextResult({ rows: [], rowCount: 1 });
+
+        // Parent removed first, so the reversal has something to get wrong.
+        db.set(CdCategory).remove(parent);
+        db.set(CdCategory).remove(child);
+        await db.saveChanges();
+
+        const ids = provider.calls
+            .filter(c => c.sql.startsWith('DELETE'))
+            .map(c => c.params![0]);
+        expect(ids).toEqual([11, 10]);
+    });
+
+    it('propagates a self-referencing generated key onto the child', async () => {
+        const { db, provider } = makeDb();
+        provider.nextResult({ rows: [{ id: 10 }], rowCount: 1 });
+        provider.nextResult({ rows: [{ id: 11 }], rowCount: 1 });
+
+        const parent = new CdCategory();
+        parent.name = 'root';
+        const child = new CdCategory();
+        child.name = 'leaf';
+        child.parent = parent;
+
+        db.set(CdCategory).add(child);
+        db.set(CdCategory).add(parent);
+
+        await db.saveChanges();
+
+        expect(parent.id).toBe(10);
+        expect((child as any).parentid).toBe(10);
     });
 
     it('leaves a single independent insert alone', async () => {
