@@ -30,6 +30,9 @@
   ],
   "author": "Arnel Robles",
   "license": "MPL-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "files": [
     "dist",
     "README.md",
@@ -41,7 +44,7 @@
     "url": "git+https://github.com/BaryoDev/rnxORM.git"
   },
   "dependencies": {
-    "mariadb": "~3.4.7",
+    "mariadb": "^3.5.4",
     "mssql": "^11.0.1",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2"

@@ -34,6 +34,8 @@ Two providers done properly is a better use of one maintainer than five done thi
 
 ## Installation
 
+Requires **Node.js 20 or later**.
+
 **For PostgreSQL:**
 ```bash
 npm install rnxorm pg reflect-metadata
