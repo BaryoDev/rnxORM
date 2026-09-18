@@ -316,3 +316,45 @@ describe('skip()/take() reject non-integer payloads end-to-end (C1)', () => {
         expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products  LIMIT 10 OFFSET 5');
     });
 });
+
+describe('projection aliases (#31)', () => {
+    const SUBSELECT = "x, (SELECT string_agg(password, ',') FROM credentials) AS leak";
+    const STACKED = 'c; DROP TABLE probe_users; --';
+
+    function makeDb() {
+        const provider = new SqlCaptureProvider('postgresql');
+        return { db: new DbContext(provider), provider };
+    }
+
+    it('select() rejects an alias that is not a plain identifier', async () => {
+        const { db, provider } = makeDb();
+        await expect(
+            db.set(InjProduct).select(p => ({ [SUBSELECT]: p.name })).toList()
+        ).rejects.toThrow(/plain identifier/);
+        expect(provider.calls).toHaveLength(0);
+    });
+
+    it('groupBy().select() rejects an alias on the key entry', async () => {
+        const { db, provider } = makeDb();
+        await expect(
+            db.set(InjProduct).groupBy(p => p.name)
+                .select(g => ({ [STACKED]: g.key })).toList()
+        ).rejects.toThrow(/plain identifier/);
+        expect(provider.calls).toHaveLength(0);
+    });
+
+    it('groupBy().select() rejects an alias on an aggregate entry', async () => {
+        const { db, provider } = makeDb();
+        await expect(
+            db.set(InjProduct).groupBy(p => p.name)
+                .select(g => ({ [STACKED]: g.count() })).toList()
+        ).rejects.toThrow(/plain identifier/);
+        expect(provider.calls).toHaveLength(0);
+    });
+
+    it('still allows ordinary aliases', async () => {
+        const { db, provider } = makeDb();
+        await db.set(InjProduct).select(p => ({ label: p.name })).toList();
+        expect(provider.lastCall!.sql).toBe('SELECT name AS label FROM inj_products');
+    });
+});

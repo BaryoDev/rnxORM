@@ -61,6 +61,21 @@ export function assertLimit(value: number, apiName: string): number {
 }
 
 /**
+ * Apply a column's value converter to a value bound as a parameter.
+ *
+ * Converters already run on insert/update/read; a parameter in a WHERE clause
+ * is the same boundary and needs the same treatment, or the query compares a
+ * domain value against a column holding the converted form and matches nothing
+ * (issue #35). null/undefined pass through: they mean "no value", and a
+ * converter written for the domain type should not have to handle them.
+ */
+export function convertValueToDb(column: { hasConversion?: boolean; convertToDb?: (v: any) => any } | undefined, value: any): any {
+    if (!column?.hasConversion || !column.convertToDb) return value;
+    if (value === undefined || value === null) return value;
+    return column.convertToDb(value);
+}
+
+/**
  * Build one parameterized comparison for a WHERE clause, returning the SQL
  * fragment and the parameters it binds.
  *
@@ -75,6 +90,8 @@ export function assertLimit(value: number, apiName: string): number {
  * @param provider Database provider used for placeholder syntax
  * @param nextParamIndex 1-based placeholder index this condition starts at
  * @param apiName Public API name used in error messages
+ * @param column Column metadata, when available, so a value converter is
+ *   applied to the bound value (per element for IN/NOT IN)
  */
 export function buildComparison(
     columnSql: string,
@@ -82,7 +99,8 @@ export function buildComparison(
     value: any,
     provider: IDatabaseProvider,
     nextParamIndex: number,
-    apiName: string = 'where'
+    apiName: string = 'where',
+    column?: { hasConversion?: boolean; convertToDb?: (v: any) => any }
 ): { clause: string; params: any[] } {
     const sqlOperator = assertOperator(operator, apiName);
 
@@ -99,7 +117,10 @@ export function buildComparison(
             return { clause: sqlOperator === 'IN' ? '1 = 0' : '1 = 1', params: [] };
         }
         const placeholders = value.map((_, i) => provider.getParameterPlaceholder(nextParamIndex + i));
-        return { clause: `${columnSql} ${sqlOperator} (${placeholders.join(', ')})`, params: [...value] };
+        return {
+            clause: `${columnSql} ${sqlOperator} (${placeholders.join(', ')})`,
+            params: value.map(v => convertValueToDb(column, v)),
+        };
     }
 
     if (NULL_OPERATORS.includes(sqlOperator)) {
@@ -114,7 +135,7 @@ export function buildComparison(
 
     return {
         clause: `${columnSql} ${sqlOperator} ${provider.getParameterPlaceholder(nextParamIndex)}`,
-        params: [value],
+        params: [convertValueToDb(column, value)],
     };
 }
 
@@ -150,6 +171,21 @@ export function assertColumn(
         `${apiName}(): '${name}' is not a mapped column or property of ${metadata.target.name}. ` +
         `Mapped properties: ${metadata.columns.map(c => c.propertyName).join(', ')}`
     );
+}
+
+/**
+ * Resolve a column reference to its metadata, using the same property-or-column
+ * matching as assertColumn(). Returns undefined rather than throwing: callers
+ * that need the error already call assertColumn() for the SQL name, and this
+ * only supplies the converter.
+ */
+export function findColumn(
+    entityType: new (...args: any[]) => any,
+    name: string
+): { hasConversion?: boolean; convertToDb?: (v: any) => any } | undefined {
+    const metadata = MetadataStorage.get().getEntity(entityType);
+    return metadata?.columns.find(c => c.propertyName === name)
+        ?? metadata?.columns.find(c => c.columnName === name);
 }
 
 /**
@@ -195,5 +231,22 @@ export function assertColumnOrAlias(
     throw new Error(
         `${apiName}(): '${name}' is neither a mapped column of ` +
         `${entityType.name} nor a plain identifier`
+    );
+}
+
+/**
+ * Validate a projection alias from `select()` / `groupBy().select()`.
+ *
+ * Aliases are author-supplied names that exist only in the SELECT list, so
+ * there is no metadata to check them against; requiring a plain identifier
+ * rules out quotes, whitespace, semicolons and comment markers. Keys of an
+ * object-literal projection reach SQL directly, and a computed key
+ * (`{ [req.query.label]: u.name }`) puts request data in that position.
+ * @throws when the alias is not a plain identifier
+ */
+export function assertAlias(name: string, apiName: string): string {
+    if (SIMPLE_IDENTIFIER.test(name)) return name;
+    throw new Error(
+        `${apiName}(): alias '${name}' is not a plain identifier`
     );
 }

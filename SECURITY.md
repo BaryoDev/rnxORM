@@ -36,6 +36,13 @@ Honest scope, so you can threat-model correctly:
   against entity metadata. Such aliases are required to be plain identifiers
   (`^[A-Za-z_][A-Za-z0-9_]*$`), so injection-shaped strings. Anything with
   quotes, whitespace, semicolons, or comment markers. Are still rejected.
+- **Projection aliases are validated at runtime** (2.2.1+): the keys of an
+  object-literal projection in `select()` and `groupBy().select()` reach SQL as
+  aliases, and a computed key (`{ [req.query.label]: u.name }`) puts caller
+  input in that position. They go through the same plain-identifier rule as
+  grouped `orderBy()` aliases. On 2.2.0 and earlier these keys were emitted
+  unvalidated; a projection alias built from request data was an injection
+  point on any driver that accepts stacked statements.
 - **Row limits are validated at runtime** (2.2.0+): `skip()` and `take()` must
   receive a non-negative integer. They are the only query-API arguments that
   are interpolated rather than bound (no driver accepts a parameter for

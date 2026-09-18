@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- **Projection aliases are validated** (issue #31). The keys of an
+  object-literal projection in `select()` and `groupBy().select()` reached SQL
+  as aliases with no validation, while every other identifier position was
+  already guarded. A computed key built from request data
+  (`{ [req.query.label]: u.name }`) was an injection point: the projection binds
+  no parameters, so on `pg` the statement goes over the simple query protocol,
+  which accepts stacked statements. Aliases now go through the same
+  plain-identifier rule as grouped `orderBy()` aliases and throw before any SQL
+  is assembled.
+
+### Fixed
+
+- **Value converters apply to query inputs** (issue #35). Converters ran on
+  insert, update, read, and structured query filters, but not on `where()`
+  values, `find(id)`, or the parent key in `include()` collection loads. A
+  converted column was compared against its unconverted domain value, so the
+  query matched nothing and returned an empty result with no error. `IN`/`NOT
+  IN` convert per element. `having()` is deliberately unchanged: it compares
+  against aggregates, not stored column values.
+- **`select(u => u.prop)` returns values, not rows** (issue #45). A
+  single-property selector is typed `TResult[]` but returned the raw driver
+  rows, so `select(u => u.age)` gave `[{ age: 30 }]` where the compiler said
+  `[30]`, and worse with a renamed column, where the key was the column name.
+  Object-literal projections are unchanged.
+- **Predicate query filters refuse row limits** (issue #45). The predicate form
+  of `hasQueryFilter` runs in memory after the database has applied
+  `LIMIT`/`OFFSET`, so it dropped rows out of an already-truncated page:
+  `first()` returned null while matching rows sat unread, `single()` could throw
+  "Sequence contains more than one element" wrongly, and `take(20)` came back
+  short. The combination now throws and names `ignoreQueryFilters()` as the way
+  out. The structured filter form compiles to SQL and is unaffected.
+
+### Changed
+
+- Coverage is no longer collected on every `jest` run. `npm test` runs without
+  it; `npm run test:cov` collects it, and `npm run test:quiet` trims the output
+  further for iterating on one file.
+
 ## 2.2.0 (2026-08-26)
 
 ### Security
