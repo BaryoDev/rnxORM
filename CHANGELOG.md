@@ -13,11 +13,20 @@
   (optionally `schema.name`) and quoted per dialect, string defaults have their
   quotes doubled, column types must match a type grammar, and `ON DELETE` must
   be one of the four referential actions.
-  **Behavior change:** DDL now quotes identifiers (`CREATE TABLE "users"` on
-  PostgreSQL, `[users]` on SQL Server, `` `users` `` on MariaDB). This makes
-  reserved words usable as table and column names, and it changes the exact
-  DDL string existing migrations emit. Identifiers that were never valid
-  unquoted (anything with a space, a quote, or a semicolon) now throw.
+  Quoting is unconditional on SQL Server and MariaDB, whose quote characters
+  affect reserved words and special characters but not case resolution. On
+  PostgreSQL it is conditional: a lower-case name is emitted bare, exactly as
+  before, and only a reserved word or a mixed-case name is quoted. PostgreSQL
+  folds unquoted identifiers to lower case and leaves quoted ones alone, so
+  quoting a name that used to be bare would point it at a different table; the
+  manual's advice is to "always quote a particular name or never quote it".
+  This follows what the Npgsql provider does rather than EF Core's
+  unconditional base behavior.
+  **Behavior change:** reserved words now work as table and column names
+  (`createTable('order', ...)` was previously invalid SQL). SQL Server and
+  MariaDB DDL strings gain quote characters. PostgreSQL DDL for lower-case
+  names is unchanged. Identifiers that were never valid unquoted (anything with
+  a space, a quote, or a semicolon) now throw.
 - **`migration:create` validates the migration name** (issue #44). The name was
   interpolated into both the output path and the generated source, so
   `../../../../tmp/pwned` wrote a file outside the migrations directory and a

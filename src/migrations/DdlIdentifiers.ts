@@ -13,10 +13,27 @@ import { IDatabaseProvider } from "../providers/IDatabaseProvider";
  * Two rules, applied everywhere:
  *
  * - Identifiers must be plain identifiers (optionally `schema.name`), and are
- *   then quoted for the dialect. Quoting is what makes a reserved word like
- *   `order` usable as a table name.
+ *   quoted when the dialect needs them quoted. Quoting is what makes a
+ *   reserved word like `order` usable as a table name.
  * - String literals have their embedded quotes doubled, so a default value can
  *   never close the literal it sits in.
+ *
+ * Quoting is conditional on PostgreSQL and unconditional elsewhere, which
+ * follows what the Npgsql provider does rather than what EF Core's base class
+ * does. PostgreSQL folds unquoted identifiers to lower case and leaves quoted
+ * ones alone, so `CREATE TABLE Users` creates `users` while
+ * `CREATE TABLE "Users"` creates a different table named `Users`. The
+ * PostgreSQL manual's advice is to "always quote a particular name or never
+ * quote it" (section 4.1.1), so quoting a name that was previously emitted
+ * bare would point it at a different object. Lower-case names are byte
+ * identical either way, so they stay bare and only names that actually need
+ * quoting get it.
+ *
+ * MySQL/MariaDB and SQL Server do not work this way: backticks and brackets
+ * affect reserved words and special characters, not case resolution (which
+ * comes from `lower_case_table_names` and the database collation
+ * respectively). Quoting there cannot re-point an identifier, so it is
+ * unconditional.
  */
 
 const SIMPLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
@@ -62,7 +79,49 @@ export function quoteIdentifier(
         .join('.');
 }
 
-/** Wrap a validated identifier part in the dialect's quote characters. */
+/**
+ * PostgreSQL reserved words that cannot be used as a bare identifier.
+ *
+ * This is the `reserved` and `reserved (can be function or type)` set from the
+ * PostgreSQL key-word appendix. Non-reserved words are omitted deliberately:
+ * they are legal bare and quoting them would change their folded form.
+ */
+const POSTGRES_RESERVED_WORDS = new Set([
+    'all', 'analyse', 'analyze', 'and', 'any', 'array', 'as', 'asc',
+    'asymmetric', 'authorization', 'binary', 'both', 'case', 'cast', 'check',
+    'collate', 'collation', 'column', 'concurrently', 'constraint', 'create',
+    'cross', 'current_catalog', 'current_date', 'current_role', 'current_schema',
+    'current_time', 'current_timestamp', 'current_user', 'default', 'deferrable',
+    'desc', 'distinct', 'do', 'else', 'end', 'except', 'false', 'fetch', 'for',
+    'foreign', 'freeze', 'from', 'full', 'grant', 'group', 'having', 'ilike',
+    'in', 'initially', 'inner', 'intersect', 'into', 'is', 'isnull', 'join',
+    'lateral', 'leading', 'left', 'like', 'limit', 'localtime', 'localtimestamp',
+    'natural', 'not', 'notnull', 'null', 'offset', 'on', 'only', 'or', 'order',
+    'outer', 'overlaps', 'placing', 'primary', 'references', 'returning',
+    'right', 'select', 'session_user', 'similar', 'some', 'symmetric', 'system_user',
+    'table', 'tablesample', 'then', 'to', 'trailing', 'true', 'union', 'unique',
+    'user', 'using', 'variadic', 'verbose', 'when', 'where', 'window', 'with',
+]);
+
+/** A bare PostgreSQL identifier: lower case, and not starting with a digit. */
+const POSTGRES_BARE_IDENTIFIER = /^[a-z_][a-z0-9_$]*$/;
+
+/**
+ * Whether an identifier has to be quoted to mean what it says on PostgreSQL.
+ *
+ * Only names that are already all lower case and not reserved can be left
+ * bare: those fold to themselves, so quoted and unquoted forms refer to the
+ * same object. Anything else (mixed case, a reserved word) changes meaning
+ * without quotes.
+ */
+function postgresRequiresQuoting(part: string): boolean {
+    return !POSTGRES_BARE_IDENTIFIER.test(part) || POSTGRES_RESERVED_WORDS.has(part);
+}
+
+/**
+ * Wrap a validated identifier part in the dialect's quote characters, where
+ * the dialect needs it.
+ */
 function quotePart(part: string, dialect: string): string {
     switch (dialect) {
         case 'mssql':
@@ -70,8 +129,9 @@ function quotePart(part: string, dialect: string): string {
         case 'mariadb':
             return `\`${part}\``;
         default:
-            // PostgreSQL and the SQL standard.
-            return `"${part}"`;
+            // PostgreSQL: bare where bare is unambiguous, so a lower-case name
+            // keeps the exact form earlier versions emitted.
+            return postgresRequiresQuoting(part) ? `"${part}"` : part;
     }
 }
 

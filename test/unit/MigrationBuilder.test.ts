@@ -57,14 +57,16 @@ class RecordingProvider implements IDatabaseProvider {
  * execute them, and return the recorded SQL strings.
  */
 /**
- * Quote an identifier the way MigrationBuilder does for a dialect, so the
- * dialect-parameterized tests below can assert one shape across all three
- * (identifiers are quoted since issue #44).
+ * Quote an identifier the way MigrationBuilder does for a dialect.
+ *
+ * PostgreSQL leaves lower-case names bare (they fold to themselves, so quoting
+ * would be a no-op that changes nothing but the bytes); MySQL/MariaDB and SQL
+ * Server quote unconditionally. See DdlIdentifiers.ts (issue #44).
  */
 function q(name: string, dialect: string): string {
     if (dialect === 'mssql') return `[${name}]`;
     if (dialect === 'mariadb') return `\`${name}\``;
-    return `"${name}"`;
+    return name;
 }
 
 async function runBuilder(
@@ -101,8 +103,8 @@ describe('MigrationBuilder', () => {
             await builder.execute();
 
             expect(provider.queries.map(q => q.sql)).toEqual([
-                `DROP TABLE IF EXISTS "mig_first"`,
-                `DROP TABLE IF EXISTS "mig_second"`,
+                'DROP TABLE IF EXISTS mig_first',
+                'DROP TABLE IF EXISTS mig_second',
                 'SELECT 1'
             ]);
 
@@ -136,7 +138,7 @@ describe('MigrationBuilder', () => {
             );
 
             expect(queries).toHaveLength(1);
-            expect(queries[0].sql).toBe(`CREATE TABLE "mig_users" ("id" INTEGER, "name" VARCHAR(100))`);
+            expect(queries[0].sql).toBe('CREATE TABLE mig_users (id INTEGER, name VARCHAR(100))');
         });
 
         it('adds NOT NULL for nullable: false and omits it for nullable columns', async () => {
@@ -148,8 +150,8 @@ describe('MigrationBuilder', () => {
                 ])
             );
 
-            expect(queries[0].sql).toContain(`"email" VARCHAR(255) NOT NULL`);
-            expect(queries[0].sql).toContain(`"nickname" VARCHAR(50)`);
+            expect(queries[0].sql).toContain('email VARCHAR(255) NOT NULL');
+            expect(queries[0].sql).toContain('nickname VARCHAR(50)');
             expect(queries[0].sql).not.toContain('nickname VARCHAR(50) NOT NULL');
             expect(queries[0].sql).not.toContain('bio TEXT NOT NULL');
         });
@@ -161,7 +163,7 @@ describe('MigrationBuilder', () => {
                 ])
             );
 
-            expect(queries[0].sql).toBe(`CREATE TABLE "mig_codes" ("code" VARCHAR(10) PRIMARY KEY)`);
+            expect(queries[0].sql).toBe('CREATE TABLE mig_codes (code VARCHAR(10) PRIMARY KEY)');
         });
 
         it('quotes string default values and leaves numeric/boolean defaults unquoted', async () => {
@@ -173,9 +175,9 @@ describe('MigrationBuilder', () => {
                 ])
             );
 
-            expect(queries[0].sql).toContain(`"status" VARCHAR(20) DEFAULT 'active'`);
-            expect(queries[0].sql).toContain(`"retries" INTEGER DEFAULT 3`);
-            expect(queries[0].sql).toContain(`"enabled" BOOLEAN DEFAULT TRUE`);
+            expect(queries[0].sql).toContain("status VARCHAR(20) DEFAULT 'active'");
+            expect(queries[0].sql).toContain('retries INTEGER DEFAULT 3');
+            expect(queries[0].sql).toContain('enabled BOOLEAN DEFAULT TRUE');
         });
 
         it('combines NOT NULL and DEFAULT on the same column', async () => {
@@ -199,7 +201,7 @@ describe('MigrationBuilder', () => {
                     b.createTable('mig_pg', autoIdColumns)
                 );
                 expect(queries[0].sql).toBe(
-                    `CREATE TABLE "mig_pg" ("id" SERIAL PRIMARY KEY, "name" VARCHAR(100) NOT NULL)`
+                    'CREATE TABLE mig_pg (id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL)'
                 );
             });
 
@@ -208,7 +210,7 @@ describe('MigrationBuilder', () => {
                     b.createTable('mig_ms', autoIdColumns)
                 );
                 expect(queries[0].sql).toBe(
-                    `CREATE TABLE [mig_ms] ([id] INT IDENTITY(1,1) PRIMARY KEY, [name] VARCHAR(100) NOT NULL)`
+                    'CREATE TABLE [mig_ms] ([id] INT IDENTITY(1,1) PRIMARY KEY, [name] VARCHAR(100) NOT NULL)'
                 );
             });
 
@@ -236,7 +238,7 @@ describe('MigrationBuilder', () => {
     describe('renameTable', () => {
         it('postgresql uses ALTER TABLE ... RENAME TO', async () => {
             const queries = await runBuilder('postgresql', b => b.renameTable('mig_a', 'mig_b'));
-            expect(queries.map(q => q.sql)).toEqual([`ALTER TABLE "mig_a" RENAME TO "mig_b"`]);
+            expect(queries.map(q => q.sql)).toEqual(['ALTER TABLE mig_a RENAME TO mig_b']);
         });
 
         it('mssql uses EXEC sp_rename', async () => {
@@ -267,7 +269,7 @@ describe('MigrationBuilder', () => {
             const queries = await runBuilder('postgresql', b =>
                 b.addColumn('mig_users', 'age', 'INTEGER', { nullable: false })
             );
-            expect(queries[0].sql).toBe(`ALTER TABLE "mig_users" ADD COLUMN "age" INTEGER NOT NULL`);
+            expect(queries[0].sql).toBe('ALTER TABLE mig_users ADD COLUMN age INTEGER NOT NULL');
         });
 
         it('appends quoted DEFAULT for string values', async () => {
@@ -275,7 +277,7 @@ describe('MigrationBuilder', () => {
                 b.addColumn('mig_users', 'role', 'VARCHAR(20)', { defaultValue: 'user' })
             );
             expect(queries[0].sql).toBe(
-                `ALTER TABLE "mig_users" ADD COLUMN "role" VARCHAR(20) DEFAULT 'user'`
+                "ALTER TABLE mig_users ADD COLUMN role VARCHAR(20) DEFAULT 'user'"
             );
         });
 
@@ -309,7 +311,7 @@ describe('MigrationBuilder', () => {
                 b.alterColumn('mig_users', 'name', 'VARCHAR(200)')
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE "mig_users" ALTER COLUMN "name" TYPE VARCHAR(200)`
+                'ALTER TABLE mig_users ALTER COLUMN name TYPE VARCHAR(200)'
             ]);
         });
 
@@ -318,8 +320,8 @@ describe('MigrationBuilder', () => {
                 b.alterColumn('mig_users', 'name', 'VARCHAR(200)', { nullable: false })
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE "mig_users" ALTER COLUMN "name" TYPE VARCHAR(200)`,
-                `ALTER TABLE "mig_users" ALTER COLUMN "name" SET NOT NULL`
+                'ALTER TABLE mig_users ALTER COLUMN name TYPE VARCHAR(200)',
+                'ALTER TABLE mig_users ALTER COLUMN name SET NOT NULL'
             ]);
         });
 
@@ -328,8 +330,8 @@ describe('MigrationBuilder', () => {
                 b.alterColumn('mig_users', 'name', 'VARCHAR(200)', { nullable: true })
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE "mig_users" ALTER COLUMN "name" TYPE VARCHAR(200)`,
-                `ALTER TABLE "mig_users" ALTER COLUMN "name" DROP NOT NULL`
+                'ALTER TABLE mig_users ALTER COLUMN name TYPE VARCHAR(200)',
+                'ALTER TABLE mig_users ALTER COLUMN name DROP NOT NULL'
             ]);
         });
 
@@ -341,9 +343,9 @@ describe('MigrationBuilder', () => {
                 })
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE "mig_users" ALTER COLUMN "status" TYPE VARCHAR(20)`,
-                `ALTER TABLE "mig_users" ALTER COLUMN "status" SET NOT NULL`,
-                `ALTER TABLE "mig_users" ALTER COLUMN "status" SET DEFAULT 'active'`
+                'ALTER TABLE mig_users ALTER COLUMN status TYPE VARCHAR(20)',
+                'ALTER TABLE mig_users ALTER COLUMN status SET NOT NULL',
+                "ALTER TABLE mig_users ALTER COLUMN status SET DEFAULT 'active'"
             ]);
         });
 
@@ -352,8 +354,8 @@ describe('MigrationBuilder', () => {
                 b.alterColumn('mig_users', 'retries', 'INTEGER', { defaultValue: 5 })
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE "mig_users" ALTER COLUMN "retries" TYPE INTEGER`,
-                `ALTER TABLE "mig_users" ALTER COLUMN "retries" SET DEFAULT 5`
+                'ALTER TABLE mig_users ALTER COLUMN retries TYPE INTEGER',
+                'ALTER TABLE mig_users ALTER COLUMN retries SET DEFAULT 5'
             ]);
         });
 
@@ -362,7 +364,7 @@ describe('MigrationBuilder', () => {
                 b.alterColumn('mig_users', 'name', 'NVARCHAR(200)')
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE [mig_users] ALTER COLUMN [name] NVARCHAR(200)`
+                'ALTER TABLE [mig_users] ALTER COLUMN [name] NVARCHAR(200)'
             ]);
         });
 
@@ -371,7 +373,7 @@ describe('MigrationBuilder', () => {
                 b.alterColumn('mig_users', 'name', 'NVARCHAR(200)', { nullable: false })
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE [mig_users] ALTER COLUMN [name] NVARCHAR(200) NOT NULL`
+                'ALTER TABLE [mig_users] ALTER COLUMN [name] NVARCHAR(200) NOT NULL'
             ]);
         });
 
@@ -400,7 +402,7 @@ describe('MigrationBuilder', () => {
                 b.renameColumn('mig_users', 'name', 'full_name')
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `ALTER TABLE "mig_users" RENAME COLUMN "name" TO "full_name"`
+                'ALTER TABLE mig_users RENAME COLUMN name TO full_name'
             ]);
         });
 
@@ -441,7 +443,7 @@ describe('MigrationBuilder', () => {
                 b.createIndex('mig_users', 'ux_mig_users_email', ['email'], true)
             );
             expect(queries[0].sql).toBe(
-                `CREATE UNIQUE INDEX "ux_mig_users_email" ON "mig_users" ("email")`
+                'CREATE UNIQUE INDEX ux_mig_users_email ON mig_users (email)'
             );
         });
 
@@ -460,7 +462,7 @@ describe('MigrationBuilder', () => {
             const queries = await runBuilder('postgresql', b =>
                 b.dropIndex('mig_users', 'ix_mig_users_email')
             );
-            expect(queries.map(q => q.sql)).toEqual([`DROP INDEX IF EXISTS "ix_mig_users_email"`]);
+            expect(queries.map(q => q.sql)).toEqual(['DROP INDEX IF EXISTS ix_mig_users_email']);
         });
 
         it('mssql uses DROP INDEX ... ON table', async () => {
@@ -468,7 +470,7 @@ describe('MigrationBuilder', () => {
                 b.dropIndex('mig_users', 'ix_mig_users_email')
             );
             expect(queries.map(q => q.sql)).toEqual([
-                `DROP INDEX [ix_mig_users_email] ON [mig_users]`
+                'DROP INDEX [ix_mig_users_email] ON [mig_users]'
             ]);
         });
 

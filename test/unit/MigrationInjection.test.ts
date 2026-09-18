@@ -136,7 +136,7 @@ describe('string defaults are escaped, not concatenated (#44)', () => {
         // One statement, and the payload is inert inside the literal.
         expect(provider.queries).toHaveLength(1);
         expect(provider.queries[0].sql).toBe(
-            `ALTER TABLE "tenant_fields" ADD COLUMN "note" text DEFAULT 'x''; DROP TABLE users; --'`
+            `ALTER TABLE tenant_fields ADD COLUMN note text DEFAULT 'x''; DROP TABLE users; --'`
         );
     });
 
@@ -174,9 +174,24 @@ describe('string defaults are escaped, not concatenated (#44)', () => {
 });
 
 describe('identifier quoting (#44)', () => {
-    it('quotes per dialect', async () => {
+    /**
+     * PostgreSQL folds unquoted identifiers to lower case and leaves quoted
+     * ones alone, so quoting a name that used to be emitted bare points it at
+     * a different object. The manual's advice is "always quote a particular
+     * name or never quote it", so lower-case names stay bare and only names
+     * that need quoting get it. This is what the Npgsql provider does.
+     * MySQL/MariaDB and SQL Server do not resolve case through their quote
+     * characters, so quoting there is unconditional.
+     */
+    it('leaves a lower-case name bare on postgresql', async () => {
+        const { builder, provider } = builderFor('postgresql');
+        builder.createTable('t', [{ name: 'c', type: 'integer' }]);
+        await builder.execute();
+        expect(provider.queries[0].sql).toBe('CREATE TABLE t (c integer)');
+    });
+
+    it('quotes unconditionally on mssql and mariadb', async () => {
         for (const [dialect, expected] of [
-            ['postgresql', 'CREATE TABLE "t" ("c" integer)'],
             ['mssql', 'CREATE TABLE [t] ([c] integer)'],
             ['mariadb', 'CREATE TABLE `t` (`c` integer)'],
         ] as const) {
@@ -187,18 +202,39 @@ describe('identifier quoting (#44)', () => {
         }
     });
 
-    it('allows a reserved word as a table name now that it is quoted', async () => {
-        const { builder, provider } = builderFor();
+    it('quotes a reserved word on postgresql so it is usable as a name', async () => {
+        const { builder, provider } = builderFor('postgresql');
         builder.createTable('order', [{ name: 'select', type: 'integer' }]);
         await builder.execute();
         expect(provider.queries[0].sql).toBe('CREATE TABLE "order" ("select" integer)');
     });
 
-    it('supports a schema-qualified table name', async () => {
-        const { builder, provider } = builderFor();
+    it('quotes a mixed-case name on postgresql, because bare would fold it', async () => {
+        const { builder, provider } = builderFor('postgresql');
+        builder.createTable('UserAccounts', [{ name: 'firstName', type: 'text' }]);
+        await builder.execute();
+        expect(provider.queries[0].sql).toBe('CREATE TABLE "UserAccounts" ("firstName" text)');
+    });
+
+    it('leaves an underscore or digit name bare on postgresql', async () => {
+        const { builder, provider } = builderFor('postgresql');
+        builder.createTable('_tmp_2024', [{ name: 'col_1', type: 'integer' }]);
+        await builder.execute();
+        expect(provider.queries[0].sql).toBe('CREATE TABLE _tmp_2024 (col_1 integer)');
+    });
+
+    it('quotes only the part that needs it in a qualified name', async () => {
+        const { builder, provider } = builderFor('postgresql');
+        builder.dropTable('app.Orders');
+        await builder.execute();
+        expect(provider.queries[0].sql).toBe('DROP TABLE IF EXISTS app."Orders"');
+    });
+
+    it('supports a schema-qualified lower-case table name', async () => {
+        const { builder, provider } = builderFor('postgresql');
         builder.dropTable('app.users');
         await builder.execute();
-        expect(provider.queries[0].sql).toBe('DROP TABLE IF EXISTS "app"."users"');
+        expect(provider.queries[0].sql).toBe('DROP TABLE IF EXISTS app.users');
     });
 
     it('rejects more than one qualifier', async () => {
