@@ -46,7 +46,13 @@ function toPascalCase(name: string): string {
 /**
  * Create a new migration file
  */
-const MIGRATION_NAME = /^[A-Za-z0-9_-]+$/;
+/**
+ * A migration name must start with a letter and contain at least one
+ * alphanumeric character, because it is also turned into a class name:
+ * `1-init` produced `export class 1Init` and `---` produced an empty class
+ * name, both of which are invalid TypeScript.
+ */
+const MIGRATION_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 export function createMigration(name: string): string {
     if (!name) {
@@ -60,7 +66,8 @@ export function createMigration(name: string): string {
     if (!MIGRATION_NAME.test(name)) {
         throw new Error(
             `Invalid migration name '${name}'. ` +
-            `Migration names may contain letters, numbers, hyphens, and underscores only.`
+            `Migration names must start with a letter and may contain letters, numbers, ` +
+            `hyphens, and underscores.`
         );
     }
 

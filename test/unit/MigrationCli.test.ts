@@ -170,3 +170,35 @@ describe('migration:create name validation (#44)', () => {
         expect(path.resolve(filePath).startsWith(path.resolve(migrationsDir) + path.sep)).toBe(true);
     });
 });
+
+describe('migration names must produce a valid class name (#44 follow-up)', () => {
+    let tempDir: string;
+    let originalCwd: string;
+    let logSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+        originalCwd = process.cwd();
+        tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rnxorm-cli-cls-')));
+        process.chdir(tempDir);
+        logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+        process.chdir(originalCwd);
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        logSpy.mockRestore();
+    });
+
+    it('rejects a name starting with a digit, which produced "class 1Init"', () => {
+        expect(() => createMigration('1-init')).toThrow(/migration name/i);
+    });
+
+    it('rejects a name with no alphanumeric character, which produced an empty class name', () => {
+        expect(() => createMigration('---')).toThrow(/migration name/i);
+    });
+
+    it('still accepts a name that merely contains digits', () => {
+        const filePath = createMigration('v2-init');
+        expect(fs.readFileSync(filePath, 'utf-8')).toContain('export class V2Init extends Migration');
+    });
+});

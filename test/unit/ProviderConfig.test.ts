@@ -121,3 +121,19 @@ describe('MariaDB TLS (#43)', () => {
         expect(driverConfig(provider).connectTimeout).toBe(9000);
     });
 });
+
+describe('MSSQL connect idempotence (#44 follow-up)', () => {
+    it('does not build a second pool on a repeat connect()', async () => {
+        const provider: any = track(new MSSQLProvider({ ...base }));
+
+        // Stand in for a connected pool without touching a real server.
+        const firstPool = { close: jest.fn(async () => undefined) };
+        provider.pool = firstPool;
+
+        await provider.connect();
+
+        // A second call used to overwrite the field, orphaning the first pool
+        // with its sockets held until process exit.
+        expect(provider.pool).toBe(firstPool);
+    });
+});

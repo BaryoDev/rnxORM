@@ -3,6 +3,7 @@ import {
     assertCascadeAction,
     assertColumnType,
     assertPlainIdentifier,
+    assertQualifiedPlainIdentifier,
     quoteIdentifier,
     quoteLiteral,
 } from "./DdlIdentifiers";
@@ -67,7 +68,7 @@ export class MigrationBuilder {
                 }
 
                 if (col.defaultValue !== undefined) {
-                    def += ` DEFAULT ${quoteLiteral(col.defaultValue, 'createTable')}`;
+                    def += ` DEFAULT ${quoteLiteral(col.defaultValue, 'createTable', this.provider.getDialect())}`;
                 }
 
                 return def;
@@ -116,7 +117,7 @@ export class MigrationBuilder {
             }
 
             if (options?.defaultValue !== undefined) {
-                sql += ` DEFAULT ${quoteLiteral(options.defaultValue, 'addColumn')}`;
+                sql += ` DEFAULT ${quoteLiteral(options.defaultValue, 'addColumn', this.provider.getDialect())}`;
             }
 
             await this.provider.query(sql);
@@ -174,7 +175,7 @@ export class MigrationBuilder {
                 }
 
                 if (options?.defaultValue !== undefined) {
-                    const defaultVal = quoteLiteral(options.defaultValue, 'alterColumn');
+                    const defaultVal = quoteLiteral(options.defaultValue, 'alterColumn', dialect);
                     await this.provider.query(
                         `ALTER TABLE ${table} ALTER COLUMN ${column} SET DEFAULT ${defaultVal}`
                     );
@@ -217,7 +218,7 @@ export class MigrationBuilder {
                 // sp_rename takes bare names inside string literals, so these
                 // positions cannot be quoted and are validated instead. A
                 // payload here used to close the literal and run (issue #44).
-                const plainTable = assertPlainIdentifier(tableName, 'renameColumn');
+                const plainTable = assertQualifiedPlainIdentifier(tableName, 'renameColumn');
                 const plainOld = assertPlainIdentifier(oldName, 'renameColumn');
                 const plainNew = assertPlainIdentifier(newName, 'renameColumn');
                 await this.provider.query(
@@ -246,7 +247,7 @@ export class MigrationBuilder {
             if (dialect === 'postgresql') {
                 await this.provider.query(`ALTER TABLE ${from} RENAME TO ${to}`);
             } else if (dialect === 'mssql') {
-                const plainOld = assertPlainIdentifier(oldName, 'renameTable');
+                const plainOld = assertQualifiedPlainIdentifier(oldName, 'renameTable');
                 const plainNew = assertPlainIdentifier(newName, 'renameTable');
                 await this.provider.query(`EXEC sp_rename '${plainOld}', '${plainNew}'`);
             } else if (dialect === 'mariadb') {

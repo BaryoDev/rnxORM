@@ -44,6 +44,11 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     async connect(): Promise<void> {
+        // Idempotent: a second call used to build another pool and overwrite
+        // the field, leaving the first one open with its sockets held until
+        // process exit.
+        if (this.pool) return;
+
         // A dedicated pool, not the module-global mssql.connect() one: two
         // providers with different configs used to share a single global pool,
         // so disconnect() on either closed it for both (issue #38).
