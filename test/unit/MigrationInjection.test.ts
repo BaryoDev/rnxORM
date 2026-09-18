@@ -243,3 +243,44 @@ describe('identifier quoting (#44)', () => {
         await expect(builder.execute()).rejects.toThrow(/too many qualifiers/);
     });
 });
+
+describe('review findings on the first pass (#44 follow-up)', () => {
+    it('renders a boolean default as a bit literal on sql server', async () => {
+        const { builder, provider } = builderFor('mssql');
+        builder.createTable('t', [{ name: 'flag', type: 'bit', defaultValue: true }]);
+        await builder.execute();
+        // SQL Server has no boolean type and rejects TRUE as a bit literal.
+        expect(provider.queries[0].sql).toContain('DEFAULT 1');
+    });
+
+    it('still renders TRUE on postgresql and mariadb', async () => {
+        for (const dialect of ['postgresql', 'mariadb'] as const) {
+            const { builder, provider } = builderFor(dialect);
+            builder.createTable('t', [{ name: 'flag', type: 'boolean', defaultValue: false }]);
+            await builder.execute();
+            expect(provider.queries[0].sql).toContain('DEFAULT FALSE');
+        }
+    });
+
+    it('accepts a schema-qualified source table in sp_rename', async () => {
+        const { builder, provider } = builderFor('mssql');
+        builder.renameColumn('dbo.users', 'name', 'full_name');
+        await builder.execute();
+        expect(provider.queries[0].sql).toBe(
+            `EXEC sp_rename 'dbo.users.name', 'full_name', 'COLUMN'`
+        );
+    });
+
+    it('accepts a schema-qualified source table in renameTable', async () => {
+        const { builder, provider } = builderFor('mssql');
+        builder.renameTable('dbo.users', 'people');
+        await builder.execute();
+        expect(provider.queries[0].sql).toBe(`EXEC sp_rename 'dbo.users', 'people'`);
+    });
+
+    it('still rejects an injected qualified name', async () => {
+        const { builder } = builderFor('mssql');
+        builder.renameColumn("dbo.users'; DROP TABLE x; --", 'a', 'b');
+        await expect(builder.execute()).rejects.toThrow(/not a valid SQL identifier/);
+    });
+});

@@ -83,12 +83,27 @@ export class MariaDBProvider implements IDatabaseProvider {
                 'separate DbContext.'
             );
         }
-        if (!this.connection) {
-            await this.connect();
-            this.connectionOwnedByTransaction = true;
-        }
-        await this.connection?.beginTransaction();
+
+        // Claim the slot before the first await. Setting it only after BEGIN
+        // left a window where two concurrent callers both passed the guard
+        // above and then collided on the same provider state.
         this.inTransaction = true;
+        try {
+            if (!this.connection) {
+                await this.connect();
+                this.connectionOwnedByTransaction = true;
+            }
+            await this.connection?.beginTransaction();
+        } catch (error) {
+            // Starting failed, so release the claim and any connection it took.
+            this.inTransaction = false;
+            if (this.connectionOwnedByTransaction && this.connection) {
+                await this.connection.release();
+                this.connection = null;
+                this.connectionOwnedByTransaction = false;
+            }
+            throw error;
+        }
     }
 
     async commitTransaction(): Promise<void> {

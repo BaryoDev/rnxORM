@@ -149,15 +149,38 @@ export function assertPlainIdentifier(name: string, apiName: string): string {
 }
 
 /**
+ * Validate a possibly schema-qualified name for the `sp_rename` source
+ * position, returning it unquoted.
+ *
+ * `sp_rename 'dbo.users.name', ...` is legal and worked before these
+ * identifiers were validated, so each part is checked separately and rejoined
+ * rather than rejecting the dot outright. The *new* name stays a single
+ * identifier, because sp_rename requires an unqualified target.
+ * @throws when any part is not a plain identifier
+ */
+export function assertQualifiedPlainIdentifier(name: string, apiName: string): string {
+    if (typeof name !== 'string' || name.length === 0) {
+        throw new Error(`${apiName}(): identifier is required`);
+    }
+    const parts = name.split('.');
+    if (parts.length > 2) {
+        throw new Error(
+            `${apiName}(): '${name}' has too many qualifiers. Use 'name' or 'schema.name'.`
+        );
+    }
+    return parts.map(part => assertIdentifierPart(part, apiName, name)).join('.');
+}
+
+/**
  * Render a value as a SQL literal for a DEFAULT clause.
  *
  * Strings are single-quoted with embedded quotes doubled, which is the
- * standard escape every supported dialect accepts. Numbers and booleans are
- * rendered bare. Anything else is rejected rather than stringified into
- * something like `[object Object]`.
+ * standard escape every supported dialect accepts. Numbers are rendered bare,
+ * and booleans per dialect (SQL Server has no boolean type). Anything else is
+ * rejected rather than stringified into something like `[object Object]`.
  * @throws when the value is not a string, number, or boolean
  */
-export function quoteLiteral(value: any, apiName: string): string {
+export function quoteLiteral(value: any, apiName: string, dialect?: string): string {
     if (typeof value === 'number') {
         if (!Number.isFinite(value)) {
             throw new Error(`${apiName}(): default value ${value} is not a finite number`);
@@ -166,6 +189,9 @@ export function quoteLiteral(value: any, apiName: string): string {
     }
 
     if (typeof value === 'boolean') {
+        // SQL Server has no boolean type and rejects TRUE/FALSE as bit
+        // literals, so a boolean default there has to be 1 or 0.
+        if (dialect === 'mssql') return value ? '1' : '0';
         return value ? 'TRUE' : 'FALSE';
     }
 

@@ -74,12 +74,26 @@ export class PostgreSQLProvider implements IDatabaseProvider {
                 'separate DbContext.'
             );
         }
-        if (!this.client) {
-            await this.connect();
-            this.clientOwnedByTransaction = true;
-        }
-        await this.client?.query('BEGIN');
+        // Claim the slot before the first await. Setting it only after BEGIN
+        // left a window where two concurrent callers both passed the guard
+        // above and then collided on the same provider state.
         this.transactionOpen = true;
+        try {
+            if (!this.client) {
+                await this.connect();
+                this.clientOwnedByTransaction = true;
+            }
+            await this.client?.query('BEGIN');
+        } catch (error) {
+            // Starting failed, so release the claim and any client it took.
+            this.transactionOpen = false;
+            if (this.clientOwnedByTransaction && this.client) {
+                this.client.release();
+                this.client = null;
+                this.clientOwnedByTransaction = false;
+            }
+            throw error;
+        }
     }
 
     async commitTransaction(): Promise<void> {
