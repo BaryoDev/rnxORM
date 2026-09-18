@@ -70,6 +70,15 @@
 
 ### Fixed
 
+- **Query filters reach eager-loaded relations** (issue #37). Structured filters
+  were compiled into the root query but never into the queries that load
+  related entities, so `include()` returned rows the filter was meant to hide:
+  soft-deleted children, or another tenant's rows under a tenant filter. All
+  three relation loaders now append the related entity's filter to their
+  `IN (...)` predicate, numbering placeholders after the key list, and
+  `ignoreQueryFilters()` on the root query propagates to the includes. The
+  README and llms.txt claimed filters applied on "every query path", which is
+  now true.
 - **mariadb upgraded and dotenv removed** (issue #42). The pinned mariadb
   connector carried three advisories, including one where it leaks the
   cleartext password to an interceptor despite `ssl: true`, which defeats the
