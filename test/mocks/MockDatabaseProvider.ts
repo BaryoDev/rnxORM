@@ -100,6 +100,10 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         this.transactionData = null;
     }
 
+    isInTransaction(): boolean {
+        return this.inTransaction;
+    }
+
     getParameterPlaceholder(index: number): string {
         return `$${index}`;
     }

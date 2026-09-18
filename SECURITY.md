@@ -49,6 +49,14 @@ Honest scope, so you can threat-model correctly:
   `LIMIT`/`OFFSET` everywhere), and TypeScript's `number` type erases at
   runtime, so an untyped `req.query.limit` reaching them used to be an
   injection vector. It now throws before SQL is assembled.
+- **Connections can use TLS** (2.2.1+): `DatabaseConfig` takes `ssl`
+  (`true` or a driver options object) and a `driverOptions` passthrough, and
+  all three providers forward them. SQL Server now defaults to
+  `encrypt: true, trustServerCertificate: false`. On 2.2.0 and earlier there
+  was no way to turn TLS on at all, and the SQL Server provider hardcoded
+  `encrypt: false` with `trustServerCertificate: true`, so its traffic was
+  cleartext and it accepted any certificate presented. Anyone on the network
+  path could read every query and result set.
 - **Raw SQL is yours.** `fromSqlRaw()` / `executeSqlRaw()` execute exactly what
   you pass; parameterize your own inputs.
 - **Global query filters are a convenience, not an isolation boundary.** Do not

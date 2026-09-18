@@ -3,6 +3,7 @@ import { MetadataStorage, RelationType } from "./MetadataStorage";
 import { EntityState, snapshotEntity } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
+import { toCount, toExactNumber } from "./Numerics";
 import { assertAlias, assertColumn, assertColumnOrAlias, assertHavingExpression, assertLimit, buildComparison, convertValueToDb, findColumn } from "./Identifiers";
 
 /** Renders a captured aggregate into its SQL function call. `col` is undefined for count(). */
@@ -239,7 +240,7 @@ export class DbSet<T> {
     async count(): Promise<number> {
         const filter = this.compileFilterWhere();
         const res = await this.context.query(`SELECT COUNT(*) as count FROM ${this.tableName}${filter.where}`, filter.params);
-        return parseInt(res.rows[0].count);
+        return toCount(res.rows[0]?.count);
     }
 
     /**
@@ -252,7 +253,7 @@ export class DbSet<T> {
 
         const filter = this.compileFilterWhere();
         const res = await this.context.query(`SELECT SUM(${columnName}) as total FROM ${this.tableName}${filter.where}`, filter.params);
-        return parseFloat(res.rows[0].total) || 0;
+        return toExactNumber(res.rows[0]?.total) ?? 0;
     }
 
     /**
@@ -265,7 +266,7 @@ export class DbSet<T> {
 
         const filter = this.compileFilterWhere();
         const res = await this.context.query(`SELECT AVG(${columnName}) as avg FROM ${this.tableName}${filter.where}`, filter.params);
-        return parseFloat(res.rows[0].avg) || 0;
+        return toExactNumber(res.rows[0]?.avg) ?? 0;
     }
 
     /**
@@ -705,7 +706,7 @@ export class QueryBuilder<T> {
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
-        return parseInt(res.rows[0].count);
+        return toCount(res.rows[0]?.count);
     }
 
     /**
@@ -773,7 +774,7 @@ export class QueryBuilder<T> {
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT SUM(${columnName}) as total FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
-        return parseFloat(res.rows[0].total) || 0;
+        return toExactNumber(res.rows[0]?.total) ?? 0;
     }
 
     /**
@@ -788,7 +789,7 @@ export class QueryBuilder<T> {
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT AVG(${columnName}) as avg FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
-        return parseFloat(res.rows[0].avg) || 0;
+        return toExactNumber(res.rows[0]?.avg) ?? 0;
     }
 
     /**
@@ -1261,7 +1262,7 @@ export class SelectQueryBuilder<T, TResult> {
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
         const res = await this.context.query(sql, [...this.params, ...filter.params]);
-        return parseInt(res.rows[0].count);
+        return toCount(res.rows[0]?.count);
     }
 
     /**

@@ -64,6 +64,8 @@ class FakeHistoryProvider implements IDatabaseProvider {
     async commitTransaction(): Promise<void> { this.events.push('COMMIT'); }
     async rollbackTransaction(): Promise<void> { this.events.push('ROLLBACK'); }
 
+    isInTransaction(): boolean { return this.events.lastIndexOf('BEGIN') > Math.max(this.events.lastIndexOf('COMMIT'), this.events.lastIndexOf('ROLLBACK')); }
+
     getParameterPlaceholder(index: number): string { return `$${index}`; }
 
     mapType(tsType: string): string { return tsType; }

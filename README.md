@@ -121,6 +121,64 @@ const db = new DbContext(new MSSQLProvider({
 }));
 ```
 
+**TLS:**
+
+Every provider takes `ssl` (`true`, or an options object passed to the driver)
+and `driverOptions` for anything the ORM does not model:
+
+```typescript
+new PostgreSQLProvider({
+  host: "db.example.com",
+  port: 5432,
+  user: "app",
+  password: process.env.DB_PASSWORD!,
+  database: "mydb",
+  ssl: { rejectUnauthorized: true, ca: process.env.DB_CA_CERT },
+});
+```
+
+SQL Server **encrypts by default and validates the certificate**. For a local
+server with a self-signed certificate, opt out explicitly:
+
+```typescript
+new MSSQLProvider({
+  // ...
+  ssl: false,
+  trustServerCertificate: true,   // local development only
+});
+```
+
+### Transactions
+
+`saveChanges()` opens a transaction, writes, and commits. If you already opened
+one, it enlists in yours instead: it will not commit or roll back a transaction
+it did not open, so your unit of work stays yours.
+
+```typescript
+await db.beginTransaction();
+try {
+  db.set(Order).add(order);
+  await db.saveChanges();        // enlists, does not commit
+
+  db.set(Invoice).add(invoice);
+  await db.saveChanges();        // same transaction
+
+  await db.commitTransaction();  // one atomic unit
+} catch (e) {
+  await db.rollbackTransaction();
+  throw e;
+}
+```
+
+Nesting is not supported: a second `beginTransaction()` throws rather than
+silently ending the first (which is what MariaDB and SQL Server would otherwise
+do).
+
+**One `DbContext` per request.** Transaction state lives on the provider
+instance, so two concurrent requests sharing a context share its transaction,
+and one request's commit ends the other's unit of work. Build a context per
+request and dispose it when the request finishes.
+
 **MariaDB/MySQL:**
 ```typescript
 import { DbContext, MariaDBProvider } from "rnxorm";
@@ -195,7 +253,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 
 - **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL providers
 - **Change Tracking & SaveChanges()**: EF Core-style automatic change detection and batch persistence
-- **Transactions**: Automatic transaction wrapping for `saveChanges()`
+- **Transactions**: `saveChanges()` wraps its writes in a transaction, or enlists in one you opened with `beginTransaction()` rather than nesting. Transaction state lives on the provider, so a `DbContext` in a transaction must not be shared across concurrent requests: use one context per request. See [Transactions](#transactions)
 - **Concurrency Tokens**: Optimistic concurrency control via `isConcurrencyToken()` (token check in UPDATE WHERE clause, auto-increment on save, conflict detection)
 - **Data Seeding**: Idempotent seeding via `hasData()` in ModelBuilder
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`

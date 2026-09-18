@@ -27,6 +27,8 @@ class RecordingProvider implements IDatabaseProvider {
     async commitTransaction(): Promise<void> {}
     async rollbackTransaction(): Promise<void> {}
 
+    isInTransaction(): boolean { return false; }
+
     mapType(tsType: string): string { return tsType; }
     generateCreateTableSql(_entity: EntityMetadata): string { return ''; }
     generateAddColumnSql(_t: string, _c: ColumnMetadata): string { return ''; }

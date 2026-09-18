@@ -4,6 +4,16 @@
 
 ### Security
 
+- **TLS is configurable, and SQL Server encrypts by default** (issue #43).
+  `DatabaseConfig` gained `ssl` (`true` or a driver options object),
+  `trustServerCertificate`, and a `driverOptions` passthrough, forwarded by all
+  three providers. There was previously no supported way to enable TLS on any
+  provider, and the SQL Server provider hardcoded `encrypt: false` with
+  `trustServerCertificate: true`, putting its traffic on the wire in cleartext
+  and accepting any certificate presented. **Behavior change:** SQL Server now
+  defaults to `encrypt: true, trustServerCertificate: false`. A local server
+  with a self-signed certificate needs `ssl: false` (or
+  `trustServerCertificate: true`) set explicitly.
 - **Projection aliases are validated** (issue #31). The keys of an
   object-literal projection in `select()` and `groupBy().select()` reached SQL
   as aliases with no validation, while every other identifier position was
@@ -16,6 +26,28 @@
 
 ### Fixed
 
+- **Transactions no longer collide** (issue #38). Transaction state is a single
+  slot on the provider instance, so `saveChanges()` and a caller-opened
+  transaction fought over it: `saveChanges()` committed the caller's
+  transaction early and the caller's later rollback rolled back nothing. On
+  PostgreSQL, commit also released a pooled client the caller had acquired
+  through `connect()`, after which every later query silently drew an arbitrary
+  connection. `saveChanges()` now enlists in an open transaction instead of
+  wrapping its own, and only commits or rolls back one it opened. A nested
+  `beginTransaction()` throws rather than silently ending the outer transaction
+  (which is what MariaDB does with a second START TRANSACTION, and what SQL
+  Server did by orphaning the first Transaction object). The SQL Server
+  provider also builds its own connection pool rather than the module-global
+  one, so two providers with different configs no longer share a pool that
+  either one's `disconnect()` closes.
+- **Generated keys and exact-numeric aggregates keep their precision**
+  (issue #39). The three drivers return three different JS types for BIGINT and
+  DECIMAL, and the ORM funnelled all of them through `Number()`/`parseFloat()`,
+  which silently rounds anything a double cannot represent: a generated key
+  above 2^53 came back wrong, and a DECIMAL sum lost its cents. Values that
+  convert exactly are still numbers; values that do not keep their exact string
+  form. `count()` also parses with an explicit radix and returns 0 for an empty
+  result set rather than NaN. `QueryResult.insertId` is now `number | string`.
 - **Change detection compares values, not references** (issue #40). The
   original-values snapshot was a shallow `{ ...entity }` compared with `!==`,
   which was wrong in both directions: two `Date` objects holding the same

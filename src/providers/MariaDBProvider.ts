@@ -1,6 +1,7 @@
 import * as mariadb from "mariadb";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { toExactNumber } from "../core/Numerics";
 
 /**
  * MariaDB database provider implementation
@@ -9,13 +10,19 @@ export class MariaDBProvider implements IDatabaseProvider {
     private pool: mariadb.Pool;
     private connection: mariadb.PoolConnection | null = null;
     private inTransaction: boolean = false;
+    /** Whether the transaction acquired the connection it runs on. */
+    private connectionOwnedByTransaction = false;
 
     getDialect(): string {
         return 'mariadb';
     }
 
+    /** The driver config this provider built, kept for inspection and tests. */
+    private readonly poolConfig: Record<string, unknown>;
+
     constructor(config: DatabaseConfig) {
-        this.pool = mariadb.createPool({
+        this.poolConfig = {
+            ...config.driverOptions,
             host: config.host,
             port: config.port,
             user: config.user,
@@ -23,7 +30,9 @@ export class MariaDBProvider implements IDatabaseProvider {
             database: config.database,
             connectionLimit: config.max || 10,
             idleTimeout: config.idleTimeoutMillis || 30000,
-        });
+            ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
+        };
+        this.pool = mariadb.createPool(this.poolConfig);
     }
 
     async connect(): Promise<void> {
@@ -51,8 +60,10 @@ export class MariaDBProvider implements IDatabaseProvider {
             return {
                 rows: rows,
                 rowCount: rowCount,
+                // mariadb returns insertId as a BigInt. Number() truncated
+                // anything above 2^53 into a wrong key (issue #39).
                 insertId: result.insertId !== undefined && result.insertId !== null
-                    ? Number(result.insertId)
+                    ? toExactNumber(result.insertId)
                     : undefined,
             };
         } finally {
@@ -63,22 +74,46 @@ export class MariaDBProvider implements IDatabaseProvider {
     }
 
     async beginTransaction(): Promise<void> {
-        if (!this.connection) await this.connect();
+        // A second START TRANSACTION is an implicit COMMIT of the first on
+        // MariaDB, so nesting silently ends the outer unit of work (issue #38).
+        if (this.inTransaction) {
+            throw new Error(
+                'A transaction is already open on this provider. Nested transactions are ' +
+                'not supported; commit or roll back the current one first, or use a ' +
+                'separate DbContext.'
+            );
+        }
+        if (!this.connection) {
+            await this.connect();
+            this.connectionOwnedByTransaction = true;
+        }
         await this.connection?.beginTransaction();
         this.inTransaction = true;
     }
 
     async commitTransaction(): Promise<void> {
-        if (this.connection && this.inTransaction) {
-            await this.connection.commit();
-            this.inTransaction = false;
-        }
+        if (!this.connection || !this.inTransaction) return;
+        await this.connection.commit();
+        await this.endTransaction();
     }
 
     async rollbackTransaction(): Promise<void> {
-        if (this.connection && this.inTransaction) {
-            await this.connection.rollback();
-            this.inTransaction = false;
+        if (!this.connection || !this.inTransaction) return;
+        await this.connection.rollback();
+        await this.endTransaction();
+    }
+
+    isInTransaction(): boolean {
+        return this.inTransaction;
+    }
+
+    /** Release the transaction's connection only if the transaction acquired it. */
+    private async endTransaction(): Promise<void> {
+        this.inTransaction = false;
+        if (this.connectionOwnedByTransaction && this.connection) {
+            await this.connection.release();
+            this.connection = null;
+            this.connectionOwnedByTransaction = false;
         }
     }
 
