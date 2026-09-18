@@ -57,6 +57,19 @@ Honest scope, so you can threat-model correctly:
   `encrypt: false` with `trustServerCertificate: true`, so its traffic was
   cleartext and it accepted any certificate presented. Anyone on the network
   path could read every query and result set.
+- **Migration DDL identifiers are validated and quoted** (2.2.1+):
+  `MigrationBuilder` used to concatenate every argument it was given straight
+  into DDL, including string defaults that land inside quotes. Table, column,
+  index, and constraint names must now be plain identifiers (optionally
+  `schema.name`) and are quoted for the dialect; string defaults have their
+  embedded quotes doubled; column types must match a type grammar; and
+  `ON DELETE` must be one of the four referential actions. On 2.2.0 and
+  earlier, an app that built migration operations from request data (the
+  "custom fields per tenant" shape) had an injection point: a default value of
+  `x'; DROP TABLE users; --` closed the literal and ran.
+  `migration:create` also validates the migration name, which used to be
+  interpolated into both the output path (so `../../../../tmp/pwned` wrote
+  outside the migrations directory) and the generated source.
 - **Raw SQL is yours.** `fromSqlRaw()` / `executeSqlRaw()` execute exactly what
   you pass; parameterize your own inputs.
 - **Global query filters are a convenience, not an isolation boundary.** Do not
