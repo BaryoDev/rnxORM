@@ -291,6 +291,58 @@ export class DbContext {
         const updates = entries.filter(e => e.state === EntityState.Modified);
         const deletes = entries.filter(e => e.state === EntityState.Deleted);
 
+        // A relation whose principal is the same type as its dependent (a category
+        // under a category) carries no type-level edge: the edge is between two
+        // rows, not two tables. The type sort cannot see it, so the order within
+        // one type is settled here, by following each entry's own navigation to
+        // the instance it points at.
+        const sortWithinType = (group: EntityEntry<any>[]): EntityEntry<any>[] => {
+            if (group.length < 2) return group;
+
+            const type = group[0].entity.constructor;
+            const metadata = MetadataStorage.get().getEntity(type);
+            const selfRelations = (metadata?.relations ?? []).filter(r =>
+                (r.relationType === RelationType.ManyToOne || r.relationType === RelationType.OneToOne) &&
+                r.relatedEntity() === type);
+            if (selfRelations.length === 0) return group;
+
+            const byEntity = new Map<any, EntityEntry<any>>();
+            for (const entry of group) byEntity.set(entry.entity, entry);
+
+            // Edge from dependent entry to the principal entry it references, kept
+            // only when that principal is in this same batch. A parent that is
+            // already stored has its key and needs no ordering.
+            const dependsOn = new Map<EntityEntry<any>, Set<EntityEntry<any>>>();
+            for (const entry of group) {
+                const deps = new Set<EntityEntry<any>>();
+                for (const relation of selfRelations) {
+                    const target = (entry.entity as any)[relation.propertyName];
+                    const principal = target && byEntity.get(target);
+                    if (principal && principal !== entry) deps.add(principal);
+                }
+                dependsOn.set(entry, deps);
+            }
+
+            const ordered: EntityEntry<any>[] = [];
+            const done = new Set<EntityEntry<any>>();
+            const remaining = [...group];
+            while (remaining.length > 0) {
+                const ready = remaining.filter(e => [...dependsOn.get(e)!].every(d => done.has(d)));
+                if (ready.length === 0) {
+                    // A cycle between rows, same as the type-level case: leave the
+                    // rest alone and let the database report it.
+                    ordered.push(...remaining);
+                    break;
+                }
+                for (const entry of ready) {
+                    ordered.push(entry);
+                    done.add(entry);
+                    remaining.splice(remaining.indexOf(entry), 1);
+                }
+            }
+            return ordered;
+        };
+
         const sortPrincipalFirst = (group: EntityEntry<any>[]): EntityEntry<any>[] => {
             if (group.length < 2) return group;
 
@@ -326,7 +378,7 @@ export class DbContext {
                     break;
                 }
                 for (const type of ready) {
-                    ordered.push(...group.filter(e => e.entity.constructor === type));
+                    ordered.push(...sortWithinType(group.filter(e => e.entity.constructor === type)));
                     done.add(type);
                     remaining.splice(remaining.indexOf(type), 1);
                 }
