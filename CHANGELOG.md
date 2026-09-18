@@ -16,6 +16,49 @@
 
 ### Fixed
 
+- **Change detection compares values, not references** (issue #40). The
+  original-values snapshot was a shallow `{ ...entity }` compared with `!==`,
+  which was wrong in both directions: two `Date` objects holding the same
+  instant are different references, so an entity with a date column was
+  rewritten on every save, and nested objects and arrays were shared by
+  reference with the entity, so `user.config.theme = 'light'` or
+  `user.tags.push('x')` mutated the "original" too and was never persisted.
+  Snapshots are now deep for the shapes a column can hold, and comparison is by
+  value: `Date` by instant, objects and arrays structurally.
+- **`include()` no longer dirties the entities it loads** (issue #34).
+  Navigation properties were part of the snapshot comparison, and
+  `loadIncludes` assigns them after the snapshot is taken, so every eagerly
+  loaded root looked modified. With a concurrency token configured, the next
+  unrelated `saveChanges()` bumped the version of every row a read had touched,
+  which then broke other contexts holding those rows with spurious concurrency
+  violations. Change detection now compares mapped columns only; navigations
+  are relations, not column values.
+- **`update()` on a detached entity emits SQL** (issue #33). The
+  disconnected-update pattern (take an entity off the wire, mark it modified,
+  save) snapshotted the entity against itself, so nothing looked modified and
+  `updateEntity` returned before emitting anything, while `saveChanges()` still
+  reported 1. An entry with no baseline from a database read now writes every
+  non-key column, matching EF Core's `Update()`, and `saveChanges()` counts
+  statements actually executed rather than entries considered.
+- **Deletes check concurrency tokens and row counts** (issue #41). `DELETE` ran
+  without the token in its `WHERE` clause and ignored the result, so deleting a
+  row another user had already changed or deleted succeeded silently. It now
+  carries the token and throws the same concurrency error `updateEntity` does
+  when no rows are affected.
+- **Concurrency tokens are only bumped after the write succeeds** (issue #41).
+  The new value was assigned to the entity while the statement was still being
+  built, so a failed or rolled-back save left the entity holding `version + 1`
+  against an unchanged `originalValues`, and a retry sent the wrong expected
+  version. Non-numeric tokens were also reset to the integer `1`; they now
+  throw, and the README no longer documents timestamp or GUID tokens, which
+  never worked.
+- **`saveChanges()` orders writes by foreign-key dependency** (issue #36).
+  Entries were written in insertion order, so adding a child before its parent
+  sent the child INSERT first and hit the FK constraint; deletes had the mirror
+  problem. Inserts are now topologically sorted principal-first and deletes
+  dependent-first. Setting a navigation (`post.author = user`) also back-fills
+  the dependent's foreign key once the principal INSERT returns its generated
+  key, so the EF Core idiom of adding both and saving once works.
 - **Value converters apply to query inputs** (issue #35). Converters ran on
   insert, update, read, and structured query filters, but not on `where()`
   values, `find(id)`, or the parent key in `include()` collection loads. A
