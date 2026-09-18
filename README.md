@@ -771,6 +771,38 @@ const allAdults = await users.all(u => u.age >= 18);
 
 Configure entities programmatically by overriding `onModelCreating()` in your DbContext:
 
+**The model is scoped to your context type.** Each `DbContext` subclass that
+declares `onModelCreating` gets its own model, built from the decorator
+metadata and cached per context type. Two context types can map the same entity
+differently without interfering:
+
+```typescript
+class TenantAContext extends DbContext {
+  protected onModelCreating(mb: ModelBuilder): void {
+    mb.entity(User).toTable('tenant_a_users');
+  }
+}
+
+class TenantBContext extends DbContext {
+  protected onModelCreating(mb: ModelBuilder): void {
+    mb.entity(User).toTable('tenant_b_users');
+  }
+}
+// Each context queries its own table, whatever order they are constructed in.
+```
+
+The same holds for query filters, so an `AppContext` with a soft-delete filter
+and an `AdminContext` without one can coexist. `ensureCreated()` on such a
+context creates only that context's entities.
+
+Configuring a `ModelBuilder` standalone (outside `onModelCreating`) still
+writes to the shared metadata every context starts from:
+
+```typescript
+new ModelBuilder().entity(User).hasQueryFilter({ property: 'isDeleted', operator: '=', value: false });
+```
+
+
 ```typescript
 import { DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
 

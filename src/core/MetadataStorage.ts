@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "async_hooks";
+
 export interface ColumnMetadata {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     target: Function;
@@ -107,16 +109,69 @@ export interface EntityMetadata {
 }
 
 export class MetadataStorage {
+    /**
+     * The registry decorators write into. Every context's model starts as a
+     * copy of this, and `onModelCreating` never writes back into it.
+     */
     private static instance: MetadataStorage;
+
+    /**
+     * The model reads resolve against while a context is active.
+     *
+     * `MetadataStorage` used to be a single process-wide registry that
+     * `onModelCreating` mutated on every construction, so two context types
+     * mapping the same entity shared one model and the last one constructed
+     * won. An app mapping one entity to per-tenant tables read the wrong
+     * tenant's table (issue #32). Each `DbContext` subclass now builds its own
+     * model, and reads resolve against whichever context is active.
+     */
+    private static readonly modelScope = new AsyncLocalStorage<MetadataStorage>();
+
     private entities: EntityMetadata[] = [];
 
     private constructor() { }
 
+    /**
+     * The metadata to read: the active context's model, or the shared
+     * decorator registry when no context is active (during decorator
+     * evaluation at class-definition time, for instance).
+     */
     static get(): MetadataStorage {
+        return MetadataStorage.modelScope.getStore() ?? MetadataStorage.shared();
+    }
+
+    /**
+     * The shared registry decorators populate, independent of any context.
+     */
+    static shared(): MetadataStorage {
         if (!MetadataStorage.instance) {
             MetadataStorage.instance = new MetadataStorage();
         }
         return MetadataStorage.instance;
+    }
+
+    /**
+     * Build a context-scoped model: a deep-enough copy of the decorator
+     * registry that `onModelCreating` can retarget tables, add filters, and
+     * change columns without touching the shared seed or any other context.
+     */
+    static createScopedModel(): MetadataStorage {
+        const scoped = new MetadataStorage();
+        scoped.entities = MetadataStorage.shared().entities.map(cloneEntity);
+        return scoped;
+    }
+
+    /**
+     * Run `fn` with `model` as the metadata reads resolve against, including
+     * inside anything `fn` awaits.
+     *
+     * AsyncLocalStorage rather than a plain variable, because a query resolves
+     * metadata after awaiting: two contexts interleaving `await ctx.set(X)`
+     * would otherwise see whichever model was assigned last, which is the very
+     * bug being fixed.
+     */
+    static withModel<T>(model: MetadataStorage, fn: () => T): T {
+        return MetadataStorage.modelScope.run(model, fn);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -257,4 +312,23 @@ export class MetadataStorage {
     static reset(): void {
         MetadataStorage.instance = new MetadataStorage();
     }
+}
+
+/**
+ * Copy one entity's metadata deeply enough that a context can reconfigure it
+ * in isolation. Arrays and the per-column/relation objects are copied; the
+ * `target` constructor and any converter functions are shared by reference,
+ * since those are identity, not configuration.
+ */
+function cloneEntity(entity: EntityMetadata): EntityMetadata {
+    return {
+        ...entity,
+        columns: entity.columns.map(c => ({ ...c })),
+        relations: entity.relations.map(r => ({ ...r })),
+        indexes: entity.indexes.map(i => ({ ...i })),
+        uniqueConstraints: entity.uniqueConstraints.map(u => ({ ...u })),
+        ownedEntities: entity.ownedEntities?.map(o => ({ ...o })),
+        seedData: entity.seedData ? [...entity.seedData] : undefined,
+        queryFilterConditions: entity.queryFilterConditions?.map(q => ({ ...q })),
+    };
 }

@@ -4,6 +4,21 @@
 
 ### Security
 
+- **The model is scoped per context type** (issue #32). `MetadataStorage` was a
+  process-wide singleton and `onModelCreating` mutated it on every
+  construction, so two context types mapping the same entity shared one model
+  and the last one constructed won. An app mapping one entity class to
+  per-tenant tables read the wrong tenant's table, and an `AppContext` with a
+  soft-delete filter could not coexist with an `AdminContext` without one.
+  Each `DbContext` subclass that declares `onModelCreating` now builds its own
+  model from a copy of the decorator registry, cached per context type the way
+  EF Core caches a model per context type, and queries resolve against the
+  model of the context they were issued on even when two contexts interleave
+  their awaits. `ensureCreated()` on such a context also creates only that
+  context's entities rather than everything registered in the process.
+  A context that does not declare `onModelCreating` reads the shared registry
+  directly, so the standalone `new ModelBuilder().entity(X)...` form keeps
+  working unchanged.
 - **Migration DDL is validated and quoted** (issue #44). `MigrationBuilder`
   concatenated every argument into DDL, including string defaults that land
   inside quotes, so an app building migration operations from request data had
