@@ -76,14 +76,8 @@
   TLS support added in #43, and a SQL injection under the big5/gbk/sjis/cp932/
   gb18030 client charsets. `dotenv` was a production dependency that nothing in
   `src/` imports.
-  Pinned to 3.4.7, which carries the fix and still supports Node 14+. The 3.5.x
-  line requires Node 20 and calls `process.exit(1)` on import below that, so it
-  would have dropped Node 18 silently.
-  Three moderate advisories remain, all transitive (`uuid` under
-  `@azure/identity`, pulled in by `tedious` under `mssql`). Fixing them
-  requires `@azure/identity` 4.13.3, which also needs Node 20, so they are left
-  in place while Node 18 is supported. None is reachable from the ORM's own
-  code paths.
+  Now on 3.5.4, alongside the move to Node 20 (see Changed). `npm audit` reports
+  zero vulnerabilities, production and dev.
 - **Transactions no longer collide** (issue #38). Transaction state is a single
   slot on the provider instance, so `saveChanges()` and a caller-opened
   transaction fought over it: `saveChanges()` committed the caller's
@@ -171,6 +165,13 @@
 
 ### Changed
 
+- **Node.js 20 is now the minimum** (was 18). `engines` declares `>=20.0.0` and
+  CI builds on 20 and 22. The mariadb 3.5.x line and `@azure/identity` 4.13.3
+  both require Node 20, and the latter carries the fix for three transitive
+  advisories under `tedious`, so staying on 18 meant shipping known
+  vulnerabilities. **Breaking for anyone on Node 18**, which reached end of
+  life on 30 April 2025. Note that Node 20's own security support ends
+  30 April 2026, so 22 is the better target for new work.
 - Coverage is no longer collected on every `jest` run. `npm test` runs without
   it; `npm run test:cov` collects it, and `npm run test:quiet` trims the output
   further for iterating on one file.
