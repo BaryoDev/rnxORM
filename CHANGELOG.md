@@ -70,6 +70,16 @@
 
 ### Fixed
 
+- **Query filters reach eager-loaded relations** (issue #37). Structured filters
+  were compiled into the root query but never into the queries that load
+  related entities, so `include()` returned rows the filter was meant to hide:
+  soft-deleted children, or another tenant's rows under a tenant filter. All
+  three relation loaders now append the related entity's filter to their
+  `IN (...)` predicate, numbering placeholders after the key list, and
+  `ignoreQueryFilters()` on the root query propagates to the includes. The
+  README and llms.txt claimed filters applied on "every query path", which is
+  now true.
+
 - **Transactions no longer collide** (issue #38). Transaction state is a single
   slot on the provider instance, so `saveChanges()` and a caller-opened
   transaction fought over it: `saveChanges()` committed the caller's

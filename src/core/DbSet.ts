@@ -874,6 +874,34 @@ export class QueryBuilder<T> {
      * that is already tracked yields the SAME instance, local edits included.
      * `asNoTracking()` still propagates and keeps the whole graph untracked.
      */
+    /**
+     * Compile the related entity's global query filters for an include query.
+     *
+     * Filters were compiled into the root query but not into the queries that
+     * load related entities, so an include returned rows the filter was meant
+     * to hide: soft-deleted children, or another tenant's rows under a tenant
+     * filter (issue #37). Placeholders continue after the key list the caller
+     * has already bound. `ignoreQueryFilters()` on the root query propagates
+     * here, since it is the same logical read.
+     */
+    private compileRelatedFilter(
+        relatedMetadata: any,
+        boundParamCount: number
+    ): { clause: string; params: any[] } {
+        if (this.ignoreFilters) {
+            return { clause: '', params: [] };
+        }
+        const filter = compileQueryFilter(
+            relatedMetadata,
+            this.context.getProvider(),
+            boundParamCount + 1
+        );
+        return {
+            clause: filter.clauses.length > 0 ? ` AND ${filter.clauses.join(' AND ')}` : '',
+            params: filter.params,
+        };
+    }
+
     private async loadIncludes(entities: T[]): Promise<void> {
         if (entities.length === 0) return;
 
@@ -923,8 +951,9 @@ export class QueryBuilder<T> {
         // Load related entities
         const uniqueFkValues = [...new Set(foreignKeyValues)];
         const placeholders = uniqueFkValues.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
-        const sql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${relatedPkColumn} IN (${placeholders})`;
-        const res = await this.context.query(sql, uniqueFkValues);
+        const filter = this.compileRelatedFilter(relatedMetadata, uniqueFkValues.length);
+        const sql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${relatedPkColumn} IN (${placeholders})${filter.clause}`;
+        const res = await this.context.query(sql, [...uniqueFkValues, ...filter.params]);
 
         // Map related entities by their primary key
         const relatedEntitiesMap = new Map();
@@ -968,8 +997,9 @@ export class QueryBuilder<T> {
 
         // Load all related entities
         const placeholders = pkValues.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
-        const sql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${foreignKeyColumn} IN (${placeholders})`;
-        const res = await this.context.query(sql, pkValues);
+        const filter = this.compileRelatedFilter(relatedMetadata, pkValues.length);
+        const sql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${foreignKeyColumn} IN (${placeholders})${filter.clause}`;
+        const res = await this.context.query(sql, [...pkValues, ...filter.params]);
 
         // Group related entities by foreign key
         const relatedEntitiesMap = new Map<any, any[]>();
@@ -1030,8 +1060,9 @@ export class QueryBuilder<T> {
         if (!relatedPkColumn) return;
 
         const relatedPlaceholders = uniqueRelatedIds.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
-        const relatedSql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${relatedPkColumn.columnName} IN (${relatedPlaceholders})`;
-        const relatedRes = await this.context.query(relatedSql, uniqueRelatedIds);
+        const relatedFilter = this.compileRelatedFilter(relatedMetadata, uniqueRelatedIds.length);
+        const relatedSql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${relatedPkColumn.columnName} IN (${relatedPlaceholders})${relatedFilter.clause}`;
+        const relatedRes = await this.context.query(relatedSql, [...uniqueRelatedIds, ...relatedFilter.params]);
 
         // Map related entities
         const relatedEntitiesMap = new Map();

@@ -19,7 +19,7 @@ Implemented:
 - **Bulk Operations**: `addRange`, `updateRange`, `removeRange` (per-row statements, one transaction)
 - **Schema Evolution**: `ensureCreated()` adds missing columns, best-effort type migration
 - **Query Optimization**: `.asNoTracking()` skips change tracking (entities are NOT frozen)
-- **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })`. Translated to SQL WHERE clauses on toList/find/where-chains/aggregates/select; `value` may be a function resolved at query time; bypass with `ignoreQueryFilters()`
+- **Global Query Filters (structured form)**: `hasQueryFilter({ property, operator, value })`. Translated to SQL WHERE clauses on toList/find/where-chains/aggregates/select/groupBy and on the queries that load `include()`d relations; `value` may be a function resolved at query time; bypass with `ignoreQueryFilters()`, which propagates to includes
 - **Migration CLI**: `migration:create` scaffolds; `migration:run`/`revert`/`status` load a `rnxorm.config.js` (or `--config <path>`) exporting `createMigrator()`
 
 Partial (works with limitations):
