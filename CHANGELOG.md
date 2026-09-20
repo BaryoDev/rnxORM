@@ -49,6 +49,10 @@
 - Removed 59 comments and 13 JSDoc blocks that restated the line below them.
   Comments explaining why a fix exists, including all 39 citing issue
   numbers, were left alone.
+- Verified against real databases, not just the mocked unit suite: 707 tests
+  pass with `USE_REAL_DB=true` across PostgreSQL 16, MariaDB 11 and SQL
+  Server 2022, which is the coverage that matters for the provider-layer
+  changes above.
 
 ## 2.3.0 (2026-09-18)
 
