@@ -1,4 +1,10 @@
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import {
+    DatabaseRow,
+    Dialect,
+    QueryParameter,
+    ReferentialAction,
+} from "../core/types";
 
 /**
  * Configuration for database connection
@@ -42,10 +48,13 @@ export interface DatabaseConfig {
 }
 
 /**
- * Result from database query execution
+ * The result of executing a statement.
+ *
+ * `TRow` defaults to an index-signature row because column names are not known
+ * at compile time; a caller that knows the shape can supply it.
  */
-export interface QueryResult {
-    rows: any[];
+export interface QueryResult<TRow = DatabaseRow> {
+    rows: TRow[];
     rowCount: number;
     /**
      * Generated key for an auto-increment primary key.
@@ -65,7 +74,7 @@ export interface IDatabaseProvider {
      * Get the SQL dialect identifier for this provider.
      * Used for provider-specific SQL generation (e.g., pagination, DDL).
      */
-    getDialect(): string;
+    getDialect(): Dialect;
 
     /**
      * Connect to the database
@@ -80,21 +89,12 @@ export interface IDatabaseProvider {
     /**
      * Execute a SQL query
      */
-    query(text: string, params?: any[]): Promise<QueryResult>;
+    query(text: string, params?: QueryParameter[]): Promise<QueryResult>;
 
-    /**
-     * Begin a transaction
-     */
     beginTransaction(): Promise<void>;
 
-    /**
-     * Commit a transaction
-     */
     commitTransaction(): Promise<void>;
 
-    /**
-     * Rollback a transaction
-     */
     rollbackTransaction(): Promise<void>;
 
     /**
@@ -112,14 +112,8 @@ export interface IDatabaseProvider {
      */
     mapType(tsType: string): string;
 
-    /**
-     * Generate CREATE TABLE SQL
-     */
     generateCreateTableSql(entity: EntityMetadata): string;
 
-    /**
-     * Generate ALTER TABLE ADD COLUMN SQL
-     */
     generateAddColumnSql(tableName: string, column: ColumnMetadata): string;
 
     /**
@@ -127,24 +121,12 @@ export interface IDatabaseProvider {
      */
     generateAlterColumnTypeSql(tableName: string, column: ColumnMetadata): string;
 
-    /**
-     * Generate INSERT SQL
-     */
     generateInsertSql(tableName: string, columns: ColumnMetadata[]): string;
 
-    /**
-     * Generate UPDATE SQL
-     */
     generateUpdateSql(tableName: string, columns: ColumnMetadata[], pkColumn: ColumnMetadata): string;
 
-    /**
-     * Generate DELETE SQL
-     */
     generateDeleteSql(tableName: string, pkColumn: ColumnMetadata): string;
 
-    /**
-     * Generate SELECT SQL
-     */
     generateSelectSql(tableName: string, whereClause?: string): string;
 
     /**
@@ -155,16 +137,13 @@ export interface IDatabaseProvider {
     /**
      * Get query to fetch existing columns from database schema
      */
-    getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] };
+    getSchemaColumnsQuery(tableName: string): { sql: string; params: QueryParameter[] };
 
     /**
      * Normalize database type for comparison
      */
     normalizeType(dbType: string): string;
 
-    /**
-     * Get auto-increment/identity column definition
-     */
     getAutoIncrementType(): string;
 
     /**
@@ -172,21 +151,15 @@ export interface IDatabaseProvider {
      */
     isTypeMismatch(entityType: string, dbType: string): boolean;
 
-    /**
-     * Generate ADD FOREIGN KEY constraint SQL
-     */
     generateAddForeignKeySql(
         tableName: string,
         columnName: string,
         referencedTable: string,
         referencedColumn: string,
-        onDelete?: string,
-        onUpdate?: string
+        onDelete?: ReferentialAction,
+        onUpdate?: ReferentialAction
     ): string;
 
-    /**
-     * Generate CREATE INDEX SQL
-     */
     generateCreateIndexSql(
         tableName: string,
         indexName: string,
@@ -194,9 +167,6 @@ export interface IDatabaseProvider {
         unique: boolean
     ): string;
 
-    /**
-     * Generate CREATE UNIQUE CONSTRAINT SQL
-     */
     generateCreateUniqueConstraintSql(
         tableName: string,
         constraintName: string,
@@ -212,7 +182,7 @@ export interface IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string,
+        onDelete?: ReferentialAction,
         referencedColumn1?: string,
         referencedColumn2?: string
     ): string;

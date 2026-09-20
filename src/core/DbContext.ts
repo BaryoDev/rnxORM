@@ -1,6 +1,7 @@
 import { DbSet } from "./DbSet";
+import { DatabaseRow, EntityLike, QueryParameter, asQueryParameter, assertNever } from "./types";
 import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
-import { RelationType, MetadataStorage } from "./MetadataStorage";
+import { RelationType, MetadataStorage, EntityMetadata, ColumnMetadata } from "./MetadataStorage";
 import { toCount, toExactNumber } from "./Numerics";
 import { ModelBuilder } from "./ModelBuilder";
 import { ChangeTracker } from "./ChangeTracker";
@@ -140,7 +141,7 @@ export class DbContext {
         await this.provider.disconnect();
     }
 
-    async query(text: string, params?: any[]): Promise<QueryResult> {
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
         return await this.provider.query(text, params);
     }
 
@@ -156,7 +157,7 @@ export class DbContext {
      *     ['inactive', '2020-01-01']
      * );
      */
-    async executeSqlRaw(sql: string, parameters?: any[]): Promise<number> {
+    async executeSqlRaw(sql: string, parameters?: QueryParameter[]): Promise<number> {
         const result = await this.provider.query(sql, parameters);
         return result.rowCount;
     }
@@ -247,6 +248,15 @@ export class DbContext {
                         await this.deleteEntity(entity, entry, metadata, tableName, pkColumn);
                         savedCount++;
                         break;
+
+                    case EntityState.Unchanged:
+                    case EntityState.Detached:
+                        // getChangedEntries() filters these out, so reaching
+                        // here means that filter and this switch disagree.
+                        break;
+
+                    default:
+                        assertNever(entry.state, 'saveChanges');
                 }
             }
 
@@ -406,7 +416,7 @@ export class DbContext {
     private propagateGeneratedKey(principal: any): void {
         const principalType = principal.constructor;
         const principalMetadata = MetadataStorage.get().getEntity(principalType);
-        const principalPk = principalMetadata?.columns.find((c: any) => c.isPrimaryKey);
+        const principalPk = principalMetadata?.columns.find((c) => c.isPrimaryKey);
         if (!principalPk) return;
 
         const keyValue = principal[principalPk.propertyName];
@@ -440,21 +450,18 @@ export class DbContext {
     /**
      * Insert a new entity
      */
-    private async insertEntity(entity: any, metadata: any, tableName: string): Promise<void> {
-        const columns = metadata.columns.filter((c: any) => {
-            // Skip shadow properties
+    private async insertEntity(entity: EntityLike, metadata: EntityMetadata, tableName: string): Promise<void> {
+        const columns = metadata.columns.filter((c) => {
             if (c.isShadowProperty) return true;
 
             const value = entity[c.propertyName];
-            // Skip auto-increment primary keys with undefined/null values
             return !(c.isPrimaryKey && c.isAutoIncrement && (value === undefined || value === null));
         });
 
-        const columnNames = columns.map((c: any) => c.columnName);
-        const values = columns.map((c: any) => {
+        const columnNames = columns.map((c) => c.columnName);
+        const values = columns.map((c) => {
             let value = c.isShadowProperty ? c.defaultValue : entity[c.propertyName];
 
-            // Apply value conversion from entity to database
             if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
                 value = c.convertToDb(value);
             }
@@ -464,7 +471,7 @@ export class DbContext {
 
         const placeholders = values.map((_: any, i: number) => this.provider.getParameterPlaceholder(i + 1));
 
-        const pkColumn = metadata.columns.find((c: any) => c.isPrimaryKey && c.isAutoIncrement);
+        const pkColumn = metadata.columns.find((c) => c.isPrimaryKey && c.isAutoIncrement);
         const needsGeneratedId = pkColumn && (entity[pkColumn.propertyName] === undefined || entity[pkColumn.propertyName] === null);
         const dialect = this.provider.getDialect();
 
@@ -493,7 +500,6 @@ export class DbContext {
                 ? pkColumn.convertFromDb(value)
                 : value;
 
-        // Set auto-increment ID if applicable
         if (needsGeneratedId) {
             if (result.insertId !== undefined) {
                 entity[pkColumn.propertyName] = fromDb(result.insertId);
@@ -511,7 +517,7 @@ export class DbContext {
         // find()/toList() for this primary key returns this same instance
         // (issue #5), whether the id was just generated above or was already
         // set explicitly by the caller before add().
-        const identityPkColumn = metadata.columns.find((c: any) => c.isPrimaryKey);
+        const identityPkColumn = metadata.columns.find((c) => c.isPrimaryKey);
         if (identityPkColumn) {
             const pkValue = entity[identityPkColumn.propertyName];
             if (pkValue !== undefined && pkValue !== null) {
@@ -523,7 +529,7 @@ export class DbContext {
     /**
      * Update an existing entity
      */
-    private async updateEntity(entity: any, entry: EntityEntry<any>, metadata: any, tableName: string, pkColumn: any): Promise<boolean> {
+    private async updateEntity(entity: EntityLike, entry: EntityEntry<EntityLike>, metadata: EntityMetadata, tableName: string, pkColumn: ColumnMetadata): Promise<boolean> {
         // An entry with no baseline (update()/attach(e, Modified) on an entity
         // this context never read) has original values copied from the entity
         // itself, so property comparison reports nothing modified. EF Core's
@@ -533,33 +539,31 @@ export class DbContext {
         const modifiedProperties = entry.hasBaseline
             ? entry.getModifiedProperties()
             : metadata.columns
-                .filter((c: any) => !c.isPrimaryKey && !c.isConcurrencyToken && !c.isShadowProperty)
-                .map((c: any) => c.propertyName);
+                .filter((c) => !c.isPrimaryKey && !c.isConcurrencyToken && !c.isShadowProperty)
+                .map((c) => c.propertyName);
 
         if (modifiedProperties.length === 0) {
             return false; // Nothing to update
         }
 
         const setClause: string[] = [];
-        const values: any[] = [];
+        const values: QueryParameter[] = [];
         let paramIndex = 1;
 
-        // Find concurrency token columns
-        const concurrencyTokens = metadata.columns.filter((c: any) => c.isConcurrencyToken);
+        const concurrencyTokens = metadata.columns.filter((c) => c.isConcurrencyToken);
 
         for (const propName of modifiedProperties) {
-            const column = metadata.columns.find((c: any) => c.propertyName === propName);
+            const column = metadata.columns.find((c) => c.propertyName === propName);
             if (column && !column.isPrimaryKey && !column.isConcurrencyToken) {
                 setClause.push(`${column.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
 
                 let value = entity[propName];
 
-                // Apply value conversion from entity to database
                 if (column.hasConversion && column.convertToDb && value !== undefined && value !== null) {
                     value = column.convertToDb(value);
                 }
 
-                values.push(value);
+                values.push(asQueryParameter(value));
             }
         }
 
@@ -602,9 +606,8 @@ export class DbContext {
             pkValue = pkColumn.convertToDb(pkValue);
         }
 
-        values.push(pkValue);
+        values.push(asQueryParameter(pkValue));
 
-        // Build WHERE clause with PK
         let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
 
         // Add concurrency token checks to WHERE clause. A token the entity
@@ -617,7 +620,7 @@ export class DbContext {
                 continue;
             }
             whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
-            values.push(originalValue);
+            values.push(asQueryParameter(originalValue));
         }
 
         const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${whereClause}`;
@@ -652,7 +655,7 @@ export class DbContext {
     /**
      * Delete an entity
      */
-    private async deleteEntity(entity: any, entry: EntityEntry<any>, metadata: any, tableName: string, pkColumn: any): Promise<void> {
+    private async deleteEntity(entity: EntityLike, entry: EntityEntry<EntityLike>, metadata: EntityMetadata, tableName: string, pkColumn: ColumnMetadata): Promise<void> {
         let pkValue = entity[pkColumn.propertyName];
 
         // Apply value conversion to primary key if needed
@@ -661,13 +664,13 @@ export class DbContext {
         }
 
         let paramIndex = 1;
-        const values: any[] = [pkValue];
+        const values: QueryParameter[] = [asQueryParameter(pkValue)];
         let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
 
         // A delete competes for the row the same way an update does, so it
         // carries the same token check. Without it, deleting a row another
         // user already changed succeeded silently (issue #41).
-        const concurrencyTokens = metadata.columns.filter((c: any) => c.isConcurrencyToken);
+        const concurrencyTokens = metadata.columns.filter((c) => c.isConcurrencyToken);
         for (const token of concurrencyTokens) {
             const originalValue = entry.hasBaseline
                 ? entry.originalValues[token.propertyName]
@@ -676,7 +679,7 @@ export class DbContext {
                 continue;
             }
             whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
-            values.push(originalValue);
+            values.push(asQueryParameter(originalValue));
         }
 
         const sql = `DELETE FROM ${tableName} WHERE ${whereClause}`;
@@ -869,10 +872,11 @@ export class DbContext {
             const schemaQuery = this.provider.getSchemaColumnsQuery(entity.tableName);
             const existingColumnsRes = await this.query(schemaQuery.sql, schemaQuery.params);
 
+            // information_schema always reports these two as strings.
             const existingColumns = new Map(
-                existingColumnsRes.rows.map((r: any) => [
-                    r.column_name.toLowerCase(),
-                    r.data_type.toLowerCase()
+                existingColumnsRes.rows.map((r) => [
+                    String(r.column_name).toLowerCase(),
+                    String(r.data_type).toLowerCase()
                 ])
             );
 
@@ -884,7 +888,6 @@ export class DbContext {
                     const alterTableSql = this.provider.generateAddColumnSql(entity.tableName, col);
                     await this.query(alterTableSql);
                 } else {
-                    // Check for type mismatch using provider
                     if (this.provider.isTypeMismatch(col.type, existingType)) {
                         try {
                             const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
@@ -907,19 +910,16 @@ export class DbContext {
                     continue;
                 }
 
-                // Check if data already exists
                 for (const seedItem of entity.seedData) {
                     const pkValue = (seedItem as any)[pkColumn.propertyName];
 
                     if (pkValue !== undefined) {
-                        // Check if record exists
                         const placeholder = this.provider.getParameterPlaceholder(1);
                         const checkSql = `SELECT COUNT(*) as count FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
                         const result = await this.query(checkSql, [pkValue]);
                         const exists = toCount(result.rows[0]?.count) > 0;
 
                         if (!exists) {
-                            // Insert seed data
                             const columns = entity.columns.filter(c =>
                                 (seedItem as any)[c.propertyName] !== undefined || c.isShadowProperty
                             );
@@ -928,7 +928,6 @@ export class DbContext {
                             const values = columns.map(c => {
                                 let value = c.isShadowProperty ? c.defaultValue : (seedItem as any)[c.propertyName];
 
-                                // Apply value conversion from entity to database
                                 if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
                                     value = c.convertToDb(value);
                                 }

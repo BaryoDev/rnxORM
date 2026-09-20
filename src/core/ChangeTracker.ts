@@ -5,8 +5,8 @@ import { MetadataStorage } from "./MetadataStorage";
  * Tracks changes to entities loaded from or added to the context
  */
 export class ChangeTracker {
-    private trackedEntities: Map<any, EntityEntry<any>> = new Map();
-    private autoDetectChanges: boolean = true;
+    #trackedEntities: Map<any, EntityEntry<any>> = new Map();
+    #autoDetectChanges: boolean = true;
 
     /**
      * Identity map: entity constructor -> primary key value -> tracked entity instance.
@@ -14,31 +14,31 @@ export class ChangeTracker {
      * same row is loaded more than once, instead of two conflicting instances.
      */
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-    private identityMap: Map<Function, Map<any, any>> = new Map();
+    #identityMap: Map<Function, Map<any, any>> = new Map();
 
     /**
      * Gets or sets whether DetectChanges is called automatically
      */
     get autoDetectChangesEnabled(): boolean {
-        return this.autoDetectChanges;
+        return this.#autoDetectChanges;
     }
 
     set autoDetectChangesEnabled(value: boolean) {
-        this.autoDetectChanges = value;
+        this.#autoDetectChanges = value;
     }
 
     /**
      * Track an entity with the specified state
      */
     track<T>(entity: T, state: EntityState, originalValues?: Partial<T>): EntityEntry<T> {
-        if (this.trackedEntities.has(entity)) {
-            const entry = this.trackedEntities.get(entity)!;
+        if (this.#trackedEntities.has(entity)) {
+            const entry = this.#trackedEntities.get(entity)!;
             entry.state = state;
             return entry;
         }
 
         const entry = new EntityEntry<T>(entity, state, originalValues);
-        this.trackedEntities.set(entity, entry);
+        this.#trackedEntities.set(entity, entry);
         this.registerIdentityFromEntity(entity, state);
         return entry;
     }
@@ -73,21 +73,21 @@ export class ChangeTracker {
      * Get the entry for a tracked entity
      */
     entry<T>(entity: T): EntityEntry<T> | undefined {
-        return this.trackedEntities.get(entity);
+        return this.#trackedEntities.get(entity);
     }
 
     /**
      * Check if an entity is being tracked
      */
     isTracked<T>(entity: T): boolean {
-        return this.trackedEntities.has(entity);
+        return this.#trackedEntities.has(entity);
     }
 
     /**
      * Stop tracking an entity
      */
     untrack<T>(entity: T): void {
-        this.trackedEntities.delete(entity);
+        this.#trackedEntities.delete(entity);
         this.removeFromIdentityMap(entity);
     }
 
@@ -98,7 +98,7 @@ export class ChangeTracker {
      */
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     findByKey(entityType: Function, pkValue: any): any | undefined {
-        return this.identityMap.get(entityType)?.get(pkValue);
+        return this.#identityMap.get(entityType)?.get(pkValue);
     }
 
     /**
@@ -110,10 +110,10 @@ export class ChangeTracker {
      */
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     registerIdentity(entityType: Function, pkValue: any, entity: any): void {
-        let typeMap = this.identityMap.get(entityType);
+        let typeMap = this.#identityMap.get(entityType);
         if (!typeMap) {
             typeMap = new Map();
-            this.identityMap.set(entityType, typeMap);
+            this.#identityMap.set(entityType, typeMap);
         }
         typeMap.set(pkValue, entity);
     }
@@ -124,7 +124,7 @@ export class ChangeTracker {
      * not by entity reference.
      */
     private removeFromIdentityMap(entity: any): void {
-        for (const typeMap of this.identityMap.values()) {
+        for (const typeMap of this.#identityMap.values()) {
             for (const [key, value] of typeMap.entries()) {
                 if (value === entity) {
                     typeMap.delete(key);
@@ -137,7 +137,7 @@ export class ChangeTracker {
      * Get all tracked entities
      */
     entries(): IterableIterator<EntityEntry<any>> {
-        return this.trackedEntities.values();
+        return this.#trackedEntities.values();
     }
 
     /**
@@ -145,7 +145,7 @@ export class ChangeTracker {
      */
     getEntriesByState(state: EntityState): EntityEntry<any>[] {
         const result: EntityEntry<any>[] = [];
-        for (const entry of this.trackedEntities.values()) {
+        for (const entry of this.#trackedEntities.values()) {
             if (entry.state === state) {
                 result.push(entry);
             }
@@ -158,7 +158,7 @@ export class ChangeTracker {
      */
     getChangedEntries(): EntityEntry<any>[] {
         const result: EntityEntry<any>[] = [];
-        for (const entry of this.trackedEntities.values()) {
+        for (const entry of this.#trackedEntities.values()) {
             if (entry.state === EntityState.Added ||
                 entry.state === EntityState.Modified ||
                 entry.state === EntityState.Deleted) {
@@ -172,7 +172,7 @@ export class ChangeTracker {
      * Detect changes in all tracked entities
      */
     detectChanges(): void {
-        for (const entry of this.trackedEntities.values()) {
+        for (const entry of this.#trackedEntities.values()) {
             if (entry.state === EntityState.Unchanged) {
                 if (entry.isModified) {
                     entry.state = EntityState.Modified;
@@ -185,7 +185,7 @@ export class ChangeTracker {
      * Check if there are any pending changes
      */
     hasChanges(): boolean {
-        for (const entry of this.trackedEntities.values()) {
+        for (const entry of this.#trackedEntities.values()) {
             if (entry.state === EntityState.Added ||
                 entry.state === EntityState.Modified ||
                 entry.state === EntityState.Deleted) {
@@ -199,8 +199,8 @@ export class ChangeTracker {
      * Clear all tracked entities
      */
     clear(): void {
-        this.trackedEntities.clear();
-        this.identityMap.clear();
+        this.#trackedEntities.clear();
+        this.#identityMap.clear();
     }
 
     /**
@@ -209,7 +209,7 @@ export class ChangeTracker {
     acceptAllChanges(): void {
         const entriesToRemove: any[] = [];
 
-        for (const entry of this.trackedEntities.values()) {
+        for (const entry of this.#trackedEntities.values()) {
             if (entry.state === EntityState.Deleted) {
                 entriesToRemove.push(entry.entity);
             } else {
@@ -219,7 +219,7 @@ export class ChangeTracker {
 
         // Remove deleted entities from tracking (and from the identity map)
         for (const entity of entriesToRemove) {
-            this.trackedEntities.delete(entity);
+            this.#trackedEntities.delete(entity);
             this.removeFromIdentityMap(entity);
         }
     }
@@ -236,7 +236,7 @@ export class ChangeTracker {
     } {
         let added = 0, modified = 0, deleted = 0, unchanged = 0;
 
-        for (const entry of this.trackedEntities.values()) {
+        for (const entry of this.#trackedEntities.values()) {
             switch (entry.state) {
                 case EntityState.Added:
                     added++;
@@ -254,7 +254,7 @@ export class ChangeTracker {
         }
 
         return {
-            total: this.trackedEntities.size,
+            total: this.#trackedEntities.size,
             added,
             modified,
             deleted,

@@ -1,13 +1,41 @@
 import { Pool, PoolClient } from "pg";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { Dialect, QueryParameter } from "../core/types";
+import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
 
 /**
  * PostgreSQL database provider implementation
  */
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'TEXT',
+    integer: 'INTEGER',
+    boolean: 'BOOLEAN',
+    timestamp: 'TIMESTAMP',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL',
+    float: 'REAL',
+    double: 'DOUBLE PRECISION',
+    bigint: 'BIGINT',
+    json: 'JSONB',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar'] as const;
+
+/** Database type names that normalize to a different canonical name. */
+const NORMALIZE_MAP: Readonly<Record<string, string>> = {
+    'character varying': 'varchar',
+    'timestamp without time zone': 'timestamp',
+    'timestamp with time zone': 'timestamp',
+    'double precision': 'double',
+};
+
 export class PostgreSQLProvider implements IDatabaseProvider {
-    private pool: Pool;
-    private client: PoolClient | null = null;
+    #pool: Pool;
+    #client: PoolClient | null = null;
     /**
      * Whether this provider currently holds an open transaction, and whether
      * the client it runs on was acquired for that transaction. A client the
@@ -15,18 +43,39 @@ export class PostgreSQLProvider implements IDatabaseProvider {
      * used to release it, after which every later query silently drew an
      * arbitrary pool connection (issue #38).
      */
-    private transactionOpen = false;
-    private clientOwnedByTransaction = false;
+    #transactionOpen = false;
+    #clientOwnedByTransaction = false;
 
-    getDialect(): string {
+    getDialect(): Dialect {
         return 'postgresql';
     }
 
+    /**
+     * The options handed to the driver, for tests that assert on TLS and
+     * pool settings without opening a connection.
+     *
+     * These fields are `#private`, so this is the supported way to read them;
+     * tests used to reach in with `provider.poolConfig`, which stopped working
+     * and was never part of any contract.
+     * @internal
+     */
+    get driverConfig(): Readonly<Record<string, unknown>> {
+        return this.#poolConfig as Readonly<Record<string, unknown>>;
+    }
+
+    /**
+     * The underlying connection pool, for test teardown.
+     * @internal
+     */
+    get connectionPool(): unknown {
+        return this.#pool;
+    }
+
     /** The driver config this provider built, kept for inspection and tests. */
-    private readonly poolConfig: Record<string, unknown>;
+    readonly #poolConfig: Record<string, unknown>;
 
     constructor(config: DatabaseConfig) {
-        this.poolConfig = {
+        this.#poolConfig = {
             ...config.driverOptions,
             host: config.host,
             port: config.port,
@@ -40,25 +89,25 @@ export class PostgreSQLProvider implements IDatabaseProvider {
             // default (and PGSSLMODE) still applies when they did not.
             ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
         };
-        this.pool = new Pool(this.poolConfig);
+        this.#pool = new Pool(this.#poolConfig);
     }
 
     async connect(): Promise<void> {
-        this.client = await this.pool.connect();
+        this.#client = await this.#pool.connect();
     }
 
     async disconnect(): Promise<void> {
-        if (this.client) {
-            this.client.release();
-            this.client = null;
+        if (this.#client) {
+            this.#client.release();
+            this.#client = null;
         }
-        await this.pool.end();
+        await this.#pool.end();
     }
 
-    async query(text: string, params?: any[]): Promise<QueryResult> {
-        const result = this.client
-            ? await this.client.query(text, params)
-            : await this.pool.query(text, params);
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
+        const result = this.#client
+            ? await this.#client.query(text, params)
+            : await this.#pool.query(text, params);
 
         return {
             rows: result.rows,
@@ -67,7 +116,7 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     }
 
     async beginTransaction(): Promise<void> {
-        if (this.transactionOpen) {
+        if (this.#transactionOpen) {
             throw new Error(
                 'A transaction is already open on this provider. Nested transactions are ' +
                 'not supported; commit or roll back the current one first, or use a ' +
@@ -77,77 +126,54 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         // Claim the slot before the first await. Setting it only after BEGIN
         // left a window where two concurrent callers both passed the guard
         // above and then collided on the same provider state.
-        this.transactionOpen = true;
+        this.#transactionOpen = true;
         try {
-            if (!this.client) {
+            if (!this.#client) {
                 await this.connect();
-                this.clientOwnedByTransaction = true;
+                this.#clientOwnedByTransaction = true;
             }
-            await this.client?.query('BEGIN');
+            await this.#client?.query('BEGIN');
         } catch (error) {
             // Starting failed, so release the claim and any client it took.
-            this.transactionOpen = false;
-            if (this.clientOwnedByTransaction && this.client) {
-                this.client.release();
-                this.client = null;
-                this.clientOwnedByTransaction = false;
+            this.#transactionOpen = false;
+            if (this.#clientOwnedByTransaction && this.#client) {
+                this.#client.release();
+                this.#client = null;
+                this.#clientOwnedByTransaction = false;
             }
             throw error;
         }
     }
 
     async commitTransaction(): Promise<void> {
-        if (!this.transactionOpen || !this.client) return;
-        await this.client.query('COMMIT');
+        if (!this.#transactionOpen || !this.#client) return;
+        await this.#client.query('COMMIT');
         this.endTransaction();
     }
 
     async rollbackTransaction(): Promise<void> {
-        if (!this.transactionOpen || !this.client) return;
-        await this.client.query('ROLLBACK');
+        if (!this.#transactionOpen || !this.#client) return;
+        await this.#client.query('ROLLBACK');
         this.endTransaction();
     }
 
     isInTransaction(): boolean {
-        return this.transactionOpen;
+        return this.#transactionOpen;
     }
 
     /**
      * Release the transaction's client only if the transaction acquired it.
      */
     private endTransaction(): void {
-        this.transactionOpen = false;
-        if (this.clientOwnedByTransaction && this.client) {
-            this.client.release();
-            this.client = null;
-            this.clientOwnedByTransaction = false;
+        this.#transactionOpen = false;
+        if (this.#clientOwnedByTransaction && this.#client) {
+            this.#client.release();
+            this.#client = null;
+            this.#clientOwnedByTransaction = false;
         }
     }
 
-    mapType(tsType: string): string {
-        // Map TypeScript types to PostgreSQL types
-        const typeMap: Record<string, string> = {
-            text: 'TEXT',
-            integer: 'INTEGER',
-            boolean: 'BOOLEAN',
-            timestamp: 'TIMESTAMP',
-            date: 'DATE',
-            time: 'TIME',
-            decimal: 'DECIMAL',
-            float: 'REAL',
-            double: 'DOUBLE PRECISION',
-            bigint: 'BIGINT',
-            json: 'JSONB',
-        };
-
-        // Check if it's a custom type (e.g., varchar(50))
-        const lowerType = tsType.toLowerCase();
-        if (lowerType.startsWith('varchar')) {
-            return tsType.toUpperCase();
-        }
-
-        return typeMap[lowerType] || tsType.toUpperCase();
-    }
+    mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);
 
     generateCreateTableSql(entity: EntityMetadata): string {
         const columns = entity.columns.map((col) => {
@@ -214,19 +240,7 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         };
     }
 
-    normalizeType(dbType: string): string {
-        const normalized = dbType.toLowerCase();
-
-        // Map PostgreSQL types to normalized types
-        const typeMap: Record<string, string> = {
-            'character varying': 'varchar',
-            'timestamp without time zone': 'timestamp',
-            'timestamp with time zone': 'timestamp',
-            'double precision': 'double',
-        };
-
-        return typeMap[normalized] || normalized;
-    }
+    normalizeType = createTypeNormalizer(NORMALIZE_MAP);
 
     getAutoIncrementType(): string {
         return 'SERIAL';

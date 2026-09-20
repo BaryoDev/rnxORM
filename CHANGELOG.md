@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The provider contract is typed rather than stringly typed.**
+  `getDialect()` returns a `Dialect` union (`'postgresql' | 'mssql' |
+  'mariadb'`) instead of `string`, foreign-key signatures take a
+  `ReferentialAction` instead of `string`, `QueryResult.rows` is
+  `Record<string, unknown>[]` instead of `any[]`, and bound parameters are
+  `QueryParameter[]`. These names are exported from the package root, so a
+  custom provider can be typed against them and an editor can complete them.
+  Runtime validation is unchanged everywhere it existed: TypeScript erases,
+  and these values reach the library from callers who may not be type-checked.
+  **Breaking for a custom `IDatabaseProvider`**, which must now return a
+  `Dialect` rather than an arbitrary string.
+- **Eager loading rejects owned types instead of ignoring them.**
+  `ownsMany()` records an `OwnsMany` relation and no loader implements one, so
+  `include()` on an owned collection previously left the navigation
+  `undefined` with no error. It now throws and names the alternative mapping.
+- **`include()` of an unimplemented relation type and `saveChanges()` of an
+  unhandled entity state are compile errors.** Both dispatches gained an
+  exhaustiveness check, so adding a `RelationType` or `EntityState` without
+  handling it fails the build rather than silently doing nothing.
+
+### Fixed
+
+- **Migration history reads the `applied_at` column the drivers actually
+  return.** `getAppliedMigrations()` assumed a string and called
+  `new Date()` on it; `pg` returns a `Date`. Both shapes are handled, and a
+  value no driver could produce throws rather than yielding an
+  `Invalid Date` that sorts wrong. The test fake only ever supplied a string,
+  so the `Date` path had no coverage.
+
+### Internal
+
+- The three providers shared one copy of the column type-mapping algorithm
+  instead of three, with each map declared `satisfies TypeMap` so a provider
+  missing a column type is a compile error. Proven equivalent to the previous
+  implementations over 29 inputs per dialect before the old code was removed.
+- The query builders hold their clause state in one `QueryState` object.
+  They used to declare the same seven fields each and copy them with
+  `builder['conditions'] = [...]`, reaching through `private` by index.
+- Data fields on `EntityEntry`, `ChangeTracker`, `MetadataStorage` and the
+  providers are `#private`, so they are unreachable at runtime rather than
+  only at compile time. Two tests that reached through `private` now use
+  named `@internal` accessors.
+- Removed 59 comments and 13 JSDoc blocks that restated the line below them.
+  Comments explaining why a fix exists, including all 39 citing issue
+  numbers, were left alone.
+- Verified against real databases, not just the mocked unit suite: 707 tests
+  pass with `USE_REAL_DB=true` across PostgreSQL 16, MariaDB 11 and SQL
+  Server 2022, which is the coverage that matters for the provider-layer
+  changes above.
+
 ## 2.3.0 (2026-09-18)
 
 ### Security

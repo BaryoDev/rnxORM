@@ -1,27 +1,76 @@
 import * as mariadb from "mariadb";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { Dialect, QueryParameter } from "../core/types";
+import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
 import { toExactNumber } from "../core/Numerics";
 
 /**
  * MariaDB database provider implementation
  */
-export class MariaDBProvider implements IDatabaseProvider {
-    private pool: mariadb.Pool;
-    private connection: mariadb.PoolConnection | null = null;
-    private inTransaction: boolean = false;
-    /** Whether the transaction acquired the connection it runs on. */
-    private connectionOwnedByTransaction = false;
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'TEXT',
+    integer: 'INT',
+    boolean: 'TINYINT(1)',
+    timestamp: 'DATETIME',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL(10,2)',
+    float: 'FLOAT',
+    double: 'DOUBLE',
+    bigint: 'BIGINT',
+    json: 'JSON',
+} satisfies TypeMap;
 
-    getDialect(): string {
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar', 'decimal'] as const;
+
+/** Database type names that normalize to a different canonical name. */
+const NORMALIZE_MAP: Readonly<Record<string, string>> = {
+    'int': 'integer',
+    'tinyint': 'boolean',
+    'datetime': 'timestamp',
+    'varchar': 'varchar',
+};
+
+export class MariaDBProvider implements IDatabaseProvider {
+    #pool: mariadb.Pool;
+    #connection: mariadb.PoolConnection | null = null;
+    #inTransaction: boolean = false;
+    /** Whether the transaction acquired the connection it runs on. */
+    #connectionOwnedByTransaction = false;
+
+    getDialect(): Dialect {
         return 'mariadb';
     }
 
+    /**
+     * The options handed to the driver, for tests that assert on TLS and
+     * pool settings without opening a connection.
+     *
+     * These fields are `#private`, so this is the supported way to read them;
+     * tests used to reach in with `provider.poolConfig`, which stopped working
+     * and was never part of any contract.
+     * @internal
+     */
+    get driverConfig(): Readonly<Record<string, unknown>> {
+        return this.#poolConfig as Readonly<Record<string, unknown>>;
+    }
+
+    /**
+     * The underlying connection pool, for test teardown.
+     * @internal
+     */
+    get connectionPool(): unknown {
+        return this.#pool;
+    }
+
     /** The driver config this provider built, kept for inspection and tests. */
-    private readonly poolConfig: Record<string, unknown>;
+    readonly #poolConfig: Record<string, unknown>;
 
     constructor(config: DatabaseConfig) {
-        this.poolConfig = {
+        this.#poolConfig = {
             ...config.driverOptions,
             host: config.host,
             port: config.port,
@@ -32,23 +81,23 @@ export class MariaDBProvider implements IDatabaseProvider {
             idleTimeout: config.idleTimeoutMillis || 30000,
             ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
         };
-        this.pool = mariadb.createPool(this.poolConfig);
+        this.#pool = mariadb.createPool(this.#poolConfig);
     }
 
     async connect(): Promise<void> {
-        this.connection = await this.pool.getConnection();
+        this.#connection = await this.#pool.getConnection();
     }
 
     async disconnect(): Promise<void> {
-        if (this.connection) {
-            await this.connection.release();
-            this.connection = null;
+        if (this.#connection) {
+            await this.#connection.release();
+            this.#connection = null;
         }
-        await this.pool.end();
+        await this.#pool.end();
     }
 
-    async query(text: string, params?: any[]): Promise<QueryResult> {
-        const conn = this.connection || await this.pool.getConnection();
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
+        const conn = this.#connection || await this.#pool.getConnection();
 
         try {
             const result = await conn.query(text, params);
@@ -67,7 +116,7 @@ export class MariaDBProvider implements IDatabaseProvider {
                     : undefined,
             };
         } finally {
-            if (!this.connection) {
+            if (!this.#connection) {
                 await conn.release();
             }
         }
@@ -76,7 +125,7 @@ export class MariaDBProvider implements IDatabaseProvider {
     async beginTransaction(): Promise<void> {
         // A second START TRANSACTION is an implicit COMMIT of the first on
         // MariaDB, so nesting silently ends the outer unit of work (issue #38).
-        if (this.inTransaction) {
+        if (this.#inTransaction) {
             throw new Error(
                 'A transaction is already open on this provider. Nested transactions are ' +
                 'not supported; commit or roll back the current one first, or use a ' +
@@ -87,76 +136,52 @@ export class MariaDBProvider implements IDatabaseProvider {
         // Claim the slot before the first await. Setting it only after BEGIN
         // left a window where two concurrent callers both passed the guard
         // above and then collided on the same provider state.
-        this.inTransaction = true;
+        this.#inTransaction = true;
         try {
-            if (!this.connection) {
+            if (!this.#connection) {
                 await this.connect();
-                this.connectionOwnedByTransaction = true;
+                this.#connectionOwnedByTransaction = true;
             }
-            await this.connection?.beginTransaction();
+            await this.#connection?.beginTransaction();
         } catch (error) {
             // Starting failed, so release the claim and any connection it took.
-            this.inTransaction = false;
-            if (this.connectionOwnedByTransaction && this.connection) {
-                await this.connection.release();
-                this.connection = null;
-                this.connectionOwnedByTransaction = false;
+            this.#inTransaction = false;
+            if (this.#connectionOwnedByTransaction && this.#connection) {
+                await this.#connection.release();
+                this.#connection = null;
+                this.#connectionOwnedByTransaction = false;
             }
             throw error;
         }
     }
 
     async commitTransaction(): Promise<void> {
-        if (!this.connection || !this.inTransaction) return;
-        await this.connection.commit();
+        if (!this.#connection || !this.#inTransaction) return;
+        await this.#connection.commit();
         await this.endTransaction();
     }
 
     async rollbackTransaction(): Promise<void> {
-        if (!this.connection || !this.inTransaction) return;
-        await this.connection.rollback();
+        if (!this.#connection || !this.#inTransaction) return;
+        await this.#connection.rollback();
         await this.endTransaction();
     }
 
     isInTransaction(): boolean {
-        return this.inTransaction;
+        return this.#inTransaction;
     }
 
     /** Release the transaction's connection only if the transaction acquired it. */
     private async endTransaction(): Promise<void> {
-        this.inTransaction = false;
-        if (this.connectionOwnedByTransaction && this.connection) {
-            await this.connection.release();
-            this.connection = null;
-            this.connectionOwnedByTransaction = false;
+        this.#inTransaction = false;
+        if (this.#connectionOwnedByTransaction && this.#connection) {
+            await this.#connection.release();
+            this.#connection = null;
+            this.#connectionOwnedByTransaction = false;
         }
     }
 
-    mapType(tsType: string): string {
-        // Map TypeScript types to MariaDB types
-        const typeMap: Record<string, string> = {
-            text: 'TEXT',
-            integer: 'INT',
-            boolean: 'TINYINT(1)',
-            timestamp: 'DATETIME',
-            date: 'DATE',
-            time: 'TIME',
-            decimal: 'DECIMAL(10,2)',
-            float: 'FLOAT',
-            double: 'DOUBLE',
-            bigint: 'BIGINT',
-            json: 'JSON',
-        };
-
-        const lowerType = tsType.toLowerCase();
-
-        // Check if it's a custom type (e.g., varchar(50))
-        if (lowerType.startsWith('varchar') || lowerType.startsWith('decimal')) {
-            return tsType.toUpperCase();
-        }
-
-        return typeMap[lowerType] || tsType.toUpperCase();
-    }
+    mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);
 
     generateCreateTableSql(entity: EntityMetadata): string {
         const columns = entity.columns.map((col) => {
@@ -224,19 +249,7 @@ export class MariaDBProvider implements IDatabaseProvider {
         };
     }
 
-    normalizeType(dbType: string): string {
-        const normalized = dbType.toLowerCase();
-
-        // Map MariaDB types to normalized types
-        const typeMap: Record<string, string> = {
-            'int': 'integer',
-            'tinyint': 'boolean',
-            'datetime': 'timestamp',
-            'varchar': 'varchar',
-        };
-
-        return typeMap[normalized] || normalized;
-    }
+    normalizeType = createTypeNormalizer(NORMALIZE_MAP);
 
     getAutoIncrementType(): string {
         return 'AUTO_INCREMENT';

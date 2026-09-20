@@ -29,10 +29,30 @@ describe('type mapping (documented in README "Type Mapping")', () => {
         expect(mariadb.mapType(tsType)).toBe(maria);
     });
 
+    // Exact, not toContain: 'NVARCHAR(50)' contains 'varchar(50)' once
+    // lowercased, so a looser assertion passes whether or not SQL Server
+    // applies its N prefix.
     it('passes explicit varchar(n) overrides through', () => {
-        expect(postgres.mapType('varchar(50)').toLowerCase()).toContain('varchar(50)');
-        expect(mssql.mapType('varchar(50)').toLowerCase()).toContain('varchar(50)');
-        expect(mariadb.mapType('varchar(50)').toLowerCase()).toContain('varchar(50)');
+        expect(postgres.mapType('varchar(50)')).toBe('VARCHAR(50)');
+        expect(mariadb.mapType('varchar(50)')).toBe('VARCHAR(50)');
+    });
+
+    it('promotes varchar to NVARCHAR on SQL Server but leaves nvarchar alone', () => {
+        expect(mssql.mapType('varchar(50)')).toBe('NVARCHAR(50)');
+        expect(mssql.mapType('nvarchar(50)')).toBe('NVARCHAR(50)');
+    });
+
+    it('passes a parameterized decimal through where the dialect allows it', () => {
+        expect(mssql.mapType('decimal(18,4)')).toBe('DECIMAL(18,4)');
+        expect(mariadb.mapType('decimal(18,4)')).toBe('DECIMAL(18,4)');
+        // PostgreSQL has no passthrough for decimal, so the table wins.
+        expect(postgres.mapType('decimal')).toBe('DECIMAL');
+    });
+
+    it('uppercases a type it does not know', () => {
+        expect(postgres.mapType('citext')).toBe('CITEXT');
+        expect(mssql.mapType('citext')).toBe('CITEXT');
+        expect(mariadb.mapType('citext')).toBe('CITEXT');
     });
 });
 

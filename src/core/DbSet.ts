@@ -1,5 +1,7 @@
 import { DbContext } from "./DbContext";
-import { MetadataStorage, RelationType } from "./MetadataStorage";
+import { QueryState } from "./QueryState";
+import { DatabaseRow, QueryParameter, asQueryParameter, assertNever } from "./types";
+import { MetadataStorage, RelationType, EntityMetadata, ColumnMetadata } from "./MetadataStorage";
 import { EntityState, snapshotEntity } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
@@ -102,7 +104,7 @@ export class DbSet<T> {
         }
 
         const res = await this.context.query(sql, filter.clauses.length > 0 ? filter.params : undefined);
-        const entities = res.rows.map((row: any) => this.mapRowToEntity(row, true));
+        const entities = res.rows.map((row: DatabaseRow) => this.mapRowToEntity(row, true));
 
         // Predicate-form query filters are evaluated in memory
         if (metadata?.queryFilter) {
@@ -200,7 +202,7 @@ export class DbSet<T> {
         // A converted key is stored in its converted form, so the caller's
         // domain value has to go through the converter before it is bound, the
         // way updateEntity()/deleteEntity() already do it (issue #35).
-        const params: any[] = [convertValueToDb(pkColumn, id)];
+        const params: QueryParameter[] = [convertValueToDb(pkColumn, id)];
 
         // Structured query filters are appended to the SQL WHERE clause
         const filter = compileQueryFilter(metadata, provider, 2);
@@ -225,7 +227,7 @@ export class DbSet<T> {
      * Build the WHERE clause for this entity's structured query filters,
      * or an empty clause when none are configured.
      */
-    private compileFilterWhere(): { where: string; params?: any[] } {
+    private compileFilterWhere(): { where: string; params?: QueryParameter[] } {
         const metadata = this.context.metadata.getEntity(this.entityType);
         const filter = compileQueryFilter(metadata, this.context.getProvider(), 1);
         if (filter.clauses.length === 0) {
@@ -332,7 +334,7 @@ export class DbSet<T> {
      *     .fromSqlRaw('SELECT * FROM users WHERE age > $1', [18])
      *     .toList();
      */
-    fromSqlRaw(sql: string, parameters?: any[]): RawSqlQueryBuilder<T> {
+    fromSqlRaw(sql: string, parameters?: QueryParameter[]): RawSqlQueryBuilder<T> {
         return new RawSqlQueryBuilder(this.entityType, this.context, sql, parameters);
     }
 
@@ -355,7 +357,6 @@ export class DbSet<T> {
         metadata?.columns.forEach(col => {
             let value = row[col.columnName];
 
-            // Apply value conversion from database to entity
             if (col.hasConversion && col.convertFromDb) {
                 value = col.convertFromDb(value);
             }
@@ -366,7 +367,6 @@ export class DbSet<T> {
             }
         });
 
-        // Track the entity if requested
         if (track) {
             const originalValues = snapshotEntity(entity);
             this.context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
@@ -386,8 +386,11 @@ export class DbSet<T> {
      * the row - those rows never touch the identity map.
      * @internal
      */
-    private static resolvePkValue(metadata: any, row: any): { pkColumn: any; pkValue: any } | null {
-        const pkColumn = metadata?.columns.find((c: any) => c.isPrimaryKey);
+    private static resolvePkValue(
+        metadata: EntityMetadata | undefined,
+        row: DatabaseRow
+    ): { pkColumn: ColumnMetadata; pkValue: unknown } | null {
+        const pkColumn = metadata?.columns.find((c) => c.isPrimaryKey);
         if (!pkColumn) return null;
 
         let pkValue = row[pkColumn.columnName];
@@ -428,7 +431,6 @@ export class DbSet<T> {
         metadata?.columns.forEach(col => {
             let value = row[col.columnName];
 
-            // Apply value conversion from database to entity
             if (col.hasConversion && col.convertFromDb) {
                 value = col.convertFromDb(value);
             }
@@ -459,15 +461,10 @@ interface IncludeInfo {
 }
 
 export class QueryBuilder<T> {
-    private conditions: string[] = [];
-    private params: any[] = [];
+    /** WHERE conditions, bound params, ordering and row limits. */
+    private readonly state = new QueryState();
     private noTracking: boolean = false;
     private includes: IncludeInfo[] = [];
-    private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
-    private skipCount?: number;
-    private takeCount?: number;
-    private isDistinct: boolean = false;
-    private ignoreFilters: boolean = false;
 
     constructor(
         private entityType: new () => T,
@@ -489,11 +486,11 @@ export class QueryBuilder<T> {
         //. The next condition numbers from the updated params length.
         const sqlColumn = assertColumn(this.entityType, column, 'where');
         const comparison = buildComparison(
-            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where',
+            sqlColumn, operator, value, this.context.getProvider(), this.state.params.length + 1, 'where',
             findColumn(this.entityType, column)
         );
-        this.conditions.push(comparison.clause);
-        this.params.push(...comparison.params);
+        this.state.conditions.push(comparison.clause);
+        this.state.params.push(...comparison.params);
         return this;
     }
 
@@ -527,7 +524,7 @@ export class QueryBuilder<T> {
     orderBy(column: keyof T & string): this;
     orderBy(column: string): this;
     orderBy(column: string): this {
-        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
+        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -537,7 +534,7 @@ export class QueryBuilder<T> {
     orderByDescending(column: keyof T & string): this;
     orderByDescending(column: string): this;
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
+        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -545,7 +542,7 @@ export class QueryBuilder<T> {
      * Skip N results (for pagination)
      */
     skip(count: number): this {
-        this.skipCount = assertLimit(count, 'skip');
+        this.state.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -553,7 +550,7 @@ export class QueryBuilder<T> {
      * Take N results (limit)
      */
     take(count: number): this {
-        this.takeCount = assertLimit(count, 'take');
+        this.state.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -574,7 +571,7 @@ export class QueryBuilder<T> {
      * @returns This query builder
      */
     ignoreQueryFilters(): this {
-        this.ignoreFilters = true;
+        this.state.ignoreFilters = true;
         return this;
     }
 
@@ -582,12 +579,12 @@ export class QueryBuilder<T> {
      * Compile this entity's structured query filters (unless disabled) with
      * placeholder numbering continuing after the user-supplied parameters.
      */
-    private compileFilters(): { clauses: string[]; params: any[] } {
-        if (this.ignoreFilters) {
+    private compileFilters(): { clauses: string[]; params: QueryParameter[] } {
+        if (this.state.ignoreFilters) {
             return { clauses: [], params: [] };
         }
         const metadata = this.context.metadata.getEntity(this.entityType);
-        return compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
+        return compileQueryFilter(metadata, this.context.getProvider(), this.state.params.length + 1);
     }
 
     /**
@@ -603,8 +600,8 @@ export class QueryBuilder<T> {
      * The structured filter form compiles to SQL and is unaffected.
      */
     private assertNoInMemoryFilterWithRowLimit(): void {
-        if (this.ignoreFilters) return;
-        if (this.skipCount === undefined && this.takeCount === undefined) return;
+        if (this.state.ignoreFilters) return;
+        if (this.state.skipCount === undefined && this.state.takeCount === undefined) return;
 
         const metadata = this.context.metadata.getEntity(this.entityType);
         if (!metadata?.queryFilter) return;
@@ -625,65 +622,60 @@ export class QueryBuilder<T> {
         const dialect = provider.getDialect();
 
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
-        const queryParams = [...this.params, ...filter.params];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
+        const queryParams = [...this.state.params, ...filter.params];
         let whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
 
-        // Add ORDER BY clause
-        if (this.orderByColumns.length > 0) {
-            const orderByClause = this.orderByColumns
+        if (this.state.orderByColumns.length > 0) {
+            const orderByClause = this.state.orderByColumns
                 .map(o => `${o.column} ${o.direction}`)
                 .join(', ');
             whereClause += (whereClause ? ' ' : '') + `ORDER BY ${orderByClause}`;
         }
 
-        // Add pagination (database-specific)
         if (dialect === 'mssql') {
             // MSSQL uses OFFSET/FETCH syntax (requires ORDER BY)
-            if (this.skipCount !== undefined || this.takeCount !== undefined) {
+            if (this.state.skipCount !== undefined || this.state.takeCount !== undefined) {
                 // MSSQL requires ORDER BY for OFFSET/FETCH
-                if (this.orderByColumns.length === 0) {
+                if (this.state.orderByColumns.length === 0) {
                     whereClause += (whereClause ? ' ' : '') + 'ORDER BY (SELECT NULL)';
                 }
-                whereClause += ` OFFSET ${this.skipCount ?? 0} ROWS`;
-                if (this.takeCount !== undefined) {
-                    whereClause += ` FETCH NEXT ${this.takeCount} ROWS ONLY`;
+                whereClause += ` OFFSET ${this.state.skipCount ?? 0} ROWS`;
+                if (this.state.takeCount !== undefined) {
+                    whereClause += ` FETCH NEXT ${this.state.takeCount} ROWS ONLY`;
                 }
             }
         } else {
             // PostgreSQL/MariaDB use LIMIT/OFFSET
-            if (this.takeCount !== undefined) {
-                whereClause += ` LIMIT ${this.takeCount}`;
+            if (this.state.takeCount !== undefined) {
+                whereClause += ` LIMIT ${this.state.takeCount}`;
             }
-            if (this.skipCount !== undefined) {
-                whereClause += ` OFFSET ${this.skipCount}`;
+            if (this.state.skipCount !== undefined) {
+                whereClause += ` OFFSET ${this.state.skipCount}`;
             }
         }
 
-        // Add DISTINCT if needed
         let selectClause = "SELECT *";
-        if (this.isDistinct) {
+        if (this.state.isDistinct) {
             selectClause = "SELECT DISTINCT *";
         }
 
         const sql = `${selectClause} FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
         const res = await this.context.query(sql, queryParams);
 
-        // Map rows to entities
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, this.noTracking, this.context)
         );
 
         // Predicate-form query filters are evaluated in memory (unless ignored)
         let filteredEntities = entities;
-        if (!this.ignoreFilters) {
+        if (!this.state.ignoreFilters) {
             const metadata = this.context.metadata.getEntity(this.entityType);
             if (metadata?.queryFilter) {
                 filteredEntities = entities.filter(metadata.queryFilter);
             }
         }
 
-        // Load includes (eager loading)
         if (this.includes.length > 0) {
             await this.loadIncludes(filteredEntities);
         }
@@ -704,10 +696,10 @@ export class QueryBuilder<T> {
      */
     async count(): Promise<number> {
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, [...this.params, ...filter.params]);
+        const res = await this.context.query(sql, [...this.state.params, ...filter.params]);
         return toCount(res.rows[0]?.count);
     }
 
@@ -772,10 +764,10 @@ export class QueryBuilder<T> {
         const columnName = resolveColumn(selector, this.entityType, 'sum');
 
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT SUM(${columnName}) as total FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, [...this.params, ...filter.params]);
+        const res = await this.context.query(sql, [...this.state.params, ...filter.params]);
         return toExactNumber(res.rows[0]?.total) ?? 0;
     }
 
@@ -787,10 +779,10 @@ export class QueryBuilder<T> {
         const columnName = resolveColumn(selector, this.entityType, 'average');
 
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT AVG(${columnName}) as avg FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, [...this.params, ...filter.params]);
+        const res = await this.context.query(sql, [...this.state.params, ...filter.params]);
         return toExactNumber(res.rows[0]?.avg) ?? 0;
     }
 
@@ -802,10 +794,10 @@ export class QueryBuilder<T> {
         const columnName = resolveColumn(selector, this.entityType, 'min');
 
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT MIN(${columnName}) as min FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, [...this.params, ...filter.params]);
+        const res = await this.context.query(sql, [...this.state.params, ...filter.params]);
         return res.rows[0].min;
     }
 
@@ -817,10 +809,10 @@ export class QueryBuilder<T> {
         const columnName = resolveColumn(selector, this.entityType, 'max');
 
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT MAX(${columnName}) as max FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, [...this.params, ...filter.params]);
+        const res = await this.context.query(sql, [...this.state.params, ...filter.params]);
         return res.rows[0].max;
     }
 
@@ -830,14 +822,7 @@ export class QueryBuilder<T> {
      */
     select<TResult>(selector: (entity: T) => TResult): SelectQueryBuilder<T, TResult> {
         const builder = new SelectQueryBuilder(this.entityType, this.context, this.tableName, selector);
-        // Copy current query state
-        builder['conditions'] = [...this.conditions];
-        builder['params'] = [...this.params];
-        builder['orderByColumns'] = [...this.orderByColumns];
-        builder['skipCount'] = this.skipCount;
-        builder['takeCount'] = this.takeCount;
-        builder['isDistinct'] = this.isDistinct;
-        builder['ignoreFilters'] = this.ignoreFilters;
+        builder.adoptState(this.state.clone());
         return builder;
     }
 
@@ -845,7 +830,7 @@ export class QueryBuilder<T> {
      * Remove duplicate entities
      */
     distinct(): this {
-        this.isDistinct = true;
+        this.state.isDistinct = true;
         return this;
     }
 
@@ -856,10 +841,11 @@ export class QueryBuilder<T> {
     groupBy<TKey>(selector: (entity: T) => TKey): GroupedQueryBuilder<T, TKey> {
         const propertyName = resolvePropertyName(selector, 'groupBy');
         const builder = new GroupedQueryBuilder(this.entityType, this.context, this.tableName, propertyName) as GroupedQueryBuilder<T, TKey>;
-        // Copy current query state (WHERE conditions)
-        builder['conditions'] = [...this.conditions];
-        builder['params'] = [...this.params];
-        if (!this.ignoreFilters) {
+        // Only the WHERE state carries over: a GROUP BY re-derives its own
+        // ordering and row limits, so cloning them would apply the outer
+        // query's LIMIT to the grouped result.
+        builder.adoptWhere(this.state.conditions, this.state.params);
+        if (!this.state.ignoreFilters) {
             builder.applyQueryFilter();
         }
         return builder;
@@ -885,10 +871,10 @@ export class QueryBuilder<T> {
      * here, since it is the same logical read.
      */
     private compileRelatedFilter(
-        relatedMetadata: any,
+        relatedMetadata: EntityMetadata,
         boundParamCount: number
-    ): { clause: string; params: any[] } {
-        if (this.ignoreFilters) {
+    ): { clause: string; params: QueryParameter[] } {
+        if (this.state.ignoreFilters) {
             return { clause: '', params: [] };
         }
         const filter = compileQueryFilter(
@@ -918,16 +904,33 @@ export class QueryBuilder<T> {
             const relatedPkColumn = relatedMetadata.columns.find(c => c.isPrimaryKey);
             if (!relatedPkColumn) continue;
 
-            // Handle different relation types
-            if (relationMetadata.relationType === RelationType.ManyToOne || relationMetadata.relationType === RelationType.OneToOne) {
-                // Load the single related entity
-                await this.loadManyToOneRelation(entities, relationMetadata, relatedMetadata, relatedPkColumn.columnName);
-            } else if (relationMetadata.relationType === RelationType.OneToMany) {
-                // Load the collection of related entities
-                await this.loadOneToManyRelation(entities, relationMetadata, relatedMetadata);
-            } else if (relationMetadata.relationType === RelationType.ManyToMany) {
-                // Load many-to-many relation through join table
-                await this.loadManyToManyRelation(entities, relationMetadata, relatedMetadata);
+            switch (relationMetadata.relationType) {
+                case RelationType.ManyToOne:
+                case RelationType.OneToOne:
+                    await this.loadManyToOneRelation(entities, relationMetadata, relatedMetadata, relatedPkColumn.columnName);
+                    break;
+
+                case RelationType.OneToMany:
+                    await this.loadOneToManyRelation(entities, relationMetadata, relatedMetadata);
+                    break;
+
+                case RelationType.ManyToMany:
+                    await this.loadManyToManyRelation(entities, relationMetadata, relatedMetadata);
+                    break;
+
+                case RelationType.OwnsOne:
+                case RelationType.OwnsMany:
+                    // ModelBuilder can declare these, but no loader implements
+                    // them: include() used to return silently with the
+                    // navigation left undefined. Saying so beats a caller
+                    // debugging an empty collection.
+                    throw new Error(
+                        `include('${include.propertyName}'): owned types are not supported by eager loading yet. ` +
+                        `Map the relation as one-to-many or many-to-one instead.`
+                    );
+
+                default:
+                    assertNever(relationMetadata.relationType, 'loadIncludes');
             }
         }
     }
@@ -935,34 +938,30 @@ export class QueryBuilder<T> {
     private async loadManyToOneRelation(
         entities: T[],
         relationMetadata: any,
-        relatedMetadata: any,
+        relatedMetadata: EntityMetadata,
         relatedPkColumn: string
     ): Promise<void> {
         const foreignKeyColumn = relationMetadata.foreignKeyColumn;
         if (!foreignKeyColumn) return;
 
-        // Get all unique foreign key values
         const foreignKeyValues = entities
             .map(e => (e as any)[foreignKeyColumn])
             .filter(v => v !== null && v !== undefined);
 
         if (foreignKeyValues.length === 0) return;
 
-        // Load related entities
         const uniqueFkValues = [...new Set(foreignKeyValues)];
         const placeholders = uniqueFkValues.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
         const filter = this.compileRelatedFilter(relatedMetadata, uniqueFkValues.length);
         const sql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${relatedPkColumn} IN (${placeholders})${filter.clause}`;
         const res = await this.context.query(sql, [...uniqueFkValues, ...filter.params]);
 
-        // Map related entities by their primary key
         const relatedEntitiesMap = new Map();
-        res.rows.forEach((row: any) => {
+        res.rows.forEach((row: DatabaseRow) => {
             const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn], relatedEntity);
         });
 
-        // Attach related entities to main entities
         entities.forEach(entity => {
             const fkValue = (entity as any)[foreignKeyColumn];
             if (fkValue && relatedEntitiesMap.has(fkValue)) {
@@ -974,7 +973,7 @@ export class QueryBuilder<T> {
     private async loadOneToManyRelation(
         entities: T[],
         relationMetadata: any,
-        relatedMetadata: any
+        relatedMetadata: EntityMetadata
     ): Promise<void> {
         const entityMetadata = this.context.metadata.getEntity(this.entityType);
         if (!entityMetadata) return;
@@ -984,7 +983,7 @@ export class QueryBuilder<T> {
 
         // Find the foreign key column on the related entity
         const inverseSide = relationMetadata.inverseSide;
-        const relatedRelation = relatedMetadata.relations.find((r: any) => r.propertyName === inverseSide);
+        const relatedRelation = relatedMetadata.relations.find((r) => r.propertyName === inverseSide);
         if (!relatedRelation || !relatedRelation.foreignKeyColumn) return;
 
         const foreignKeyColumn = relatedRelation.foreignKeyColumn;
@@ -995,15 +994,13 @@ export class QueryBuilder<T> {
         // the collection silently comes back empty (issue #35).
         const pkValues = entities.map(e => convertValueToDb(pkColumn, (e as any)[pkColumn.propertyName]));
 
-        // Load all related entities
         const placeholders = pkValues.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
         const filter = this.compileRelatedFilter(relatedMetadata, pkValues.length);
         const sql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${foreignKeyColumn} IN (${placeholders})${filter.clause}`;
         const res = await this.context.query(sql, [...pkValues, ...filter.params]);
 
-        // Group related entities by foreign key
         const relatedEntitiesMap = new Map<any, any[]>();
-        res.rows.forEach((row: any) => {
+        res.rows.forEach((row: DatabaseRow) => {
             const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             const fkValue = row[foreignKeyColumn];
 
@@ -1013,7 +1010,6 @@ export class QueryBuilder<T> {
             relatedEntitiesMap.get(fkValue)!.push(relatedEntity);
         });
 
-        // Attach collections to main entities
         entities.forEach(entity => {
             // The map is keyed by the row's FK value (database form), so the
             // entity's key is converted the same way before the lookup.
@@ -1025,7 +1021,7 @@ export class QueryBuilder<T> {
     private async loadManyToManyRelation(
         entities: T[],
         relationMetadata: any,
-        relatedMetadata: any
+        relatedMetadata: EntityMetadata
     ): Promise<void> {
         if (!relationMetadata.joinTable) return;
 
@@ -1038,7 +1034,6 @@ export class QueryBuilder<T> {
         // Converted keys are stored converted in the join table too (issue #35).
         const pkValues = entities.map(e => convertValueToDb(pkColumn, (e as any)[pkColumn.propertyName]));
 
-        // Query join table
         const placeholders = pkValues.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
         const joinSql = `SELECT * FROM ${relationMetadata.joinTable} WHERE ${relationMetadata.joinColumn} IN (${placeholders})`;
         const joinRes = await this.context.query(joinSql, pkValues);
@@ -1051,29 +1046,25 @@ export class QueryBuilder<T> {
             return;
         }
 
-        // Get related entity IDs
-        const relatedIds = joinRes.rows.map((r: any) => r[relationMetadata.inverseJoinColumn!]);
+        const relatedIds = joinRes.rows.map((r) => r[relationMetadata.inverseJoinColumn!]);
         const uniqueRelatedIds = [...new Set(relatedIds)];
 
-        // Load related entities
-        const relatedPkColumn = relatedMetadata.columns.find((c: any) => c.isPrimaryKey);
+        const relatedPkColumn = relatedMetadata.columns.find((c) => c.isPrimaryKey);
         if (!relatedPkColumn) return;
 
         const relatedPlaceholders = uniqueRelatedIds.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
         const relatedFilter = this.compileRelatedFilter(relatedMetadata, uniqueRelatedIds.length);
         const relatedSql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${relatedPkColumn.columnName} IN (${relatedPlaceholders})${relatedFilter.clause}`;
-        const relatedRes = await this.context.query(relatedSql, [...uniqueRelatedIds, ...relatedFilter.params]);
+        const relatedRes = await this.context.query(relatedSql, [...uniqueRelatedIds.map(asQueryParameter), ...relatedFilter.params]);
 
-        // Map related entities
         const relatedEntitiesMap = new Map();
-        relatedRes.rows.forEach((row: any) => {
+        relatedRes.rows.forEach((row: DatabaseRow) => {
             const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn.columnName], relatedEntity);
         });
 
-        // Group by source entity
         const relationMap = new Map<any, any[]>();
-        joinRes.rows.forEach((joinRow: any) => {
+        joinRes.rows.forEach((joinRow: DatabaseRow) => {
             const sourceId = joinRow[relationMetadata.joinColumn!];
             const targetId = joinRow[relationMetadata.inverseJoinColumn!];
 
@@ -1086,7 +1077,6 @@ export class QueryBuilder<T> {
             }
         });
 
-        // Attach to entities
         entities.forEach(entity => {
             // relationMap is keyed by the join row's source id (database form).
             const pkValue = convertValueToDb(pkColumn, (entity as any)[pkColumn.propertyName]);
@@ -1100,13 +1090,20 @@ export class QueryBuilder<T> {
  * Allows selecting specific properties or transforming results
  */
 export class SelectQueryBuilder<T, TResult> {
-    private conditions: string[] = [];
-    private params: any[] = [];
-    private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
-    private skipCount?: number;
-    private takeCount?: number;
-    private isDistinct: boolean = false;
-    private ignoreFilters: boolean = false;
+    /** WHERE conditions, bound params, ordering and row limits. */
+    private state = new QueryState();
+
+    /**
+     * Continue the query the projection was derived from.
+     *
+     * Takes ownership of an already-cloned state, so the two builders never
+     * share an array. Replaces `builder['conditions'] = ...`, which reached
+     * through `private` because these builders are siblings, not a hierarchy.
+     * @internal
+     */
+    adoptState(state: QueryState): void {
+        this.state = state;
+    }
 
     constructor(
         private entityType: new () => T,
@@ -1120,7 +1117,7 @@ export class SelectQueryBuilder<T, TResult> {
      * @returns This query builder
      */
     ignoreQueryFilters(): this {
-        this.ignoreFilters = true;
+        this.state.ignoreFilters = true;
         return this;
     }
 
@@ -1128,12 +1125,12 @@ export class SelectQueryBuilder<T, TResult> {
      * Compile this entity's structured query filters (unless disabled) with
      * placeholder numbering continuing after the user-supplied parameters.
      */
-    private compileFilters(): { clauses: string[]; params: any[] } {
-        if (this.ignoreFilters) {
+    private compileFilters(): { clauses: string[]; params: QueryParameter[] } {
+        if (this.state.ignoreFilters) {
             return { clauses: [], params: [] };
         }
         const metadata = this.context.metadata.getEntity(this.entityType);
-        return compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
+        return compileQueryFilter(metadata, this.context.getProvider(), this.state.params.length + 1);
     }
 
     /**
@@ -1144,11 +1141,11 @@ export class SelectQueryBuilder<T, TResult> {
     where(column: string, operator: string, value: any): this {
         const sqlColumn = assertColumn(this.entityType, column, 'where');
         const comparison = buildComparison(
-            sqlColumn, operator, value, this.context.getProvider(), this.params.length + 1, 'where',
+            sqlColumn, operator, value, this.context.getProvider(), this.state.params.length + 1, 'where',
             findColumn(this.entityType, column)
         );
-        this.conditions.push(comparison.clause);
-        this.params.push(...comparison.params);
+        this.state.conditions.push(comparison.clause);
+        this.state.params.push(...comparison.params);
         return this;
     }
 
@@ -1158,7 +1155,7 @@ export class SelectQueryBuilder<T, TResult> {
     orderBy(column: keyof T & string): this;
     orderBy(column: string): this;
     orderBy(column: string): this {
-        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
+        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -1168,7 +1165,7 @@ export class SelectQueryBuilder<T, TResult> {
     orderByDescending(column: keyof T & string): this;
     orderByDescending(column: string): this;
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
+        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -1176,7 +1173,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Skip N results
      */
     skip(count: number): this {
-        this.skipCount = assertLimit(count, 'skip');
+        this.state.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -1184,7 +1181,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Take N results
      */
     take(count: number): this {
-        this.takeCount = assertLimit(count, 'take');
+        this.state.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -1192,7 +1189,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Remove duplicates
      */
     distinct(): this {
-        this.isDistinct = true;
+        this.state.isDistinct = true;
         return this;
     }
 
@@ -1205,35 +1202,33 @@ export class SelectQueryBuilder<T, TResult> {
 
         // First, get the entities
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
-        const queryParams = [...this.params, ...filter.params];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
+        const queryParams = [...this.state.params, ...filter.params];
         let whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
 
-        // Add ORDER BY clause
-        if (this.orderByColumns.length > 0) {
-            const orderByClause = this.orderByColumns
+        if (this.state.orderByColumns.length > 0) {
+            const orderByClause = this.state.orderByColumns
                 .map(o => `${o.column} ${o.direction}`)
                 .join(', ');
             whereClause += (whereClause ? ' ' : '') + `ORDER BY ${orderByClause}`;
         }
 
-        // Add pagination (database-specific)
         if (dialect === 'mssql') {
-            if (this.skipCount !== undefined || this.takeCount !== undefined) {
-                if (this.orderByColumns.length === 0) {
+            if (this.state.skipCount !== undefined || this.state.takeCount !== undefined) {
+                if (this.state.orderByColumns.length === 0) {
                     whereClause += (whereClause ? ' ' : '') + 'ORDER BY (SELECT NULL)';
                 }
-                whereClause += ` OFFSET ${this.skipCount ?? 0} ROWS`;
-                if (this.takeCount !== undefined) {
-                    whereClause += ` FETCH NEXT ${this.takeCount} ROWS ONLY`;
+                whereClause += ` OFFSET ${this.state.skipCount ?? 0} ROWS`;
+                if (this.state.takeCount !== undefined) {
+                    whereClause += ` FETCH NEXT ${this.state.takeCount} ROWS ONLY`;
                 }
             }
         } else {
-            if (this.takeCount !== undefined) {
-                whereClause += ` LIMIT ${this.takeCount}`;
+            if (this.state.takeCount !== undefined) {
+                whereClause += ` LIMIT ${this.state.takeCount}`;
             }
-            if (this.skipCount !== undefined) {
-                whereClause += ` OFFSET ${this.skipCount}`;
+            if (this.state.skipCount !== undefined) {
+                whereClause += ` OFFSET ${this.state.skipCount}`;
             }
         }
 
@@ -1243,18 +1238,17 @@ export class SelectQueryBuilder<T, TResult> {
         let sql: string;
         if (projectedColumns && projectedColumns.length > 0) {
             // Use SQL projection for simple property selections
-            const distinctKeyword = this.isDistinct ? 'DISTINCT ' : '';
+            const distinctKeyword = this.state.isDistinct ? 'DISTINCT ' : '';
             const columnList = projectedColumns.join(', ');
             sql = `SELECT ${distinctKeyword}${columnList} FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
         } else {
             // Fall back to selecting all columns and projecting in memory
-            const distinctKeyword = this.isDistinct ? 'DISTINCT ' : '';
+            const distinctKeyword = this.state.isDistinct ? 'DISTINCT ' : '';
             sql = `SELECT ${distinctKeyword}* FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
         }
 
         const res = await this.context.query(sql, queryParams);
 
-        // Apply selector to each row
         if (projectedColumns && projectedColumns.length > 0) {
             if (this.projectsSingleProperty) {
                 // `u => u.age` is typed TResult[] (number[]), so the caller gets
@@ -1262,7 +1256,7 @@ export class SelectQueryBuilder<T, TResult> {
                 // key is the *column* name, which differs from the property
                 // whenever @Column renames it, so read the row's only value
                 // rather than looking the property up by name (issue #45).
-                return res.rows.map((row: any) => {
+                return res.rows.map((row: DatabaseRow) => {
                     const values = Object.values(row);
                     return (values.length === 1 ? values[0] : row) as TResult;
                 });
@@ -1271,7 +1265,7 @@ export class SelectQueryBuilder<T, TResult> {
             return res.rows as TResult[];
         } else {
             // Map rows to entities first, then apply selector
-            const entities = res.rows.map((row: any) =>
+            const entities = res.rows.map((row: DatabaseRow) =>
                 DbSet.mapRowToEntity(this.entityType, row, false)
             );
             return entities.map(e => this.selector(e));
@@ -1291,10 +1285,10 @@ export class SelectQueryBuilder<T, TResult> {
      */
     async count(): Promise<number> {
         const filter = this.compileFilters();
-        const allConditions = [...this.conditions, ...filter.clauses];
+        const allConditions = [...this.state.conditions, ...filter.clauses];
         const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
         const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, [...this.params, ...filter.params]);
+        const res = await this.context.query(sql, [...this.state.params, ...filter.params]);
         return toCount(res.rows[0]?.count);
     }
 
@@ -1351,7 +1345,7 @@ export class RawSqlQueryBuilder<T> {
         private entityType: new () => T,
         private context: DbContext,
         private sql: string,
-        private parameters?: any[]
+        private parameters?: QueryParameter[]
     ) {}
 
     /**
@@ -1360,8 +1354,7 @@ export class RawSqlQueryBuilder<T> {
     async toList(): Promise<T[]> {
         const res = await this.context.query(this.sql, this.parameters);
 
-        // Map rows to entities
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, false, this.context)
         );
 
@@ -1377,8 +1370,7 @@ export class RawSqlQueryBuilder<T> {
     async toListNoTracking(): Promise<T[]> {
         const res = await this.context.query(this.sql, this.parameters);
 
-        // Map rows to entities without tracking
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, true)
         );
 
@@ -1423,13 +1415,22 @@ export interface IGrouping<TKey, TElement> {
  * Allows grouping entities and performing aggregations
  */
 export class GroupedQueryBuilder<T, TKey> {
-    private conditions: string[] = [];
-    private params: any[] = [];
+    /** WHERE conditions, bound params, ordering and row limits. */
+    private readonly state = new QueryState();
+
+    /**
+     * Take the WHERE state of the query this grouping was derived from.
+     *
+     * Ordering and row limits are deliberately not carried over: a GROUP BY
+     * re-derives them, and inheriting an outer LIMIT would truncate groups.
+     * @internal
+     */
+    adoptWhere(conditions: string[], params: QueryParameter[]): void {
+        this.state.conditions = [...conditions];
+        this.state.params = [...params];
+    }
     private havingConditions: string[] = [];
-    private havingParams: any[] = [];
-    private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
-    private skipCount?: number;
-    private takeCount?: number;
+    private havingParams: QueryParameter[] = [];
     private queryFilterApplied: boolean = false;
 
     constructor(
@@ -1456,9 +1457,9 @@ export class GroupedQueryBuilder<T, TKey> {
         }
         this.queryFilterApplied = true;
         const metadata = this.context.metadata.getEntity(this.entityType);
-        const filter = compileQueryFilter(metadata, this.context.getProvider(), this.params.length + 1);
-        this.conditions.push(...filter.clauses);
-        this.params.push(...filter.params);
+        const filter = compileQueryFilter(metadata, this.context.getProvider(), this.state.params.length + 1);
+        this.state.conditions.push(...filter.clauses);
+        this.state.params.push(...filter.params);
         return this;
     }
 
@@ -1480,7 +1481,7 @@ export class GroupedQueryBuilder<T, TKey> {
             operator,
             value,
             this.context.getProvider(),
-            this.params.length + this.havingParams.length + 1,
+            this.state.params.length + this.havingParams.length + 1,
             'having'
         );
         this.havingConditions.push(comparison.clause);
@@ -1493,7 +1494,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * from the select() list; aliases must be plain identifiers.
      */
     orderBy(column: string): this {
-        this.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderBy'), direction: 'ASC' });
+        this.state.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -1501,7 +1502,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Order grouped results descending
      */
     orderByDescending(column: string): this {
-        this.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
+        this.state.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
         return this;
     }
 
@@ -1509,7 +1510,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Skip N groups
      */
     skip(count: number): this {
-        this.skipCount = assertLimit(count, 'skip');
+        this.state.skipCount = assertLimit(count, 'skip');
         return this;
     }
 
@@ -1517,7 +1518,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Take N groups
      */
     take(count: number): this {
-        this.takeCount = assertLimit(count, 'take');
+        this.state.takeCount = assertLimit(count, 'take');
         return this;
     }
 
@@ -1538,13 +1539,9 @@ export class GroupedQueryBuilder<T, TKey> {
             this.tableName,
             this.groupByProperty,
             selector,
-            this.conditions,
-            this.params,
+            this.state.clone(),
             this.havingConditions,
-            this.havingParams,
-            this.orderByColumns,
-            this.skipCount,
-            this.takeCount
+            this.havingParams
         );
     }
 
@@ -1555,15 +1552,14 @@ export class GroupedQueryBuilder<T, TKey> {
     async toList(): Promise<IGrouping<TKey, T>[]> {
         // This is a simple in-memory grouping fallback
         // For production, you should use .select() with aggregations
-        const whereClause = this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+        const whereClause = this.state.conditions.length > 0 ? `WHERE ${this.state.conditions.join(" AND ")}` : "";
         const sql = `SELECT * FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
-        const res = await this.context.query(sql, this.params);
+        const res = await this.context.query(sql, this.state.params);
 
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, false)
         );
 
-        // Group in memory
         const groups = new Map<TKey, T[]>();
         entities.forEach(entity => {
             const key = (entity as any)[this.groupByProperty] as TKey;
@@ -1573,7 +1569,6 @@ export class GroupedQueryBuilder<T, TKey> {
             groups.get(key)!.push(entity);
         });
 
-        // Convert to IGrouping interface
         return Array.from(groups.entries()).map(([key, elements]) => ({
             key,
             count: () => elements.length,
@@ -1605,13 +1600,9 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
         private tableName: string,
         private groupByProperty: string,
         private selector: (group: IGrouping<TKey, T>) => TResult,
-        private conditions: string[],
-        private params: any[],
+        private readonly state: QueryState,
         private havingConditions: string[],
-        private havingParams: any[],
-        private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[],
-        private skipCount?: number,
-        private takeCount?: number
+        private havingParams: QueryParameter[]
     ) {}
 
     /**
@@ -1632,11 +1623,10 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
         let sql = `SELECT ${selectClauses.join(', ')} FROM ${this.tableName}`;
 
         // WHERE clause
-        if (this.conditions.length > 0) {
-            sql += ` WHERE ${this.conditions.join(' AND ')}`;
+        if (this.state.conditions.length > 0) {
+            sql += ` WHERE ${this.state.conditions.join(' AND ')}`;
         }
 
-        // GROUP BY clause
         sql += ` GROUP BY ${groupColumn.columnName}`;
 
         // HAVING clause
@@ -1644,35 +1634,33 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
             sql += ` HAVING ${this.havingConditions.join(' AND ')}`;
         }
 
-        // ORDER BY clause
-        if (this.orderByColumns.length > 0) {
-            const orderBy = this.orderByColumns.map(o => `${o.column} ${o.direction}`).join(', ');
+        if (this.state.orderByColumns.length > 0) {
+            const orderBy = this.state.orderByColumns.map(o => `${o.column} ${o.direction}`).join(', ');
             sql += ` ORDER BY ${orderBy}`;
         }
 
         // Pagination (database-specific)
         if (this.context.getProvider().getDialect() === 'mssql') {
-            if (this.skipCount !== undefined || this.takeCount !== undefined) {
+            if (this.state.skipCount !== undefined || this.state.takeCount !== undefined) {
                 // MSSQL requires ORDER BY for OFFSET/FETCH
-                if (this.orderByColumns.length === 0) {
+                if (this.state.orderByColumns.length === 0) {
                     sql += ` ORDER BY (SELECT NULL)`;
                 }
-                sql += ` OFFSET ${this.skipCount ?? 0} ROWS`;
-                if (this.takeCount !== undefined) {
-                    sql += ` FETCH NEXT ${this.takeCount} ROWS ONLY`;
+                sql += ` OFFSET ${this.state.skipCount ?? 0} ROWS`;
+                if (this.state.takeCount !== undefined) {
+                    sql += ` FETCH NEXT ${this.state.takeCount} ROWS ONLY`;
                 }
             }
         } else {
-            if (this.takeCount !== undefined) {
-                sql += ` LIMIT ${this.takeCount}`;
+            if (this.state.takeCount !== undefined) {
+                sql += ` LIMIT ${this.state.takeCount}`;
             }
-            if (this.skipCount !== undefined) {
-                sql += ` OFFSET ${this.skipCount}`;
+            if (this.state.skipCount !== undefined) {
+                sql += ` OFFSET ${this.state.skipCount}`;
             }
         }
 
-        // Execute query
-        const allParams = [...this.params, ...this.havingParams];
+        const allParams = [...this.state.params, ...this.havingParams];
         const res = await this.context.query(sql, allParams);
 
         // Map results (rows already have the shape we want from SQL)

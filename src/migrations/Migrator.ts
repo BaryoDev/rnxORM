@@ -3,6 +3,18 @@ import { Migration, MigrationRecord } from "./Migration";
 import { MigrationBuilder } from "./MigrationBuilder";
 
 /**
+ * Coerce a driver-supplied timestamp to a Date.
+ *
+ * `pg` hands back a Date, MariaDB and SQL Server may hand back a string
+ * depending on driver options, so the value is narrowed rather than trusted.
+ */
+function toDate(value: unknown): Date {
+    if (value instanceof Date) return value;
+    if (typeof value === "string" || typeof value === "number") return new Date(value);
+    throw new Error(`Migration history: cannot read applied_at from ${typeof value}`);
+}
+
+/**
  * Manages database migrations
  */
 export class Migrator {
@@ -89,10 +101,13 @@ export class Migrator {
             `SELECT migration_id, migration_name, applied_at FROM ${Migrator.HISTORY_TABLE} ORDER BY applied_at`
         );
 
+        // Columns come off the driver as `unknown`: the three drivers disagree
+        // on whether a timestamp arrives as a Date or a string, so the value is
+        // coerced rather than cast.
         return result.rows.map(row => ({
-            migrationId: row.migration_id,
-            migrationName: row.migration_name,
-            appliedAt: new Date(row.applied_at)
+            migrationId: String(row.migration_id),
+            migrationName: String(row.migration_name),
+            appliedAt: toDate(row.applied_at)
         }));
     }
 

@@ -1,17 +1,80 @@
 import * as mssql from "mssql";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { Dialect, QueryParameter } from "../core/types";
+import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
 
 /**
  * Microsoft SQL Server database provider implementation
  */
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'NVARCHAR(MAX)',
+    integer: 'INT',
+    boolean: 'BIT',
+    timestamp: 'DATETIME2',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL(18,2)',
+    float: 'REAL',
+    double: 'FLOAT',
+    bigint: 'BIGINT',
+    // SQL Server 2016+ supports JSON functions over NVARCHAR
+    json: 'NVARCHAR(MAX)',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar', 'nvarchar', 'decimal'] as const;
+
+/** Database type names that normalize to a different canonical name. */
+const NORMALIZE_MAP: Readonly<Record<string, string>> = {
+    'nvarchar': 'varchar',
+    'int': 'integer',
+    'bit': 'boolean',
+    'datetime2': 'timestamp',
+    'datetime': 'timestamp',
+};
+
 export class MSSQLProvider implements IDatabaseProvider {
-    private pool: mssql.ConnectionPool | null = null;
-    private transaction: mssql.Transaction | null = null;
+    #pool: mssql.ConnectionPool | null = null;
+    #transaction: mssql.Transaction | null = null;
     private config: mssql.config;
 
-    getDialect(): string {
+    getDialect(): Dialect {
         return 'mssql';
+    }
+
+    /**
+     * The options handed to the driver, for tests that assert on TLS and
+     * pool settings without opening a connection.
+     *
+     * These fields are `#private`, so this is the supported way to read them;
+     * tests used to reach in with `provider.poolConfig`, which stopped working
+     * and was never part of any contract.
+     * @internal
+     */
+    get driverConfig(): Readonly<Record<string, unknown>> {
+        return this.config as unknown as Readonly<Record<string, unknown>>;
+    }
+
+    /**
+     * The underlying connection pool, for test teardown.
+     * @internal
+     */
+    get connectionPool(): unknown {
+        return this.#pool;
+    }
+
+    /**
+     * Install a stand-in pool so connect() idempotence can be exercised
+     * without reaching a server.
+     *
+     * The field is `#private`, so a test cannot assign it directly the way it
+     * used to. Kept narrow on purpose: this only exists for that test.
+     * @internal
+     */
+    set connectionPool(pool: unknown) {
+        this.#pool = pool as mssql.ConnectionPool | null;
     }
 
     constructor(config: DatabaseConfig) {
@@ -47,31 +110,30 @@ export class MSSQLProvider implements IDatabaseProvider {
         // Idempotent: a second call used to build another pool and overwrite
         // the field, leaving the first one open with its sockets held until
         // process exit.
-        if (this.pool) return;
+        if (this.#pool) return;
 
         // A dedicated pool, not the module-global mssql.connect() one: two
         // providers with different configs used to share a single global pool,
         // so disconnect() on either closed it for both (issue #38).
-        this.pool = await new mssql.ConnectionPool(this.config).connect();
+        this.#pool = await new mssql.ConnectionPool(this.config).connect();
     }
 
     async disconnect(): Promise<void> {
-        if (this.pool) {
-            await this.pool.close();
-            this.pool = null;
+        if (this.#pool) {
+            await this.#pool.close();
+            this.#pool = null;
         }
     }
 
-    async query(text: string, params?: any[]): Promise<QueryResult> {
-        if (!this.pool) {
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
+        if (!this.#pool) {
             throw new Error("Not connected to database");
         }
 
-        const request = this.transaction
-            ? new mssql.Request(this.transaction)
-            : this.pool.request();
+        const request = this.#transaction
+            ? new mssql.Request(this.#transaction)
+            : this.#pool.request();
 
-        // Add parameters
         if (params) {
             params.forEach((param, index) => {
                 request.input(`p${index}`, param);
@@ -87,67 +149,41 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     async beginTransaction(): Promise<void> {
-        // Overwriting this.transaction orphaned the previous one: never
+        // Overwriting this.#transaction orphaned the previous one: never
         // committed, never rolled back, holding its pooled connection and its
         // locks until the pool timed it out (issue #38).
-        if (this.transaction) {
+        if (this.#transaction) {
             throw new Error(
                 'A transaction is already open on this provider. Nested transactions are ' +
                 'not supported; commit or roll back the current one first, or use a ' +
                 'separate DbContext.'
             );
         }
-        if (!this.pool) await this.connect();
-        this.transaction = new mssql.Transaction(this.pool!);
-        await this.transaction.begin();
+        if (!this.#pool) await this.connect();
+        this.#transaction = new mssql.Transaction(this.#pool!);
+        await this.#transaction.begin();
     }
 
     async commitTransaction(): Promise<void> {
-        if (this.transaction) {
-            await this.transaction.commit();
-            this.transaction = null;
+        if (this.#transaction) {
+            await this.#transaction.commit();
+            this.#transaction = null;
         }
     }
 
     async rollbackTransaction(): Promise<void> {
-        if (this.transaction) {
-            await this.transaction.rollback();
-            this.transaction = null;
+        if (this.#transaction) {
+            await this.#transaction.rollback();
+            this.#transaction = null;
         }
     }
 
     isInTransaction(): boolean {
-        return this.transaction !== null;
+        return this.#transaction !== null;
     }
 
-    mapType(tsType: string): string {
-        // Map TypeScript types to SQL Server types
-        const typeMap: Record<string, string> = {
-            text: 'NVARCHAR(MAX)',
-            integer: 'INT',
-            boolean: 'BIT',
-            timestamp: 'DATETIME2',
-            date: 'DATE',
-            time: 'TIME',
-            decimal: 'DECIMAL(18,2)',
-            float: 'REAL',
-            double: 'FLOAT',
-            bigint: 'BIGINT',
-            json: 'NVARCHAR(MAX)', // SQL Server 2016+ supports JSON functions
-        };
-
-        const lowerType = tsType.toLowerCase();
-
-        // Check if it's a custom type (e.g., varchar(50))
-        if (lowerType.startsWith('varchar')) {
-            return 'N' + tsType.toUpperCase(); // Use NVARCHAR for SQL Server
-        }
-        if (lowerType.startsWith('nvarchar') || lowerType.startsWith('decimal')) {
-            return tsType.toUpperCase();
-        }
-
-        return typeMap[lowerType] || tsType.toUpperCase();
-    }
+    mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES,
+    (upper, lower) => (lower.startsWith('varchar') ? 'N' + upper : upper));
 
     generateCreateTableSql(entity: EntityMetadata): string {
         const columns = entity.columns.map((col) => {
@@ -218,20 +254,7 @@ export class MSSQLProvider implements IDatabaseProvider {
         };
     }
 
-    normalizeType(dbType: string): string {
-        const normalized = dbType.toLowerCase();
-
-        // Map SQL Server types to normalized types
-        const typeMap: Record<string, string> = {
-            'nvarchar': 'varchar',
-            'int': 'integer',
-            'bit': 'boolean',
-            'datetime2': 'timestamp',
-            'datetime': 'timestamp',
-        };
-
-        return typeMap[normalized] || normalized;
-    }
+    normalizeType = createTypeNormalizer(NORMALIZE_MAP);
 
     getAutoIncrementType(): string {
         return 'IDENTITY(1,1)';

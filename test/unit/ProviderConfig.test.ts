@@ -34,7 +34,7 @@ function track<T>(provider: T): T {
 afterAll(async () => {
     for (const provider of created) {
         try {
-            await provider.pool?.end?.();
+            await (provider.connectionPool as { end?: () => Promise<void> } | null)?.end?.();
         } catch {
             // The pool never connected; nothing to close.
         }
@@ -42,8 +42,8 @@ afterAll(async () => {
 });
 
 /** The driver config a provider built, without connecting to anything. */
-function driverConfig(provider: any): any {
-    return provider.config ?? provider.poolConfig;
+function driverConfig(provider: { driverConfig: Readonly<Record<string, unknown>> }): any {
+    return provider.driverConfig;
 }
 
 describe('MSSQL TLS defaults (#43)', () => {
@@ -128,12 +128,12 @@ describe('MSSQL connect idempotence (#44 follow-up)', () => {
 
         // Stand in for a connected pool without touching a real server.
         const firstPool = { close: jest.fn(async () => undefined) };
-        provider.pool = firstPool;
+        provider.connectionPool = firstPool;
 
         await provider.connect();
 
         // A second call used to overwrite the field, orphaning the first pool
         // with its sockets held until process exit.
-        expect(provider.pool).toBe(firstPool);
+        expect(provider.connectionPool).toBe(firstPool);
     });
 });

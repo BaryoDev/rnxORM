@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { IDatabaseProvider, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
+import { DIALECTS, Dialect } from '../../src/core/types';
 
 /**
  * Minimal fake provider that records every query() call so tests can
@@ -12,9 +13,9 @@ import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 class RecordingProvider implements IDatabaseProvider {
     public queries: Array<{ sql: string; params?: any[] }> = [];
 
-    constructor(private dialect: string) {}
+    constructor(private dialect: Dialect) {}
 
-    getDialect(): string { return this.dialect; }
+    getDialect(): Dialect { return this.dialect; }
     async connect(): Promise<void> {}
     async disconnect(): Promise<void> {}
 
@@ -63,14 +64,14 @@ class RecordingProvider implements IDatabaseProvider {
  * would be a no-op that changes nothing but the bytes); MySQL/MariaDB and SQL
  * Server quote unconditionally. See DdlIdentifiers.ts (issue #44).
  */
-function q(name: string, dialect: string): string {
+function q(name: string, dialect: Dialect): string {
     if (dialect === 'mssql') return `[${name}]`;
     if (dialect === 'mariadb') return `\`${name}\``;
     return name;
 }
 
 async function runBuilder(
-    dialect: string,
+    dialect: Dialect,
     define: (builder: MigrationBuilder) => void
 ): Promise<Array<{ sql: string; params?: any[] }>> {
     const provider = new RecordingProvider(dialect);
@@ -226,7 +227,7 @@ describe('MigrationBuilder', () => {
     });
 
     describe('dropTable', () => {
-        it.each(['postgresql', 'mssql', 'mariadb'])(
+        it.each(DIALECTS)(
             'emits DROP TABLE IF EXISTS for %s',
             async dialect => {
                 const queries = await runBuilder(dialect, b => b.dropTable('mig_old'));
@@ -253,7 +254,7 @@ describe('MigrationBuilder', () => {
     });
 
     describe('addColumn', () => {
-        it.each(['postgresql', 'mssql', 'mariadb'])(
+        it.each(DIALECTS)(
             'emits ALTER TABLE ... ADD COLUMN for %s',
             async dialect => {
                 const queries = await runBuilder(dialect, b =>
@@ -292,7 +293,7 @@ describe('MigrationBuilder', () => {
     });
 
     describe('dropColumn', () => {
-        it.each(['postgresql', 'mssql', 'mariadb'])(
+        it.each(DIALECTS)(
             'emits ALTER TABLE ... DROP COLUMN for %s',
             async dialect => {
                 const queries = await runBuilder(dialect, b =>
@@ -426,7 +427,7 @@ describe('MigrationBuilder', () => {
     });
 
     describe('createIndex', () => {
-        it.each(['postgresql', 'mssql', 'mariadb'])(
+        it.each(DIALECTS)(
             'emits CREATE INDEX (non-unique, default) for %s',
             async dialect => {
                 const queries = await runBuilder(dialect, b =>
@@ -485,7 +486,7 @@ describe('MigrationBuilder', () => {
     });
 
     describe('addForeignKey', () => {
-        it.each(['postgresql', 'mssql', 'mariadb'])(
+        it.each(DIALECTS)(
             'emits ADD CONSTRAINT ... FOREIGN KEY with default ON DELETE NO ACTION for %s',
             async dialect => {
                 const queries = await runBuilder(dialect, b =>
@@ -519,7 +520,7 @@ describe('MigrationBuilder', () => {
     });
 
     describe('dropForeignKey', () => {
-        it.each(['postgresql', 'mssql', 'mariadb'])(
+        it.each(DIALECTS)(
             'emits ALTER TABLE ... DROP CONSTRAINT for %s',
             async dialect => {
                 const queries = await runBuilder(dialect, b =>

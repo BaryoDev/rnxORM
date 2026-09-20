@@ -293,9 +293,7 @@ export class EntityTypeBuilder<T> {
         const propertyName = resolvePropertyName(selector, 'hasKey');
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
-            // Clear existing primary keys
             metadata.columns.forEach(c => c.isPrimaryKey = false);
-            // Set new primary key
             const column = metadata.columns.find(c => c.propertyName === propertyName);
             if (column) {
                 column.isPrimaryKey = true;
@@ -316,7 +314,6 @@ export class EntityTypeBuilder<T> {
         const metadata = MetadataStorage.get().getEntity(this.entityType);
         if (metadata) {
             metadata.isKeyless = true;
-            // Clear any existing primary keys
             metadata.columns.forEach(c => c.isPrimaryKey = false);
         }
         return this;

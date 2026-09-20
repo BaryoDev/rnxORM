@@ -5,6 +5,7 @@ import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { Migrator } from '../../src/migrations/Migrator';
 import { IDatabaseProvider, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
+import { Dialect } from '../../src/core/types';
 
 const HISTORY_TABLE = '__MigrationHistory';
 
@@ -19,14 +20,20 @@ class FakeHistoryProvider implements IDatabaseProvider {
     /** Ordered stream of 'BEGIN' | 'COMMIT' | 'ROLLBACK' | <sql text> */
     public events: string[] = [];
     public queries: Array<{ sql: string; params?: any[] }> = [];
-    /** Rows in the fake __MigrationHistory table */
-    public historyRows: Array<{ migration_id: string; migration_name: string; applied_at: string }> = [];
+    /**
+     * Rows in the fake __MigrationHistory table.
+     *
+     * `applied_at` is `Date | string` because the drivers disagree: `pg`
+     * returns a Date, while MariaDB and SQL Server can return a string
+     * depending on driver options.
+     */
+    public historyRows: Array<{ migration_id: string; migration_name: string; applied_at: Date | string }> = [];
     /** When set, query() throws if the SQL contains this fragment */
     public failOnSqlContaining?: string;
 
     constructor(private dialect: string = 'postgresql') {}
 
-    getDialect(): string { return this.dialect; }
+    getDialect(): Dialect { return this.dialect as Dialect; }
     async connect(): Promise<void> {}
     async disconnect(): Promise<void> {}
 
@@ -197,6 +204,42 @@ describe('Migrator', () => {
 
             const pending = await migrator.getPendingMigrations();
             expect(pending.map(m => m.id)).toEqual(['20240102']);
+        });
+
+        // The three drivers return applied_at as either a Date or a string.
+        // Both reach the same Date, so history is read the same way whichever
+        // provider is underneath.
+        it.each([
+            ['a Date, as pg returns it', new Date('2024-01-01T10:00:00.000Z')],
+            ['a string, as MariaDB and SQL Server can', '2024-01-01T10:00:00.000Z'],
+        ])('reads applied_at when the driver returns %s', async (_label, appliedAt) => {
+            const { migrator, provider } = createMigrator();
+            provider.historyRows.push({
+                migration_id: '20240101',
+                migration_name: 'first',
+                applied_at: appliedAt
+            });
+
+            migrator
+                .addMigration(new TestMigration('20240101', 'first'))
+                .addMigration(new TestMigration('20240102', 'second'));
+
+            const pending = await migrator.getPendingMigrations();
+            expect(pending.map(m => m.id)).toEqual(['20240102']);
+        });
+
+        it('rejects an applied_at the driver could not have produced', async () => {
+            const { migrator, provider } = createMigrator();
+            provider.historyRows.push({
+                migration_id: '20240101',
+                migration_name: 'first',
+                applied_at: null as unknown as string
+            });
+            migrator.addMigration(new TestMigration('20240101', 'first'));
+
+            await expect(migrator.getPendingMigrations()).rejects.toThrow(
+                'cannot read applied_at'
+            );
         });
     });
 

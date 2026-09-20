@@ -1,5 +1,6 @@
 import { IDatabaseProvider, QueryResult, DatabaseConfig } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
+import { Dialect } from '../../src/core/types';
 
 /**
  * Mock in-memory database provider for testing without actual databases
@@ -16,8 +17,17 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         // Config not needed for mock
     }
 
-    getDialect(): string {
-        return 'mock';
+    /**
+     * Reports a dialect that matches no shipped provider on purpose.
+     *
+     * Every dialect branch in the ORM is either `=== 'mssql'` or a three-way
+     * if/else, so 'mock' deliberately lands on the generic fallback path: the
+     * plain INSERT with no RETURNING or OUTPUT clause. Returning a real
+     * dialect here would change which branch these tests exercise, so the
+     * value stays out-of-band and the cast documents that.
+     */
+    getDialect(): Dialect {
+        return 'mock' as Dialect;
     }
 
     async connect(): Promise<void> {
