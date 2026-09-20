@@ -50,6 +50,20 @@ export type QueryParameter =
     | undefined;
 
 /**
+ * Narrow an entity property (or a value converter's output) to something
+ * bindable as a query parameter.
+ *
+ * Column values are `unknown` once metadata is involved, and a value converter
+ * may return anything, so this is the one place that decision is made. It is a
+ * cast, not a check: the driver is the thing that ultimately validates a bound
+ * value, and rejecting here would break converters that legitimately return a
+ * driver-specific type.
+ */
+export function asQueryParameter(value: unknown): QueryParameter {
+    return value as QueryParameter;
+}
+
+/**
  * A row as it comes off the driver.
  *
  * Column names are not known at compile time, so the index signature is the

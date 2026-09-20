@@ -1,5 +1,6 @@
 import { DbContext } from "./DbContext";
-import { MetadataStorage, RelationType } from "./MetadataStorage";
+import { DatabaseRow, QueryParameter, asQueryParameter } from "./types";
+import { MetadataStorage, RelationType, EntityMetadata, ColumnMetadata } from "./MetadataStorage";
 import { EntityState, snapshotEntity } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
 import { compileQueryFilter, matchesQueryFilter } from "./QueryFilter";
@@ -102,7 +103,7 @@ export class DbSet<T> {
         }
 
         const res = await this.context.query(sql, filter.clauses.length > 0 ? filter.params : undefined);
-        const entities = res.rows.map((row: any) => this.mapRowToEntity(row, true));
+        const entities = res.rows.map((row: DatabaseRow) => this.mapRowToEntity(row, true));
 
         // Predicate-form query filters are evaluated in memory
         if (metadata?.queryFilter) {
@@ -200,7 +201,7 @@ export class DbSet<T> {
         // A converted key is stored in its converted form, so the caller's
         // domain value has to go through the converter before it is bound, the
         // way updateEntity()/deleteEntity() already do it (issue #35).
-        const params: any[] = [convertValueToDb(pkColumn, id)];
+        const params: QueryParameter[] = [convertValueToDb(pkColumn, id)];
 
         // Structured query filters are appended to the SQL WHERE clause
         const filter = compileQueryFilter(metadata, provider, 2);
@@ -225,7 +226,7 @@ export class DbSet<T> {
      * Build the WHERE clause for this entity's structured query filters,
      * or an empty clause when none are configured.
      */
-    private compileFilterWhere(): { where: string; params?: any[] } {
+    private compileFilterWhere(): { where: string; params?: QueryParameter[] } {
         const metadata = this.context.metadata.getEntity(this.entityType);
         const filter = compileQueryFilter(metadata, this.context.getProvider(), 1);
         if (filter.clauses.length === 0) {
@@ -332,7 +333,7 @@ export class DbSet<T> {
      *     .fromSqlRaw('SELECT * FROM users WHERE age > $1', [18])
      *     .toList();
      */
-    fromSqlRaw(sql: string, parameters?: any[]): RawSqlQueryBuilder<T> {
+    fromSqlRaw(sql: string, parameters?: QueryParameter[]): RawSqlQueryBuilder<T> {
         return new RawSqlQueryBuilder(this.entityType, this.context, sql, parameters);
     }
 
@@ -384,8 +385,11 @@ export class DbSet<T> {
      * the row - those rows never touch the identity map.
      * @internal
      */
-    private static resolvePkValue(metadata: any, row: any): { pkColumn: any; pkValue: any } | null {
-        const pkColumn = metadata?.columns.find((c: any) => c.isPrimaryKey);
+    private static resolvePkValue(
+        metadata: EntityMetadata | undefined,
+        row: DatabaseRow
+    ): { pkColumn: ColumnMetadata; pkValue: unknown } | null {
+        const pkColumn = metadata?.columns.find((c) => c.isPrimaryKey);
         if (!pkColumn) return null;
 
         let pkValue = row[pkColumn.columnName];
@@ -457,7 +461,7 @@ interface IncludeInfo {
 
 export class QueryBuilder<T> {
     private conditions: string[] = [];
-    private params: any[] = [];
+    private params: QueryParameter[] = [];
     private noTracking: boolean = false;
     private includes: IncludeInfo[] = [];
     private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
@@ -579,7 +583,7 @@ export class QueryBuilder<T> {
      * Compile this entity's structured query filters (unless disabled) with
      * placeholder numbering continuing after the user-supplied parameters.
      */
-    private compileFilters(): { clauses: string[]; params: any[] } {
+    private compileFilters(): { clauses: string[]; params: QueryParameter[] } {
         if (this.ignoreFilters) {
             return { clauses: [], params: [] };
         }
@@ -663,7 +667,7 @@ export class QueryBuilder<T> {
         const sql = `${selectClause} FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
         const res = await this.context.query(sql, queryParams);
 
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, this.noTracking, this.context)
         );
 
@@ -875,9 +879,9 @@ export class QueryBuilder<T> {
      * here, since it is the same logical read.
      */
     private compileRelatedFilter(
-        relatedMetadata: any,
+        relatedMetadata: EntityMetadata,
         boundParamCount: number
-    ): { clause: string; params: any[] } {
+    ): { clause: string; params: QueryParameter[] } {
         if (this.ignoreFilters) {
             return { clause: '', params: [] };
         }
@@ -921,7 +925,7 @@ export class QueryBuilder<T> {
     private async loadManyToOneRelation(
         entities: T[],
         relationMetadata: any,
-        relatedMetadata: any,
+        relatedMetadata: EntityMetadata,
         relatedPkColumn: string
     ): Promise<void> {
         const foreignKeyColumn = relationMetadata.foreignKeyColumn;
@@ -940,7 +944,7 @@ export class QueryBuilder<T> {
         const res = await this.context.query(sql, [...uniqueFkValues, ...filter.params]);
 
         const relatedEntitiesMap = new Map();
-        res.rows.forEach((row: any) => {
+        res.rows.forEach((row: DatabaseRow) => {
             const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn], relatedEntity);
         });
@@ -956,7 +960,7 @@ export class QueryBuilder<T> {
     private async loadOneToManyRelation(
         entities: T[],
         relationMetadata: any,
-        relatedMetadata: any
+        relatedMetadata: EntityMetadata
     ): Promise<void> {
         const entityMetadata = this.context.metadata.getEntity(this.entityType);
         if (!entityMetadata) return;
@@ -966,7 +970,7 @@ export class QueryBuilder<T> {
 
         // Find the foreign key column on the related entity
         const inverseSide = relationMetadata.inverseSide;
-        const relatedRelation = relatedMetadata.relations.find((r: any) => r.propertyName === inverseSide);
+        const relatedRelation = relatedMetadata.relations.find((r) => r.propertyName === inverseSide);
         if (!relatedRelation || !relatedRelation.foreignKeyColumn) return;
 
         const foreignKeyColumn = relatedRelation.foreignKeyColumn;
@@ -983,7 +987,7 @@ export class QueryBuilder<T> {
         const res = await this.context.query(sql, [...pkValues, ...filter.params]);
 
         const relatedEntitiesMap = new Map<any, any[]>();
-        res.rows.forEach((row: any) => {
+        res.rows.forEach((row: DatabaseRow) => {
             const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             const fkValue = row[foreignKeyColumn];
 
@@ -1004,7 +1008,7 @@ export class QueryBuilder<T> {
     private async loadManyToManyRelation(
         entities: T[],
         relationMetadata: any,
-        relatedMetadata: any
+        relatedMetadata: EntityMetadata
     ): Promise<void> {
         if (!relationMetadata.joinTable) return;
 
@@ -1029,25 +1033,25 @@ export class QueryBuilder<T> {
             return;
         }
 
-        const relatedIds = joinRes.rows.map((r: any) => r[relationMetadata.inverseJoinColumn!]);
+        const relatedIds = joinRes.rows.map((r) => r[relationMetadata.inverseJoinColumn!]);
         const uniqueRelatedIds = [...new Set(relatedIds)];
 
-        const relatedPkColumn = relatedMetadata.columns.find((c: any) => c.isPrimaryKey);
+        const relatedPkColumn = relatedMetadata.columns.find((c) => c.isPrimaryKey);
         if (!relatedPkColumn) return;
 
         const relatedPlaceholders = uniqueRelatedIds.map((_, i) => this.context.getProvider().getParameterPlaceholder(i + 1)).join(', ');
         const relatedFilter = this.compileRelatedFilter(relatedMetadata, uniqueRelatedIds.length);
         const relatedSql = `SELECT * FROM ${relatedMetadata.tableName} WHERE ${relatedPkColumn.columnName} IN (${relatedPlaceholders})${relatedFilter.clause}`;
-        const relatedRes = await this.context.query(relatedSql, [...uniqueRelatedIds, ...relatedFilter.params]);
+        const relatedRes = await this.context.query(relatedSql, [...uniqueRelatedIds.map(asQueryParameter), ...relatedFilter.params]);
 
         const relatedEntitiesMap = new Map();
-        relatedRes.rows.forEach((row: any) => {
+        relatedRes.rows.forEach((row: DatabaseRow) => {
             const relatedEntity = DbSet.mapRowToEntity(relationMetadata.relatedEntity(), row, this.noTracking, this.context);
             relatedEntitiesMap.set(row[relatedPkColumn.columnName], relatedEntity);
         });
 
         const relationMap = new Map<any, any[]>();
-        joinRes.rows.forEach((joinRow: any) => {
+        joinRes.rows.forEach((joinRow: DatabaseRow) => {
             const sourceId = joinRow[relationMetadata.joinColumn!];
             const targetId = joinRow[relationMetadata.inverseJoinColumn!];
 
@@ -1074,7 +1078,7 @@ export class QueryBuilder<T> {
  */
 export class SelectQueryBuilder<T, TResult> {
     private conditions: string[] = [];
-    private params: any[] = [];
+    private params: QueryParameter[] = [];
     private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
     private skipCount?: number;
     private takeCount?: number;
@@ -1101,7 +1105,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Compile this entity's structured query filters (unless disabled) with
      * placeholder numbering continuing after the user-supplied parameters.
      */
-    private compileFilters(): { clauses: string[]; params: any[] } {
+    private compileFilters(): { clauses: string[]; params: QueryParameter[] } {
         if (this.ignoreFilters) {
             return { clauses: [], params: [] };
         }
@@ -1232,7 +1236,7 @@ export class SelectQueryBuilder<T, TResult> {
                 // key is the *column* name, which differs from the property
                 // whenever @Column renames it, so read the row's only value
                 // rather than looking the property up by name (issue #45).
-                return res.rows.map((row: any) => {
+                return res.rows.map((row: DatabaseRow) => {
                     const values = Object.values(row);
                     return (values.length === 1 ? values[0] : row) as TResult;
                 });
@@ -1241,7 +1245,7 @@ export class SelectQueryBuilder<T, TResult> {
             return res.rows as TResult[];
         } else {
             // Map rows to entities first, then apply selector
-            const entities = res.rows.map((row: any) =>
+            const entities = res.rows.map((row: DatabaseRow) =>
                 DbSet.mapRowToEntity(this.entityType, row, false)
             );
             return entities.map(e => this.selector(e));
@@ -1321,7 +1325,7 @@ export class RawSqlQueryBuilder<T> {
         private entityType: new () => T,
         private context: DbContext,
         private sql: string,
-        private parameters?: any[]
+        private parameters?: QueryParameter[]
     ) {}
 
     /**
@@ -1330,7 +1334,7 @@ export class RawSqlQueryBuilder<T> {
     async toList(): Promise<T[]> {
         const res = await this.context.query(this.sql, this.parameters);
 
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, false, this.context)
         );
 
@@ -1346,7 +1350,7 @@ export class RawSqlQueryBuilder<T> {
     async toListNoTracking(): Promise<T[]> {
         const res = await this.context.query(this.sql, this.parameters);
 
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, true)
         );
 
@@ -1392,9 +1396,9 @@ export interface IGrouping<TKey, TElement> {
  */
 export class GroupedQueryBuilder<T, TKey> {
     private conditions: string[] = [];
-    private params: any[] = [];
+    private params: QueryParameter[] = [];
     private havingConditions: string[] = [];
-    private havingParams: any[] = [];
+    private havingParams: QueryParameter[] = [];
     private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[] = [];
     private skipCount?: number;
     private takeCount?: number;
@@ -1527,7 +1531,7 @@ export class GroupedQueryBuilder<T, TKey> {
         const sql = `SELECT * FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
         const res = await this.context.query(sql, this.params);
 
-        const entities = res.rows.map((row: any) =>
+        const entities = res.rows.map((row: DatabaseRow) =>
             DbSet.mapRowToEntity(this.entityType, row, false)
         );
 
@@ -1572,7 +1576,7 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
         private groupByProperty: string,
         private selector: (group: IGrouping<TKey, T>) => TResult,
         private conditions: string[],
-        private params: any[],
+        private params: QueryParameter[],
         private havingConditions: string[],
         private havingParams: any[],
         private orderByColumns: { column: string; direction: 'ASC' | 'DESC' }[],
