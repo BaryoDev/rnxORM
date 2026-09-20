@@ -36,12 +36,45 @@ const NORMALIZE_MAP: Readonly<Record<string, string>> = {
 };
 
 export class MSSQLProvider implements IDatabaseProvider {
-    private pool: mssql.ConnectionPool | null = null;
-    private transaction: mssql.Transaction | null = null;
+    #pool: mssql.ConnectionPool | null = null;
+    #transaction: mssql.Transaction | null = null;
     private config: mssql.config;
 
     getDialect(): Dialect {
         return 'mssql';
+    }
+
+    /**
+     * The options handed to the driver, for tests that assert on TLS and
+     * pool settings without opening a connection.
+     *
+     * These fields are `#private`, so this is the supported way to read them;
+     * tests used to reach in with `provider.poolConfig`, which stopped working
+     * and was never part of any contract.
+     * @internal
+     */
+    get driverConfig(): Readonly<Record<string, unknown>> {
+        return this.config as unknown as Readonly<Record<string, unknown>>;
+    }
+
+    /**
+     * The underlying connection pool, for test teardown.
+     * @internal
+     */
+    get connectionPool(): unknown {
+        return this.#pool;
+    }
+
+    /**
+     * Install a stand-in pool so connect() idempotence can be exercised
+     * without reaching a server.
+     *
+     * The field is `#private`, so a test cannot assign it directly the way it
+     * used to. Kept narrow on purpose: this only exists for that test.
+     * @internal
+     */
+    set connectionPool(pool: unknown) {
+        this.#pool = pool as mssql.ConnectionPool | null;
     }
 
     constructor(config: DatabaseConfig) {
@@ -77,29 +110,29 @@ export class MSSQLProvider implements IDatabaseProvider {
         // Idempotent: a second call used to build another pool and overwrite
         // the field, leaving the first one open with its sockets held until
         // process exit.
-        if (this.pool) return;
+        if (this.#pool) return;
 
         // A dedicated pool, not the module-global mssql.connect() one: two
         // providers with different configs used to share a single global pool,
         // so disconnect() on either closed it for both (issue #38).
-        this.pool = await new mssql.ConnectionPool(this.config).connect();
+        this.#pool = await new mssql.ConnectionPool(this.config).connect();
     }
 
     async disconnect(): Promise<void> {
-        if (this.pool) {
-            await this.pool.close();
-            this.pool = null;
+        if (this.#pool) {
+            await this.#pool.close();
+            this.#pool = null;
         }
     }
 
     async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
-        if (!this.pool) {
+        if (!this.#pool) {
             throw new Error("Not connected to database");
         }
 
-        const request = this.transaction
-            ? new mssql.Request(this.transaction)
-            : this.pool.request();
+        const request = this.#transaction
+            ? new mssql.Request(this.#transaction)
+            : this.#pool.request();
 
         if (params) {
             params.forEach((param, index) => {
@@ -116,37 +149,37 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     async beginTransaction(): Promise<void> {
-        // Overwriting this.transaction orphaned the previous one: never
+        // Overwriting this.#transaction orphaned the previous one: never
         // committed, never rolled back, holding its pooled connection and its
         // locks until the pool timed it out (issue #38).
-        if (this.transaction) {
+        if (this.#transaction) {
             throw new Error(
                 'A transaction is already open on this provider. Nested transactions are ' +
                 'not supported; commit or roll back the current one first, or use a ' +
                 'separate DbContext.'
             );
         }
-        if (!this.pool) await this.connect();
-        this.transaction = new mssql.Transaction(this.pool!);
-        await this.transaction.begin();
+        if (!this.#pool) await this.connect();
+        this.#transaction = new mssql.Transaction(this.#pool!);
+        await this.#transaction.begin();
     }
 
     async commitTransaction(): Promise<void> {
-        if (this.transaction) {
-            await this.transaction.commit();
-            this.transaction = null;
+        if (this.#transaction) {
+            await this.#transaction.commit();
+            this.#transaction = null;
         }
     }
 
     async rollbackTransaction(): Promise<void> {
-        if (this.transaction) {
-            await this.transaction.rollback();
-            this.transaction = null;
+        if (this.#transaction) {
+            await this.#transaction.rollback();
+            this.#transaction = null;
         }
     }
 
     isInTransaction(): boolean {
-        return this.transaction !== null;
+        return this.#transaction !== null;
     }
 
     mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES,

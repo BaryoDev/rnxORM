@@ -127,7 +127,7 @@ export class MetadataStorage {
      */
     private static readonly modelScope = new AsyncLocalStorage<MetadataStorage>();
 
-    private entities: EntityMetadata[] = [];
+    #entities: EntityMetadata[] = [];
 
     private constructor() { }
 
@@ -157,7 +157,7 @@ export class MetadataStorage {
      */
     static createScopedModel(): MetadataStorage {
         const scoped = new MetadataStorage();
-        scoped.entities = MetadataStorage.shared().entities.map(cloneEntity);
+        scoped.#entities = MetadataStorage.shared().#entities.map(cloneEntity);
         return scoped;
     }
 
@@ -176,11 +176,11 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addEntity(target: Function, tableName: string) {
-        let entity = this.entities.find((e) => e.target === target);
+        let entity = this.#entities.find((e) => e.target === target);
         if (entity) {
             entity.tableName = tableName;
         } else {
-            this.entities.push({
+            this.#entities.push({
                 target,
                 tableName,
                 columns: [],
@@ -193,7 +193,7 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addColumn(target: Function, propertyName: string, options: Partial<ColumnMetadata> = {}) {
-        let entity = this.entities.find((e) => e.target === target);
+        let entity = this.#entities.find((e) => e.target === target);
         if (!entity) {
             entity = {
                 target,
@@ -203,7 +203,7 @@ export class MetadataStorage {
                 indexes: [],
                 uniqueConstraints: [],
             };
-            this.entities.push(entity);
+            this.#entities.push(entity);
         }
 
         // Guard against duplicate column registration
@@ -245,7 +245,7 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addRelation(target: Function, relation: RelationMetadata) {
-        let entity = this.entities.find((e) => e.target === target);
+        let entity = this.#entities.find((e) => e.target === target);
         if (!entity) {
             entity = {
                 target,
@@ -255,7 +255,7 @@ export class MetadataStorage {
                 indexes: [],
                 uniqueConstraints: [],
             };
-            this.entities.push(entity);
+            this.#entities.push(entity);
         }
 
         entity.relations.push(relation);
@@ -263,7 +263,7 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addIndex(target: Function, index: IndexMetadata) {
-        let entity = this.entities.find((e) => e.target === target);
+        let entity = this.#entities.find((e) => e.target === target);
         if (!entity) {
             entity = {
                 target,
@@ -273,7 +273,7 @@ export class MetadataStorage {
                 indexes: [],
                 uniqueConstraints: [],
             };
-            this.entities.push(entity);
+            this.#entities.push(entity);
         }
 
         entity.indexes.push(index);
@@ -281,7 +281,7 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     addUniqueConstraint(target: Function, constraint: UniqueConstraintMetadata) {
-        let entity = this.entities.find((e) => e.target === target);
+        let entity = this.#entities.find((e) => e.target === target);
         if (!entity) {
             entity = {
                 target,
@@ -291,7 +291,7 @@ export class MetadataStorage {
                 indexes: [],
                 uniqueConstraints: [],
             };
-            this.entities.push(entity);
+            this.#entities.push(entity);
         }
 
         entity.uniqueConstraints.push(constraint);
@@ -299,11 +299,11 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     getEntity(target: Function): EntityMetadata | undefined {
-        return this.entities.find((e) => e.target === target);
+        return this.#entities.find((e) => e.target === target);
     }
 
     getEntities(): EntityMetadata[] {
-        return this.entities;
+        return this.#entities;
     }
 
     /**

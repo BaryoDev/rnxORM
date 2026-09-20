@@ -119,20 +119,20 @@ export function snapshotEntity<T>(entity: T): Partial<T> {
  * Provides access to tracking information and operations for an entity
  */
 export class EntityEntry<T> {
-    private _state: EntityState;
-    private _originalValues: Partial<T>;
-    private _currentValues: T;
-    private _hasBaseline: boolean;
+    #_state: EntityState;
+    #_originalValues: Partial<T>;
+    #_currentValues: T;
+    #_hasBaseline: boolean;
 
     constructor(
         public readonly entity: T,
         state: EntityState,
         originalValues?: Partial<T>
     ) {
-        this._state = state;
-        this._currentValues = entity;
-        this._hasBaseline = originalValues !== undefined;
-        this._originalValues = originalValues || snapshotEntity(entity);
+        this.#_state = state;
+        this.#_currentValues = entity;
+        this.#_hasBaseline = originalValues !== undefined;
+        this.#_originalValues = originalValues || snapshotEntity(entity);
     }
 
     /**
@@ -144,39 +144,39 @@ export class EntityEntry<T> {
      * entry must write every column rather than none (issue #33).
      */
     get hasBaseline(): boolean {
-        return this._hasBaseline;
+        return this.#_hasBaseline;
     }
 
     /**
      * Gets or sets the state of the entity
      */
     get state(): EntityState {
-        return this._state;
+        return this.#_state;
     }
 
     set state(value: EntityState) {
-        this._state = value;
+        this.#_state = value;
     }
 
     /**
      * Gets the original values of the entity (as loaded from the database)
      */
     get originalValues(): Partial<T> {
-        return { ...this._originalValues };
+        return { ...this.#_originalValues };
     }
 
     /**
      * Gets the current values of the entity
      */
     get currentValues(): T {
-        return this._currentValues;
+        return this.#_currentValues;
     }
 
     /**
      * Check if the entity has been modified
      */
     get isModified(): boolean {
-        if (this._state === EntityState.Modified) {
+        if (this.#_state === EntityState.Modified) {
             return true;
         }
 
@@ -189,9 +189,9 @@ export class EntityEntry<T> {
     getModifiedProperties(): string[] {
         const modified: string[] = [];
 
-        for (const key of comparableProperties(this._currentValues)) {
-            const current = (this._currentValues as any)[key];
-            const original = (this._originalValues as any)[key];
+        for (const key of comparableProperties(this.#_currentValues)) {
+            const current = (this.#_currentValues as any)[key];
+            const original = (this.#_originalValues as any)[key];
             if (!valuesEqual(current, original)) {
                 modified.push(key);
             }
@@ -204,17 +204,17 @@ export class EntityEntry<T> {
      * Reset the entity to its original values
      */
     reload(): void {
-        Object.assign(this._currentValues as any, this._originalValues);
-        this._state = EntityState.Unchanged;
+        Object.assign(this.#_currentValues as any, this.#_originalValues);
+        this.#_state = EntityState.Unchanged;
     }
 
     /**
      * Accept changes (mark current values as original)
      */
     acceptChanges(): void {
-        this._originalValues = snapshotEntity(this._currentValues);
-        this._hasBaseline = true;
-        this._state = EntityState.Unchanged;
+        this.#_originalValues = snapshotEntity(this.#_currentValues);
+        this.#_hasBaseline = true;
+        this.#_state = EntityState.Unchanged;
     }
 
     /**
