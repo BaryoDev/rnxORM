@@ -72,7 +72,6 @@ export class MSSQLProvider implements IDatabaseProvider {
             ? new mssql.Request(this.transaction)
             : this.pool.request();
 
-        // Add parameters
         if (params) {
             params.forEach((param, index) => {
                 request.input(`p${index}`, param);
@@ -122,7 +121,6 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     mapType(tsType: string): string {
-        // Map TypeScript types to SQL Server types
         const typeMap: Record<string, string> = {
             text: 'NVARCHAR(MAX)',
             integer: 'INT',
@@ -222,7 +220,6 @@ export class MSSQLProvider implements IDatabaseProvider {
     normalizeType(dbType: string): string {
         const normalized = dbType.toLowerCase();
 
-        // Map SQL Server types to normalized types
         const typeMap: Record<string, string> = {
             'nvarchar': 'varchar',
             'int': 'integer',

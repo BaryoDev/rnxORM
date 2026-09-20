@@ -442,11 +442,9 @@ export class DbContext {
      */
     private async insertEntity(entity: any, metadata: any, tableName: string): Promise<void> {
         const columns = metadata.columns.filter((c: any) => {
-            // Skip shadow properties
             if (c.isShadowProperty) return true;
 
             const value = entity[c.propertyName];
-            // Skip auto-increment primary keys with undefined/null values
             return !(c.isPrimaryKey && c.isAutoIncrement && (value === undefined || value === null));
         });
 
@@ -454,7 +452,6 @@ export class DbContext {
         const values = columns.map((c: any) => {
             let value = c.isShadowProperty ? c.defaultValue : entity[c.propertyName];
 
-            // Apply value conversion from entity to database
             if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
                 value = c.convertToDb(value);
             }
@@ -493,7 +490,6 @@ export class DbContext {
                 ? pkColumn.convertFromDb(value)
                 : value;
 
-        // Set auto-increment ID if applicable
         if (needsGeneratedId) {
             if (result.insertId !== undefined) {
                 entity[pkColumn.propertyName] = fromDb(result.insertId);
@@ -544,7 +540,6 @@ export class DbContext {
         const values: any[] = [];
         let paramIndex = 1;
 
-        // Find concurrency token columns
         const concurrencyTokens = metadata.columns.filter((c: any) => c.isConcurrencyToken);
 
         for (const propName of modifiedProperties) {
@@ -554,7 +549,6 @@ export class DbContext {
 
                 let value = entity[propName];
 
-                // Apply value conversion from entity to database
                 if (column.hasConversion && column.convertToDb && value !== undefined && value !== null) {
                     value = column.convertToDb(value);
                 }
@@ -604,7 +598,6 @@ export class DbContext {
 
         values.push(pkValue);
 
-        // Build WHERE clause with PK
         let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
 
         // Add concurrency token checks to WHERE clause. A token the entity
@@ -884,7 +877,6 @@ export class DbContext {
                     const alterTableSql = this.provider.generateAddColumnSql(entity.tableName, col);
                     await this.query(alterTableSql);
                 } else {
-                    // Check for type mismatch using provider
                     if (this.provider.isTypeMismatch(col.type, existingType)) {
                         try {
                             const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
@@ -907,19 +899,16 @@ export class DbContext {
                     continue;
                 }
 
-                // Check if data already exists
                 for (const seedItem of entity.seedData) {
                     const pkValue = (seedItem as any)[pkColumn.propertyName];
 
                     if (pkValue !== undefined) {
-                        // Check if record exists
                         const placeholder = this.provider.getParameterPlaceholder(1);
                         const checkSql = `SELECT COUNT(*) as count FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
                         const result = await this.query(checkSql, [pkValue]);
                         const exists = toCount(result.rows[0]?.count) > 0;
 
                         if (!exists) {
-                            // Insert seed data
                             const columns = entity.columns.filter(c =>
                                 (seedItem as any)[c.propertyName] !== undefined || c.isShadowProperty
                             );
@@ -928,7 +917,6 @@ export class DbContext {
                             const values = columns.map(c => {
                                 let value = c.isShadowProperty ? c.defaultValue : (seedItem as any)[c.propertyName];
 
-                                // Apply value conversion from entity to database
                                 if (c.hasConversion && c.convertToDb && value !== undefined && value !== null) {
                                     value = c.convertToDb(value);
                                 }

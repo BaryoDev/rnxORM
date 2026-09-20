@@ -134,7 +134,6 @@ export class MariaDBProvider implements IDatabaseProvider {
     }
 
     mapType(tsType: string): string {
-        // Map TypeScript types to MariaDB types
         const typeMap: Record<string, string> = {
             text: 'TEXT',
             integer: 'INT',
@@ -228,7 +227,6 @@ export class MariaDBProvider implements IDatabaseProvider {
     normalizeType(dbType: string): string {
         const normalized = dbType.toLowerCase();
 
-        // Map MariaDB types to normalized types
         const typeMap: Record<string, string> = {
             'int': 'integer',
             'tinyint': 'boolean',

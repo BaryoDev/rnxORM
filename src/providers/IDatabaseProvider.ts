@@ -48,7 +48,10 @@ export interface DatabaseConfig {
 }
 
 /**
- * Result from database query execution
+ * The result of executing a statement.
+ *
+ * `TRow` defaults to an index-signature row because column names are not known
+ * at compile time; a caller that knows the shape can supply it.
  */
 export interface QueryResult<TRow = DatabaseRow> {
     rows: TRow[];
@@ -88,19 +91,10 @@ export interface IDatabaseProvider {
      */
     query(text: string, params?: QueryParameter[]): Promise<QueryResult>;
 
-    /**
-     * Begin a transaction
-     */
     beginTransaction(): Promise<void>;
 
-    /**
-     * Commit a transaction
-     */
     commitTransaction(): Promise<void>;
 
-    /**
-     * Rollback a transaction
-     */
     rollbackTransaction(): Promise<void>;
 
     /**
@@ -118,14 +112,8 @@ export interface IDatabaseProvider {
      */
     mapType(tsType: string): string;
 
-    /**
-     * Generate CREATE TABLE SQL
-     */
     generateCreateTableSql(entity: EntityMetadata): string;
 
-    /**
-     * Generate ALTER TABLE ADD COLUMN SQL
-     */
     generateAddColumnSql(tableName: string, column: ColumnMetadata): string;
 
     /**
@@ -133,24 +121,12 @@ export interface IDatabaseProvider {
      */
     generateAlterColumnTypeSql(tableName: string, column: ColumnMetadata): string;
 
-    /**
-     * Generate INSERT SQL
-     */
     generateInsertSql(tableName: string, columns: ColumnMetadata[]): string;
 
-    /**
-     * Generate UPDATE SQL
-     */
     generateUpdateSql(tableName: string, columns: ColumnMetadata[], pkColumn: ColumnMetadata): string;
 
-    /**
-     * Generate DELETE SQL
-     */
     generateDeleteSql(tableName: string, pkColumn: ColumnMetadata): string;
 
-    /**
-     * Generate SELECT SQL
-     */
     generateSelectSql(tableName: string, whereClause?: string): string;
 
     /**
@@ -168,9 +144,6 @@ export interface IDatabaseProvider {
      */
     normalizeType(dbType: string): string;
 
-    /**
-     * Get auto-increment/identity column definition
-     */
     getAutoIncrementType(): string;
 
     /**
@@ -178,9 +151,6 @@ export interface IDatabaseProvider {
      */
     isTypeMismatch(entityType: string, dbType: string): boolean;
 
-    /**
-     * Generate ADD FOREIGN KEY constraint SQL
-     */
     generateAddForeignKeySql(
         tableName: string,
         columnName: string,
@@ -190,9 +160,6 @@ export interface IDatabaseProvider {
         onUpdate?: ReferentialAction
     ): string;
 
-    /**
-     * Generate CREATE INDEX SQL
-     */
     generateCreateIndexSql(
         tableName: string,
         indexName: string,
@@ -200,9 +167,6 @@ export interface IDatabaseProvider {
         unique: boolean
     ): string;
 
-    /**
-     * Generate CREATE UNIQUE CONSTRAINT SQL
-     */
     generateCreateUniqueConstraintSql(
         tableName: string,
         constraintName: string,

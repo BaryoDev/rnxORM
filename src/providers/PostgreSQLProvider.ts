@@ -126,7 +126,6 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     }
 
     mapType(tsType: string): string {
-        // Map TypeScript types to PostgreSQL types
         const typeMap: Record<string, string> = {
             text: 'TEXT',
             integer: 'INTEGER',
@@ -218,7 +217,6 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     normalizeType(dbType: string): string {
         const normalized = dbType.toLowerCase();
 
-        // Map PostgreSQL types to normalized types
         const typeMap: Record<string, string> = {
             'character varying': 'varchar',
             'timestamp without time zone': 'timestamp',
