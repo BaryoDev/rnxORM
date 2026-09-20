@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.4.0 (2026-09-20)
 
 ### Fixed
 
@@ -24,6 +24,12 @@
   on a `number` is still an auto-incrementing integer.
   Verified end to end against all three databases in
   `test/integration/NumericColumns.test.ts`.
+- **Migration history reads the `applied_at` column the drivers actually
+  return.** `getAppliedMigrations()` assumed a string and called
+  `new Date()` on it; `pg` returns a `Date`. Both shapes are handled, and a
+  value no driver could produce throws rather than yielding an
+  `Invalid Date` that sorts wrong. The test fake only ever supplied a string,
+  so the `Date` path had no coverage.
 
 ### Changed
 
@@ -46,15 +52,6 @@
   unhandled entity state are compile errors.** Both dispatches gained an
   exhaustiveness check, so adding a `RelationType` or `EntityState` without
   handling it fails the build rather than silently doing nothing.
-
-### Fixed
-
-- **Migration history reads the `applied_at` column the drivers actually
-  return.** `getAppliedMigrations()` assumed a string and called
-  `new Date()` on it; `pg` returns a `Date`. Both shapes are handled, and a
-  value no driver could produce throws rather than yielding an
-  `Invalid Date` that sorts wrong. The test fake only ever supplied a string,
-  so the `Date` path had no coverage.
 
 ### Internal
 
