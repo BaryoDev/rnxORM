@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { DbContext } from '../../src/core/DbContext';
 import { Entity, PrimaryKey, Column, ManyToOne, OneToMany, OneToOne, ManyToMany } from '../../src/decorators';
 import { SqlCaptureProvider } from '../mocks/SqlCaptureProvider';
+import { RelationType } from '../../src/core/MetadataStorage';
 
 @Entity('el_authors')
 class ElAuthor {
@@ -229,5 +230,29 @@ describe('eager loading with include()', () => {
     it('throws on include() of an unknown relation', () => {
         const { db } = makeDb();
         expect(() => db.set(ElPost).include((p: any) => p.reviews)).toThrow(/Relation reviews not found/);
+    });
+
+    // ownsMany() is a public ModelBuilder API that records an OwnsMany
+    // relation, but no loader implements one. include() used to fall off the
+    // end of the relation-type branch and return with the navigation left
+    // undefined, so a configured owned collection came back empty with no
+    // error anywhere.
+    it('says owned types are unsupported rather than returning nothing', async () => {
+        const { db, provider } = makeDb();
+
+        const metadata = db.metadata.getEntity(ElAuthor)!;
+        const original = [...metadata.relations];
+        const posts = metadata.relations.find(r => r.propertyName === 'posts')!;
+        posts.relationType = RelationType.OwnsMany;
+
+        try {
+            provider.nextResult({ rows: [{ id: 1, name: 'Ann' }], rowCount: 1 });
+            await expect(
+                db.set(ElAuthor).include(a => a.posts).toList()
+            ).rejects.toThrow(/owned types are not supported by eager loading/);
+        } finally {
+            metadata.relations = original;
+            posts.relationType = RelationType.OneToMany;
+        }
     });
 });

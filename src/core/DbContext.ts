@@ -1,5 +1,5 @@
 import { DbSet } from "./DbSet";
-import { DatabaseRow, EntityLike, QueryParameter, asQueryParameter } from "./types";
+import { DatabaseRow, EntityLike, QueryParameter, asQueryParameter, assertNever } from "./types";
 import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
 import { RelationType, MetadataStorage, EntityMetadata, ColumnMetadata } from "./MetadataStorage";
 import { toCount, toExactNumber } from "./Numerics";
@@ -248,6 +248,15 @@ export class DbContext {
                         await this.deleteEntity(entity, entry, metadata, tableName, pkColumn);
                         savedCount++;
                         break;
+
+                    case EntityState.Unchanged:
+                    case EntityState.Detached:
+                        // getChangedEntries() filters these out, so reaching
+                        // here means that filter and this switch disagree.
+                        break;
+
+                    default:
+                        assertNever(entry.state, 'saveChanges');
                 }
             }
 

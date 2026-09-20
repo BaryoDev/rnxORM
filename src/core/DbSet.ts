@@ -1,6 +1,6 @@
 import { DbContext } from "./DbContext";
 import { QueryState } from "./QueryState";
-import { DatabaseRow, QueryParameter, asQueryParameter } from "./types";
+import { DatabaseRow, QueryParameter, asQueryParameter, assertNever } from "./types";
 import { MetadataStorage, RelationType, EntityMetadata, ColumnMetadata } from "./MetadataStorage";
 import { EntityState, snapshotEntity } from "./EntityEntry";
 import { capture, captureAggregates, resolveColumn, resolvePropertyName, AggregateFn, AggregateSelectorEntry } from "./expressions/PropertyCapture";
@@ -904,12 +904,33 @@ export class QueryBuilder<T> {
             const relatedPkColumn = relatedMetadata.columns.find(c => c.isPrimaryKey);
             if (!relatedPkColumn) continue;
 
-            if (relationMetadata.relationType === RelationType.ManyToOne || relationMetadata.relationType === RelationType.OneToOne) {
-                await this.loadManyToOneRelation(entities, relationMetadata, relatedMetadata, relatedPkColumn.columnName);
-            } else if (relationMetadata.relationType === RelationType.OneToMany) {
-                await this.loadOneToManyRelation(entities, relationMetadata, relatedMetadata);
-            } else if (relationMetadata.relationType === RelationType.ManyToMany) {
-                await this.loadManyToManyRelation(entities, relationMetadata, relatedMetadata);
+            switch (relationMetadata.relationType) {
+                case RelationType.ManyToOne:
+                case RelationType.OneToOne:
+                    await this.loadManyToOneRelation(entities, relationMetadata, relatedMetadata, relatedPkColumn.columnName);
+                    break;
+
+                case RelationType.OneToMany:
+                    await this.loadOneToManyRelation(entities, relationMetadata, relatedMetadata);
+                    break;
+
+                case RelationType.ManyToMany:
+                    await this.loadManyToManyRelation(entities, relationMetadata, relatedMetadata);
+                    break;
+
+                case RelationType.OwnsOne:
+                case RelationType.OwnsMany:
+                    // ModelBuilder can declare these, but no loader implements
+                    // them: include() used to return silently with the
+                    // navigation left undefined. Saying so beats a caller
+                    // debugging an empty collection.
+                    throw new Error(
+                        `include('${include.propertyName}'): owned types are not supported by eager loading yet. ` +
+                        `Map the relation as one-to-many or many-to-one instead.`
+                    );
+
+                default:
+                    assertNever(relationMetadata.relationType, 'loadIncludes');
             }
         }
     }

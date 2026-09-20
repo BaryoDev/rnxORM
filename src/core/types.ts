@@ -80,5 +80,17 @@ export type DatabaseRow = Record<string, unknown>;
  */
 export type EntityLike = Record<string, unknown>;
 
+/**
+ * Mark a branch the type system believes is unreachable.
+ *
+ * Give this the switch subject in a `default` and the compiler rejects the
+ * call if any case is unhandled, naming the one that was missed. Adding a
+ * state or a relation type then fails to build rather than silently doing
+ * nothing at runtime.
+ */
+export function assertNever(value: never, context: string): never {
+    throw new Error(`${context}: unhandled case ${String(value)}`);
+}
+
 /** Constructor of an entity class, as stored in metadata and used as a map key. */
 export type EntityConstructor<T = unknown> = new (...args: never[]) => T;
