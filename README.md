@@ -345,9 +345,22 @@ rnxORM automatically maps TypeScript types to database-specific types. You can o
 | TypeScript Type | PostgreSQL | SQL Server | MariaDB/MySQL |
 |----------------|------------|------------|---------------|
 | `string`       | `TEXT`     | `NVARCHAR(MAX)` | `TEXT`   |
-| `number`       | `INTEGER`  | `INT`      | `INT`         |
+| `number`       | `DECIMAL(18,2)` | `DECIMAL(18,2)` | `DECIMAL(18,2)` |
 | `boolean`      | `BOOLEAN`  | `BIT`      | `TINYINT(1)`  |
 | `Date`         | `TIMESTAMP`| `DATETIME2`| `DATETIME`    |
+
+`number` maps to a decimal rather than an integer because TypeScript has one
+numeric type where SQL has several, and guessing integer loses data: MariaDB
+stores `19.99` into an `INT` column as `20`, and PostgreSQL rejects it. For a
+whole-number column, say so explicitly:
+
+```typescript
+@Column({ type: "integer" })
+quantity!: number;
+```
+
+Primary keys are unaffected: `@PrimaryKey()` on a `number` is still an
+auto-incrementing integer.
 
 ### Overriding Types
 

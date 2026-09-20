@@ -45,8 +45,16 @@ describe('type mapping (documented in README "Type Mapping")', () => {
     it('passes a parameterized decimal through where the dialect allows it', () => {
         expect(mssql.mapType('decimal(18,4)')).toBe('DECIMAL(18,4)');
         expect(mariadb.mapType('decimal(18,4)')).toBe('DECIMAL(18,4)');
-        // PostgreSQL has no passthrough for decimal, so the table wins.
-        expect(postgres.mapType('decimal')).toBe('DECIMAL');
+        expect(postgres.mapType('decimal(18,4)')).toBe('DECIMAL(18,4)');
+    });
+
+    // Bare `decimal` used to return `DECIMAL`, which means (10,0) on MariaDB
+    // and MySQL and dropped the fractional part (issue #60). It now carries a
+    // scale, and the same scale on every dialect.
+    it('gives bare decimal an explicit scale, the same one everywhere', () => {
+        expect(postgres.mapType('decimal')).toBe('DECIMAL(18,2)');
+        expect(mssql.mapType('decimal')).toBe('DECIMAL(18,2)');
+        expect(mariadb.mapType('decimal')).toBe('DECIMAL(18,2)');
     });
 
     it('uppercases a type it does not know', () => {
