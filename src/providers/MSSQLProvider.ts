@@ -2,10 +2,39 @@ import * as mssql from "mssql";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
+import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
 
 /**
  * Microsoft SQL Server database provider implementation
  */
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'NVARCHAR(MAX)',
+    integer: 'INT',
+    boolean: 'BIT',
+    timestamp: 'DATETIME2',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL(18,2)',
+    float: 'REAL',
+    double: 'FLOAT',
+    bigint: 'BIGINT',
+    // SQL Server 2016+ supports JSON functions over NVARCHAR
+    json: 'NVARCHAR(MAX)',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar', 'nvarchar', 'decimal'] as const;
+
+/** Database type names that normalize to a different canonical name. */
+const NORMALIZE_MAP: Readonly<Record<string, string>> = {
+    'nvarchar': 'varchar',
+    'int': 'integer',
+    'bit': 'boolean',
+    'datetime2': 'timestamp',
+    'datetime': 'timestamp',
+};
+
 export class MSSQLProvider implements IDatabaseProvider {
     private pool: mssql.ConnectionPool | null = null;
     private transaction: mssql.Transaction | null = null;
@@ -120,33 +149,8 @@ export class MSSQLProvider implements IDatabaseProvider {
         return this.transaction !== null;
     }
 
-    mapType(tsType: string): string {
-        const typeMap: Record<string, string> = {
-            text: 'NVARCHAR(MAX)',
-            integer: 'INT',
-            boolean: 'BIT',
-            timestamp: 'DATETIME2',
-            date: 'DATE',
-            time: 'TIME',
-            decimal: 'DECIMAL(18,2)',
-            float: 'REAL',
-            double: 'FLOAT',
-            bigint: 'BIGINT',
-            json: 'NVARCHAR(MAX)', // SQL Server 2016+ supports JSON functions
-        };
-
-        const lowerType = tsType.toLowerCase();
-
-        // Check if it's a custom type (e.g., varchar(50))
-        if (lowerType.startsWith('varchar')) {
-            return 'N' + tsType.toUpperCase(); // Use NVARCHAR for SQL Server
-        }
-        if (lowerType.startsWith('nvarchar') || lowerType.startsWith('decimal')) {
-            return tsType.toUpperCase();
-        }
-
-        return typeMap[lowerType] || tsType.toUpperCase();
-    }
+    mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES,
+    (upper, lower) => (lower.startsWith('varchar') ? 'N' + upper : upper));
 
     generateCreateTableSql(entity: EntityMetadata): string {
         const columns = entity.columns.map((col) => {
@@ -217,19 +221,7 @@ export class MSSQLProvider implements IDatabaseProvider {
         };
     }
 
-    normalizeType(dbType: string): string {
-        const normalized = dbType.toLowerCase();
-
-        const typeMap: Record<string, string> = {
-            'nvarchar': 'varchar',
-            'int': 'integer',
-            'bit': 'boolean',
-            'datetime2': 'timestamp',
-            'datetime': 'timestamp',
-        };
-
-        return typeMap[normalized] || normalized;
-    }
+    normalizeType = createTypeNormalizer(NORMALIZE_MAP);
 
     getAutoIncrementType(): string {
         return 'IDENTITY(1,1)';

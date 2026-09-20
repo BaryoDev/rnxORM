@@ -2,10 +2,37 @@ import { Pool, PoolClient } from "pg";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
+import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
 
 /**
  * PostgreSQL database provider implementation
  */
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'TEXT',
+    integer: 'INTEGER',
+    boolean: 'BOOLEAN',
+    timestamp: 'TIMESTAMP',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL',
+    float: 'REAL',
+    double: 'DOUBLE PRECISION',
+    bigint: 'BIGINT',
+    json: 'JSONB',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar'] as const;
+
+/** Database type names that normalize to a different canonical name. */
+const NORMALIZE_MAP: Readonly<Record<string, string>> = {
+    'character varying': 'varchar',
+    'timestamp without time zone': 'timestamp',
+    'timestamp with time zone': 'timestamp',
+    'double precision': 'double',
+};
+
 export class PostgreSQLProvider implements IDatabaseProvider {
     private pool: Pool;
     private client: PoolClient | null = null;
@@ -125,29 +152,7 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         }
     }
 
-    mapType(tsType: string): string {
-        const typeMap: Record<string, string> = {
-            text: 'TEXT',
-            integer: 'INTEGER',
-            boolean: 'BOOLEAN',
-            timestamp: 'TIMESTAMP',
-            date: 'DATE',
-            time: 'TIME',
-            decimal: 'DECIMAL',
-            float: 'REAL',
-            double: 'DOUBLE PRECISION',
-            bigint: 'BIGINT',
-            json: 'JSONB',
-        };
-
-        // Check if it's a custom type (e.g., varchar(50))
-        const lowerType = tsType.toLowerCase();
-        if (lowerType.startsWith('varchar')) {
-            return tsType.toUpperCase();
-        }
-
-        return typeMap[lowerType] || tsType.toUpperCase();
-    }
+    mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);
 
     generateCreateTableSql(entity: EntityMetadata): string {
         const columns = entity.columns.map((col) => {
@@ -214,18 +219,7 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         };
     }
 
-    normalizeType(dbType: string): string {
-        const normalized = dbType.toLowerCase();
-
-        const typeMap: Record<string, string> = {
-            'character varying': 'varchar',
-            'timestamp without time zone': 'timestamp',
-            'timestamp with time zone': 'timestamp',
-            'double precision': 'double',
-        };
-
-        return typeMap[normalized] || normalized;
-    }
+    normalizeType = createTypeNormalizer(NORMALIZE_MAP);
 
     getAutoIncrementType(): string {
         return 'SERIAL';

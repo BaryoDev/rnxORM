@@ -2,11 +2,38 @@ import * as mariadb from "mariadb";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
+import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
 import { toExactNumber } from "../core/Numerics";
 
 /**
  * MariaDB database provider implementation
  */
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'TEXT',
+    integer: 'INT',
+    boolean: 'TINYINT(1)',
+    timestamp: 'DATETIME',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL(10,2)',
+    float: 'FLOAT',
+    double: 'DOUBLE',
+    bigint: 'BIGINT',
+    json: 'JSON',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar', 'decimal'] as const;
+
+/** Database type names that normalize to a different canonical name. */
+const NORMALIZE_MAP: Readonly<Record<string, string>> = {
+    'int': 'integer',
+    'tinyint': 'boolean',
+    'datetime': 'timestamp',
+    'varchar': 'varchar',
+};
+
 export class MariaDBProvider implements IDatabaseProvider {
     private pool: mariadb.Pool;
     private connection: mariadb.PoolConnection | null = null;
@@ -133,30 +160,7 @@ export class MariaDBProvider implements IDatabaseProvider {
         }
     }
 
-    mapType(tsType: string): string {
-        const typeMap: Record<string, string> = {
-            text: 'TEXT',
-            integer: 'INT',
-            boolean: 'TINYINT(1)',
-            timestamp: 'DATETIME',
-            date: 'DATE',
-            time: 'TIME',
-            decimal: 'DECIMAL(10,2)',
-            float: 'FLOAT',
-            double: 'DOUBLE',
-            bigint: 'BIGINT',
-            json: 'JSON',
-        };
-
-        const lowerType = tsType.toLowerCase();
-
-        // Check if it's a custom type (e.g., varchar(50))
-        if (lowerType.startsWith('varchar') || lowerType.startsWith('decimal')) {
-            return tsType.toUpperCase();
-        }
-
-        return typeMap[lowerType] || tsType.toUpperCase();
-    }
+    mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);
 
     generateCreateTableSql(entity: EntityMetadata): string {
         const columns = entity.columns.map((col) => {
@@ -224,18 +228,7 @@ export class MariaDBProvider implements IDatabaseProvider {
         };
     }
 
-    normalizeType(dbType: string): string {
-        const normalized = dbType.toLowerCase();
-
-        const typeMap: Record<string, string> = {
-            'int': 'integer',
-            'tinyint': 'boolean',
-            'datetime': 'timestamp',
-            'varchar': 'varchar',
-        };
-
-        return typeMap[normalized] || normalized;
-    }
+    normalizeType = createTypeNormalizer(NORMALIZE_MAP);
 
     getAutoIncrementType(): string {
         return 'AUTO_INCREMENT';
