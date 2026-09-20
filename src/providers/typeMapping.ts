@@ -50,6 +50,14 @@ export function createTypeMapper(
     return (tsType: string): string => {
         const lowerType = tsType.toLowerCase();
 
+        // Exact names win over the passthrough prefixes. `decimal` used to
+        // match the `decimal` prefix and return a bare DECIMAL, which means
+        // (10,0) on MariaDB and MySQL: the fractional part was dropped and the
+        // configured precision in the map below was unreachable (issue #60).
+        const exact = typeMap[lowerType as ColumnType];
+        if (exact !== undefined) return exact;
+
+        // Parameterized types carry their own precision, so they pass through.
         for (const prefix of passthrough) {
             if (lowerType.startsWith(prefix)) {
                 const upper = tsType.toUpperCase();
@@ -57,7 +65,7 @@ export function createTypeMapper(
             }
         }
 
-        return typeMap[lowerType as ColumnType] ?? tsType.toUpperCase();
+        return tsType.toUpperCase();
     };
 }
 

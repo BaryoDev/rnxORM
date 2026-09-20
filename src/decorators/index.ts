@@ -22,7 +22,14 @@ export function Column(options: ColumnOptions = {}) {
 
         if (!type && designType) {
             if (designType === String) type = "text";
-            else if (designType === Number) type = "integer";
+            // TypeScript has one `number` where C# has int, decimal and
+            // double, so an inferred numeric column has to guess. It used to
+            // guess `integer`, which loses fractional values: PostgreSQL
+            // rejects 19.99 outright, and the other two accept it into an
+            // integer column (issue #51). Guessing decimal is lossless for
+            // whole and fractional values alike; an author who wants a
+            // narrower column still says `@Column({ type: 'integer' })`.
+            else if (designType === Number) type = "decimal";
             else if (designType === Boolean) type = "boolean";
             else if (designType === Date) type = "timestamp";
         }

@@ -1,6 +1,35 @@
 # Changelog
 
-## Unreleased
+## 2.4.0 (2026-09-20)
+
+### Fixed
+
+- **A numeric column no longer silently truncates** (issues #51, #60).
+  `@Column() price!: number` mapped to `INTEGER`, because TypeScript has one
+  numeric type where SQL has several and the inferred default guessed the
+  lossy one. Storing `19.99` meant MariaDB wrote `20`, SQL Server truncated
+  to `19`, and PostgreSQL rejected the parameter outright. An inferred
+  numeric column is now `decimal`.
+  Separately, `mapType('decimal')` returned a bare `DECIMAL` because the
+  passthrough prefix check ran before the table lookup, so each provider's
+  configured precision was unreachable. A bare `DECIMAL` means `(10,0)` on
+  MariaDB and MySQL, which drops the fractional part, so an explicit
+  `type: 'decimal'` truncated too. Exact type names now win over the
+  passthrough prefixes, and all three providers agree on `DECIMAL(18,2)`
+  rather than disagreeing three ways.
+  **Behavior change:** `CREATE TABLE` for an entity with an inferred numeric
+  column now emits `DECIMAL(18,2)` where it emitted an integer type. Existing
+  tables are not migrated. For a whole-number column, declare
+  `@Column({ type: 'integer' })`. Primary keys are unchanged: `@PrimaryKey()`
+  on a `number` is still an auto-incrementing integer.
+  Verified end to end against all three databases in
+  `test/integration/NumericColumns.test.ts`.
+- **Migration history reads the `applied_at` column the drivers actually
+  return.** `getAppliedMigrations()` assumed a string and called
+  `new Date()` on it; `pg` returns a `Date`. Both shapes are handled, and a
+  value no driver could produce throws rather than yielding an
+  `Invalid Date` that sorts wrong. The test fake only ever supplied a string,
+  so the `Date` path had no coverage.
 
 ### Changed
 
@@ -23,15 +52,6 @@
   unhandled entity state are compile errors.** Both dispatches gained an
   exhaustiveness check, so adding a `RelationType` or `EntityState` without
   handling it fails the build rather than silently doing nothing.
-
-### Fixed
-
-- **Migration history reads the `applied_at` column the drivers actually
-  return.** `getAppliedMigrations()` assumed a string and called
-  `new Date()` on it; `pg` returns a `Date`. Both shapes are handled, and a
-  value no driver could produce throws rather than yielding an
-  `Invalid Date` that sorts wrong. The test fake only ever supplied a string,
-  so the `Date` path had no coverage.
 
 ### Internal
 

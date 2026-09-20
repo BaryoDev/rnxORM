@@ -15,7 +15,7 @@ const TYPE_MAP = {
     timestamp: 'TIMESTAMP',
     date: 'DATE',
     time: 'TIME',
-    decimal: 'DECIMAL',
+    decimal: 'DECIMAL(18,2)',
     float: 'REAL',
     double: 'DOUBLE PRECISION',
     bigint: 'BIGINT',
