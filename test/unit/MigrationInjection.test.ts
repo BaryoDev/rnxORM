@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { IDatabaseProvider, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
+import { Dialect } from '../../src/core/types';
 
 /**
  * MigrationBuilder concatenated every argument into DDL, including string
@@ -13,9 +14,9 @@ import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 class RecordingProvider implements IDatabaseProvider {
     public queries: Array<{ sql: string; params?: any[] }> = [];
 
-    constructor(private dialect: string) {}
+    constructor(private dialect: Dialect) {}
 
-    getDialect(): string { return this.dialect; }
+    getDialect(): Dialect { return this.dialect; }
     async connect(): Promise<void> {}
     async disconnect(): Promise<void> {}
     async query(text: string, params?: any[]): Promise<QueryResult> {
@@ -45,7 +46,7 @@ class RecordingProvider implements IDatabaseProvider {
     generateCreateJoinTableSql(): string { return ''; }
 }
 
-function builderFor(dialect = 'postgresql') {
+function builderFor(dialect: Dialect = 'postgresql') {
     const provider = new RecordingProvider(dialect);
     return { builder: new MigrationBuilder(provider), provider };
 }

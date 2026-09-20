@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from "pg";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { Dialect, QueryParameter } from "../core/types";
 
 /**
  * PostgreSQL database provider implementation
@@ -18,7 +19,7 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     private transactionOpen = false;
     private clientOwnedByTransaction = false;
 
-    getDialect(): string {
+    getDialect(): Dialect {
         return 'postgresql';
     }
 
@@ -55,7 +56,7 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         await this.pool.end();
     }
 
-    async query(text: string, params?: any[]): Promise<QueryResult> {
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
         const result = this.client
             ? await this.client.query(text, params)
             : await this.pool.query(text, params);

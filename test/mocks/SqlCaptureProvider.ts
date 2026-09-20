@@ -1,7 +1,9 @@
 import { IDatabaseProvider, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
+import { Dialect } from '../../src/core/types';
 
-export type CaptureDialect = 'postgresql' | 'mssql' | 'mariadb';
+/** Alias of the shipped Dialect union, kept so existing tests keep their import. */
+export type CaptureDialect = Dialect;
 
 /**
  * Test provider that records every SQL statement (and its parameters) passed
@@ -45,7 +47,7 @@ export class SqlCaptureProvider implements IDatabaseProvider {
         this.transactionDepth = 0;
     }
 
-    getDialect(): string {
+    getDialect(): Dialect {
         return this.dialect;
     }
 

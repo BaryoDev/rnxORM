@@ -1,4 +1,10 @@
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import {
+    DatabaseRow,
+    Dialect,
+    QueryParameter,
+    ReferentialAction,
+} from "../core/types";
 
 /**
  * Configuration for database connection
@@ -44,8 +50,8 @@ export interface DatabaseConfig {
 /**
  * Result from database query execution
  */
-export interface QueryResult {
-    rows: any[];
+export interface QueryResult<TRow = DatabaseRow> {
+    rows: TRow[];
     rowCount: number;
     /**
      * Generated key for an auto-increment primary key.
@@ -65,7 +71,7 @@ export interface IDatabaseProvider {
      * Get the SQL dialect identifier for this provider.
      * Used for provider-specific SQL generation (e.g., pagination, DDL).
      */
-    getDialect(): string;
+    getDialect(): Dialect;
 
     /**
      * Connect to the database
@@ -80,7 +86,7 @@ export interface IDatabaseProvider {
     /**
      * Execute a SQL query
      */
-    query(text: string, params?: any[]): Promise<QueryResult>;
+    query(text: string, params?: QueryParameter[]): Promise<QueryResult>;
 
     /**
      * Begin a transaction
@@ -155,7 +161,7 @@ export interface IDatabaseProvider {
     /**
      * Get query to fetch existing columns from database schema
      */
-    getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] };
+    getSchemaColumnsQuery(tableName: string): { sql: string; params: QueryParameter[] };
 
     /**
      * Normalize database type for comparison
@@ -180,8 +186,8 @@ export interface IDatabaseProvider {
         columnName: string,
         referencedTable: string,
         referencedColumn: string,
-        onDelete?: string,
-        onUpdate?: string
+        onDelete?: ReferentialAction,
+        onUpdate?: ReferentialAction
     ): string;
 
     /**
@@ -212,7 +218,7 @@ export interface IDatabaseProvider {
         column2: string,
         referencedTable1: string,
         referencedTable2: string,
-        onDelete?: string,
+        onDelete?: ReferentialAction,
         referencedColumn1?: string,
         referencedColumn2?: string
     ): string;

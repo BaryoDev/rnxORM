@@ -1,6 +1,7 @@
 import * as mssql from "mssql";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { Dialect, QueryParameter } from "../core/types";
 
 /**
  * Microsoft SQL Server database provider implementation
@@ -10,7 +11,7 @@ export class MSSQLProvider implements IDatabaseProvider {
     private transaction: mssql.Transaction | null = null;
     private config: mssql.config;
 
-    getDialect(): string {
+    getDialect(): Dialect {
         return 'mssql';
     }
 
@@ -62,7 +63,7 @@ export class MSSQLProvider implements IDatabaseProvider {
         }
     }
 
-    async query(text: string, params?: any[]): Promise<QueryResult> {
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
         if (!this.pool) {
             throw new Error("Not connected to database");
         }

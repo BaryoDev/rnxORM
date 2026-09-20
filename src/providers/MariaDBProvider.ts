@@ -1,6 +1,7 @@
 import * as mariadb from "mariadb";
 import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { Dialect, QueryParameter } from "../core/types";
 import { toExactNumber } from "../core/Numerics";
 
 /**
@@ -13,7 +14,7 @@ export class MariaDBProvider implements IDatabaseProvider {
     /** Whether the transaction acquired the connection it runs on. */
     private connectionOwnedByTransaction = false;
 
-    getDialect(): string {
+    getDialect(): Dialect {
         return 'mariadb';
     }
 
@@ -47,7 +48,7 @@ export class MariaDBProvider implements IDatabaseProvider {
         await this.pool.end();
     }
 
-    async query(text: string, params?: any[]): Promise<QueryResult> {
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
         const conn = this.connection || await this.pool.getConnection();
 
         try {
