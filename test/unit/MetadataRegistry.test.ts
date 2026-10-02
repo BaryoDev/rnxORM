@@ -5,6 +5,10 @@ import { Entity, PrimaryKey, Column } from '../../src/decorators';
 import { SqlCaptureProvider } from '../mocks/SqlCaptureProvider';
 import { MockDatabaseProvider } from '../mocks/MockDatabaseProvider';
 
+afterEach(() => {
+    MetadataStorage.reset();
+});
+
 /**
  * The decorator registry was module-level state. Two copies of the package (a
  * nested node_modules, or src next to dist) meant two registries, and a class
@@ -127,6 +131,34 @@ describe('a re-evaluated entity class replaces its predecessor (#53)', () => {
         evaluateModule();
 
         expect(MetadataStorage.shared().getEntity(old)?.tableName).toBe('wm_users');
+    });
+
+    it('still resolves the old class in a context model', () => {
+        const old = evaluateModule();
+        evaluateModule();
+
+        expect(MetadataStorage.createScopedModel().getEntity(old)?.tableName).toBe('wm_users');
+    });
+
+    it('drops superseded registrations from what a context copies', () => {
+        for (let i = 0; i < 20; i++) evaluateModule();
+
+        MetadataStorage.createScopedModel();
+
+        // The raw list, which is what every new context clones. getEntities()
+        // already hides the predecessors, so it cannot show the growth.
+        const raw: { tableName: string }[] = (globalThis as any)[Symbol.for('rnxorm.metadata.v1')].entities;
+        expect(raw.filter(e => e.tableName === 'wm_users').length).toBe(1);
+    });
+
+    it('drops them for a context that reads the shared registry directly', () => {
+        for (let i = 0; i < 20; i++) evaluateModule();
+
+        // A bare DbContext has no scoped model. It lists the shared registry.
+        MetadataStorage.shared().getEntities();
+
+        const raw: { tableName: string }[] = (globalThis as any)[Symbol.for('rnxorm.metadata.v1')].entities;
+        expect(raw.filter(e => e.tableName === 'wm_users').length).toBe(1);
     });
 
     it('creates the table once', async () => {

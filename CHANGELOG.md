@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **One metadata registry per process** (issue #53). A second copy of the
+  package no longer gets its own decorator registry, and a class re-evaluated
+  in watch mode no longer makes `ensureCreated()` create its table twice.
+
 ## 2.4.0 (2026-09-20)
 
 ### Fixed
