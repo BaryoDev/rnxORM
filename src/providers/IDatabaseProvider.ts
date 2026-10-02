@@ -2,6 +2,7 @@ import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import {
     DatabaseRow,
     Dialect,
+    ExactNumeric,
     QueryParameter,
     ReferentialAction,
 } from "../core/types";
@@ -62,7 +63,7 @@ export interface QueryResult<TRow = DatabaseRow> {
      * A string when the value is outside the range a JS number represents
      * exactly, so a key above 2^53 is not silently rounded (issue #39).
      */
-    insertId?: number | string;
+    insertId?: ExactNumeric;
 }
 
 /**

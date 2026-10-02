@@ -1,6 +1,6 @@
 import { DbContext } from "../DbContext";
 import { QueryState } from "../QueryState";
-import { DatabaseRow, QueryParameter, asQueryParameter, assertNever } from "../types";
+import { DatabaseRow, QueryParameter, asQueryParameter, assertNever, ExactNumeric } from "../types";
 import { RelationType, EntityMetadata } from "../MetadataStorage";
 import { resolveColumn, resolvePropertyName } from "../expressions/PropertyCapture";
 import { compileQueryFilter } from "../QueryFilter";
@@ -316,7 +316,7 @@ export class QueryBuilder<T> {
      * Sum a numeric property across filtered results
      * @param selector Property selector function
      */
-    async sum(selector: (entity: T) => number): Promise<number> {
+    async sum(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'sum');
 
         const filter = this.compileFilters();
@@ -331,7 +331,7 @@ export class QueryBuilder<T> {
      * Calculate average of a numeric property across filtered results
      * @param selector Property selector function
      */
-    async average(selector: (entity: T) => number): Promise<number> {
+    async average(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'average');
 
         const filter = this.compileFilters();
