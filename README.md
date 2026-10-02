@@ -705,6 +705,12 @@ const totalAge = await users.sum(u => u.age);
 // Average
 const avgAge = await users.average(u => u.age);
 
+// sum() and average() return ExactNumeric (number | string). The value is a
+// number when a JS number holds it exactly, and the database's own digits as
+// a string when it does not, so narrow before doing arithmetic.
+const revenue = await orders.sum(o => o.amount);
+const label = typeof revenue === 'number' ? revenue.toFixed(2) : revenue;
+
 // Min/Max
 const youngest = await users.min(u => u.age);
 const oldest = await users.max(u => u.age);
