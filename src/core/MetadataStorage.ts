@@ -108,10 +108,83 @@ export interface EntityMetadata {
     isKeyless?: boolean; // Is this a keyless entity type (for views, query types)
 }
 
+/**
+ * Decorator registrations and the active-model scope live on `globalThis`
+ * under a `Symbol.for()` key, not in module state. Two copies of the package
+ * (a nested `node_modules`, or `src` next to `dist`) are two copies of this
+ * module, and with module state decorators registered in one copy while
+ * `DbSet` read the other (issue #53). The registrations are plain data, so
+ * each copy wraps them in its own `MetadataStorage`. The scope does hold
+ * instances, and a copy only calls another copy's instance through its public
+ * methods. The key carries a version for the day either changes shape.
+ */
+interface EntityStore {
+    entities: EntityMetadata[];
+}
+
+interface Registry extends EntityStore {
+    modelScope: AsyncLocalStorage<MetadataStorage>;
+    /**
+     * Registrations a reload superseded. Held weakly, so one lasts only as
+     * long as something still references its class.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    retired: WeakMap<Function, EntityMetadata>;
+}
+
+const REGISTRY_KEY = Symbol.for("rnxorm.metadata.v1");
+
+function registry(): Registry {
+    const host = globalThis as { [REGISTRY_KEY]?: Registry };
+    return (host[REGISTRY_KEY] ??= {
+        entities: [],
+        modelScope: new AsyncLocalStorage<MetadataStorage>(),
+        retired: new WeakMap(),
+    });
+}
+
+/**
+ * A class evaluated again (a watch-mode reload) is a new constructor with the
+ * same name and table, and its predecessor stays registered. The two are
+ * recognised as one entity by this key.
+ */
+function reloadKey(entity: EntityMetadata): string {
+    return `${entity.target.name}\u0000${entity.tableName}`;
+}
+
+/** The registrations no later registration has superseded. */
+function currentOnly(entities: EntityMetadata[]): EntityMetadata[] {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    const newest = new Map<string, Function>();
+    for (const entity of entities) {
+        newest.set(reloadKey(entity), entity.target);
+    }
+    // An anonymous class has no name to recognise a reload by.
+    return entities.filter(e => !e.target.name || newest.get(reloadKey(e)) === e.target);
+}
+
+/**
+ * Move superseded registrations out of the list every context copies.
+ * Without this the list grows by one entry per entity on every reload, and so
+ * does the work of building a context.
+ */
+function retireSuperseded(): void {
+    const shared = registry();
+    const current = currentOnly(shared.entities);
+    if (current.length === shared.entities.length) return;
+
+    const kept = new Set(current);
+    for (const entity of shared.entities) {
+        if (!kept.has(entity)) shared.retired.set(entity.target, entity);
+    }
+    shared.entities = current;
+}
+
 export class MetadataStorage {
     /**
-     * The registry decorators write into. Every context's model starts as a
-     * copy of this, and `onModelCreating` never writes back into it.
+     * This copy's handle on the registry decorators write into. Every
+     * context's model starts as a copy of it, and `onModelCreating` never
+     * writes back into it.
      */
     private static instance: MetadataStorage;
 
@@ -125,11 +198,19 @@ export class MetadataStorage {
      * tenant's table (issue #32). Each `DbContext` subclass now builds its own
      * model, and reads resolve against whichever context is active.
      */
-    private static readonly modelScope = new AsyncLocalStorage<MetadataStorage>();
+    private static get modelScope(): AsyncLocalStorage<MetadataStorage> {
+        return registry().modelScope;
+    }
 
-    #entities: EntityMetadata[] = [];
+    #store: EntityStore;
 
-    private constructor() { }
+    get #entities(): EntityMetadata[] {
+        return this.#store.entities;
+    }
+
+    private constructor(store: EntityStore) {
+        this.#store = store;
+    }
 
     /**
      * The metadata to read: the active context's model, or the shared
@@ -145,7 +226,7 @@ export class MetadataStorage {
      */
     static shared(): MetadataStorage {
         if (!MetadataStorage.instance) {
-            MetadataStorage.instance = new MetadataStorage();
+            MetadataStorage.instance = new MetadataStorage(registry());
         }
         return MetadataStorage.instance;
     }
@@ -156,9 +237,8 @@ export class MetadataStorage {
      * change columns without touching the shared seed or any other context.
      */
     static createScopedModel(): MetadataStorage {
-        const scoped = new MetadataStorage();
-        scoped.#entities = MetadataStorage.shared().#entities.map(cloneEntity);
-        return scoped;
+        retireSuperseded();
+        return new MetadataStorage({ entities: MetadataStorage.shared().#entities.map(cloneEntity) });
     }
 
     /**
@@ -299,18 +379,27 @@ export class MetadataStorage {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     getEntity(target: Function): EntityMetadata | undefined {
-        return this.#entities.find((e) => e.target === target);
-    }
-
-    getEntities(): EntityMetadata[] {
-        return this.#entities;
+        return this.#entities.find((e) => e.target === target) ?? registry().retired.get(target);
     }
 
     /**
-     * Reset the metadata storage. Useful for test isolation.
+     * Every entity in the model, one per reloaded class: where a class was
+     * evaluated again, only the newest registration is listed, so schema
+     * operations see each table once. `getEntity()` still resolves the older
+     * constructor for code that holds on to it.
+     */
+    getEntities(): EntityMetadata[] {
+        if (this.#store === registry()) retireSuperseded();
+        return currentOnly(this.#entities);
+    }
+
+    /**
+     * Reset the metadata storage, for every copy of the package. Useful for
+     * test isolation.
      */
     static reset(): void {
-        MetadataStorage.instance = new MetadataStorage();
+        registry().entities = [];
+        registry().retired = new WeakMap();
     }
 }
 
