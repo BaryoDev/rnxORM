@@ -15,13 +15,15 @@
  * string with a decimal library.
  */
 
+import { ExactNumeric } from "./types";
+
 /**
  * Convert a driver-supplied numeric value to a JS number when that round-trips
  * exactly, otherwise return the value's exact string form.
  *
  * Returns `undefined`/`null` unchanged so callers can apply their own default.
  */
-export function toExactNumber(value: any): any {
+export function toExactNumber(value: unknown): ExactNumeric | null | undefined {
     if (value === undefined || value === null) return value;
 
     if (typeof value === 'number') return value;
@@ -45,7 +47,8 @@ export function toExactNumber(value: any): any {
         return numericStringsMatch(trimmed, asNumber) ? asNumber : trimmed;
     }
 
-    return value;
+    // Not a numeric any supported driver produces; passed through untouched.
+    return value as ExactNumeric;
 }
 
 /**

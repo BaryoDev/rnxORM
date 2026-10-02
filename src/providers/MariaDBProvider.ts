@@ -111,9 +111,7 @@ export class MariaDBProvider implements IDatabaseProvider {
                 rowCount: rowCount,
                 // mariadb returns insertId as a BigInt. Number() truncated
                 // anything above 2^53 into a wrong key (issue #39).
-                insertId: result.insertId !== undefined && result.insertId !== null
-                    ? toExactNumber(result.insertId)
-                    : undefined,
+                insertId: toExactNumber(result.insertId) ?? undefined,
             };
         } finally {
             if (!this.#connection) {
