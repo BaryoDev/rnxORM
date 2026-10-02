@@ -75,9 +75,13 @@ describe('one registry across copies of the package (#53)', () => {
         }
 
         const p = new SqlCaptureProvider('postgresql');
-        await new RetargetingContext(p).set(DupOrder).toList();
+        const ctx = new RetargetingContext(p);
+        await ctx.set(DupOrder).toList();
 
         expect(p.lastCall!.sql).toBe('SELECT * FROM tenant_orders');
+        // The scoped model is a copy of what the other copy's decorators
+        // registered, not an empty entry created by `mb.entity()`.
+        expect(ctx.metadata.getEntity(DupOrder)!.columns.map(c => c.columnName)).toEqual(['id']);
         expect(a.storage.MetadataStorage.shared().getEntity(DupOrder)!.tableName).toBe('dup_orders');
     });
 

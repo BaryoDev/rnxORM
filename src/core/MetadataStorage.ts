@@ -113,9 +113,10 @@ export interface EntityMetadata {
  * under a `Symbol.for()` key, not in module state. Two copies of the package
  * (a nested `node_modules`, or `src` next to `dist`) are two copies of this
  * module, and with module state decorators registered in one copy while
- * `DbSet` read the other (issue #53). What is shared is plain data, so the
- * copies do not need to agree on the `MetadataStorage` class itself. The key
- * carries a version for the day that data changes shape.
+ * `DbSet` read the other (issue #53). The registrations are plain data, so
+ * each copy wraps them in its own `MetadataStorage`. The scope does hold
+ * instances, and a copy only calls another copy's instance through its public
+ * methods. The key carries a version for the day either changes shape.
  */
 interface EntityStore {
     entities: EntityMetadata[];
