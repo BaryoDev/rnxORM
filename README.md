@@ -123,6 +123,19 @@ const db = new DbContext(new MSSQLProvider({
 }));
 ```
 
+**MariaDB/MySQL:**
+```typescript
+import { DbContext, MariaDBProvider } from "rnxorm";
+
+const db = new DbContext(new MariaDBProvider({
+  host: "localhost",
+  port: 3306,
+  user: "root",
+  password: "password",
+  database: "mydb",
+}));
+```
+
 **TLS:**
 
 Every provider takes `ssl` (`true`, or an options object passed to the driver)
@@ -180,19 +193,6 @@ do).
 instance, so two concurrent requests sharing a context share its transaction,
 and one request's commit ends the other's unit of work. Build a context per
 request and dispose it when the request finishes.
-
-**MariaDB/MySQL:**
-```typescript
-import { DbContext, MariaDBProvider } from "rnxorm";
-
-const db = new DbContext(new MariaDBProvider({
-  host: "localhost",
-  port: 3306,
-  user: "root",
-  password: "password",
-  database: "mydb",
-}));
-```
 
 ### 3. Basic CRUD Operations with Change Tracking
 
@@ -281,7 +281,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 
 ### Partial ⚠️
 
-- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`). TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. Nested paths (`u => u.address.city`) throw instead of silently resolving to the wrong column. See [LINQ-Style Query API](#linq-style-query-api)
+- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`). TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. A nested path (`u => u.address.city`) throws in `groupBy()` instead of silently resolving to the wrong column, and in `select()` it falls back to in-memory projection like a computed selector. See [LINQ-Style Query API](#linq-style-query-api)
 - **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched**. It is never translated to SQL, and cannot be combined with `skip()`/`take()`/`first()`/`single()`, which throw rather than return a wrong answer. Prefer the structured-condition form, which compiles to SQL and paginates correctly. See [Global Query Filters](#global-query-filters)
 - **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects. Write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB. Global query filters on raw SQL results are evaluated in memory
 - **Keyless Entity Types**: `hasNoKey()` works for querying views; read-only behavior is not enforced (no error if you try to track one)
@@ -289,7 +289,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 
 ### Planned ❌ (API exists but is not functional. Do not rely on these)
 
-- **Explicit Loading**: `entry().reference()`/`collection()` throw "not implemented"
+- **Explicit Loading**: `entry().reference().load()` and `entry().collection().load()` throw
 - **Owned Entity Types**: `ownsOne()`/`ownsMany()` store configuration but nothing consumes it. No column flattening, no owned tables are created
 - **Default Values**: `hasDefaultValue()` on regular columns stores metadata but is never emitted to DDL or used in inserts
 - **Computed Columns**: `hasComputedColumnSql()` stores metadata but no `GENERATED ALWAYS AS` DDL is emitted
@@ -302,12 +302,12 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Feature | Proven by |
 |---------|-----------|
 | Multi-database support (3 providers) | `test/integration/ActualApi.test.ts` against real containers in CI (`.github/workflows/integration.yml`) |
-| Change tracking & state transitions | `test/unit/ChangeTracker.test.ts` (49 tests, 100% coverage), `test/unit/EntityEntry.test.ts` |
+| Change tracking & state transitions | `test/unit/ChangeTracker.test.ts`, `test/unit/EntityEntry.test.ts` |
 | `saveChanges()` transaction wrapping & rollback on error | `test/unit/TrackingTransactionsAndSchema.test.ts` |
 | `asNoTracking()` (untracked, changes not persisted) | `test/unit/TrackingTransactionsAndSchema.test.ts` |
 | Concurrency tokens (end-to-end conflict detection) | `test/unit/ConcurrencyToken.test.ts`, `test/unit/SqlGeneration.test.ts` |
 | Per-dialect SQL: pagination, placeholders, generated-key retrieval, IDENTITY_INSERT | `test/unit/SqlGeneration.test.ts` (exact SQL strings), verified on real engines by the integration run |
-| Global query filters translated to SQL | `test/unit/QueryFilterSql.test.ts` (18 tests: all query paths, all 3 dialects, dynamic values, `ignoreQueryFilters()`) |
+| Global query filters translated to SQL | `test/unit/QueryFilterSql.test.ts` (all query paths, all 3 dialects, dynamic values, `ignoreQueryFilters()`) |
 | Eager loading (`include()`) for all four relation types | `test/unit/EagerLoading.test.ts` (batched IN queries, stitching, edge cases) |
 | Relationship configuration (decorators & ModelBuilder) | `test/unit/RelationshipBuilder.test.ts`, `test/unit/EagerLoading.test.ts` |
 | Value converters (insert / read / update round-trip) | `test/unit/ValueConversionAndKeyless.test.ts` |
@@ -315,8 +315,8 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Shadow properties included in INSERTs | `test/unit/TrackingTransactionsAndSchema.test.ts` |
 | Schema evolution (add missing columns, attempt type migration) | `test/unit/TrackingTransactionsAndSchema.test.ts` |
 | Schema scaffolding (`ensureCreated()` on real databases) | `test/integration/ActualApi.test.ts` (creates schema on all 3 engines in CI) |
-| Migrations DDL (per-dialect create/alter/index/FK) | `test/unit/MigrationBuilder.test.ts` (~40 tests) |
-| Migrator (history table, migrate/revert/revertTo/status, transactions) | `test/unit/Migrator.test.ts` (~34 tests) |
+| Migrations DDL (per-dialect create/alter/index/FK) | `test/unit/MigrationBuilder.test.ts` |
+| Migrator (history table, migrate/revert/revertTo/status, transactions) | `test/unit/Migrator.test.ts` |
 | Migration CLI (scaffolding, config loading, run/revert/status dispatch) | `test/unit/MigrationCli.test.ts` |
 | ModelBuilder fluent API (keys, indexes, constraints, seeding, filters) | `test/unit/ModelBuilder.test.ts` |
 | CRUD, bulk operations, SQL-injection safety, unicode | `test/integration/ActualApi.test.ts` per provider |
@@ -326,8 +326,8 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Data seeding (idempotent `hasData()`) | `test/unit/ModelBuilder.test.ts` |
 | Decorator metadata registration | `test/unit/MetadataStorage.test.ts` |
 | Type mapping table, placeholder syntax, dialect identifiers | `test/unit/ProviderTypeMapping.test.ts` (also pins the capture provider's parity with real providers) |
-| Selector capture (Proxy, nested/computed classification, aggregates, `g.key`) | `test/unit/PropertyCapture.test.ts` (52 tests), renamed-column proof tests in `test/unit/SqlGeneration.test.ts` |
-| Identifier & operator validation (injection payloads rejected end-to-end) | `test/unit/Injection.test.ts` (90 tests) |
+| Selector capture (Proxy, nested/computed classification, aggregates, `g.key`) | `test/unit/PropertyCapture.test.ts`, renamed-column proof tests in `test/unit/SqlGeneration.test.ts` |
+| Identifier & operator validation (injection payloads rejected end-to-end) | `test/unit/Injection.test.ts` |
 | Query filters on every read path incl. `groupBy()`, having-placeholder ordering, legacy-lambda limitations | `test/unit/QueryFilterCoverage.test.ts` |
 | row to entity mapping characterization (both paths, converters, shadow columns, tracking) | `test/unit/EntityMapper.test.ts` |
 | Identity map (same instance on re-query, eager-loaded relations, `attach()`/`update()`, converted keys, eviction, no-tracking exclusion) | `test/unit/IdentityMap.test.ts` |
@@ -336,7 +336,7 @@ If a claim in this README is not represented in this map or the linked suites, t
 
 ### Testing status
 
-The test suite (534 tests, all passing) runs against an **in-memory mock provider** by default. It validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
+The test suite (681 tests in 31 suites at 2.4.0, all passing) runs against an **in-memory mock provider** by default. It validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
 
 ## Type Mapping
 
@@ -606,7 +606,7 @@ users[0].posts.forEach(post => console.log(post.title));
 
 > **Declaration order matters**: `@ManyToMany` derives its default join-table
 > name from the related class at decoration time, and TypeScript's
-> `emitDecoratorMetadata` embeds a direct reference to the property's type. > so declare a class **before** any class whose decorated properties
+> `emitDecoratorMetadata` embeds a direct reference to the property's type, so declare a class **before** any class whose decorated properties
 > reference it, or you'll hit `ReferenceError: Cannot access 'X' before
 > initialization` at import time. See `examples/02-relationships.ts` for a
 > working ordering.
@@ -683,18 +683,22 @@ export class Profile {
 Control what happens when parent entities are deleted:
 
 ```typescript
+import { CascadeOption, ManyToOne } from "rnxorm";
+
 @ManyToOne(() => User, user => user.posts, {
-  onDelete: "CASCADE",  // Options: CASCADE, SET_NULL, RESTRICT, NO_ACTION
-  onUpdate: "CASCADE"
+  onDelete: CascadeOption.Cascade,  // Cascade, SetNull, Restrict or NoAction
+  onUpdate: CascadeOption.Cascade
 })
 author!: User;
 ```
+
+`onDelete` and `onUpdate` take the `CascadeOption` enum, not a string literal.
 
 ## LINQ-Style Query API
 
 rnxORM provides a LINQ-style API for querying data.
 
-> **How lambda selectors are translated**: rnxORM does not have an expression-tree parser. Selectors like `u => u.age` or `u => ({ name: u.name })` are matched against the lambda's source text with regexes. Simple property accesses and object literals translate to SQL (`SELECT col AS alias`, `GROUP BY`, SQL aggregates); anything the parser doesn't recognize (computed values, template strings, method calls) makes the query **fall back to fetching all rows and evaluating the selector in memory**. Results stay correct, but check performance on large tables.
+> **How lambda selectors are translated**: TypeScript has no expression trees, so selectors are not parsed. rnxORM calls the selector with a recording Proxy (`src/core/expressions/PropertyCapture.ts`) and reads which properties it touched. Simple property accesses and object literals translate to SQL (`SELECT col AS alias`, `GROUP BY`, SQL aggregates). A projected property that is not a mapped column throws. In `select()`, a selector the capture cannot name as columns (template strings, arithmetic, a nested path such as `u => u.address.city`) **falls back to fetching the rows and projecting in memory**, so check performance on large tables. The APIs that need exactly one column (`include()`, `sum()`, `average()`, `min()`, `max()`) have no such fallback and throw on a nested or computed selector.
 
 ### Aggregations
 
@@ -715,6 +719,8 @@ const userCount = await users.count();
 // With conditions
 const adultCount = await users.where("age", ">=", 18).count();
 ```
+
+`sum()` and `average()` are typed as `number`, but they return the database's own string when the value does not fit a JavaScript number exactly (a `DECIMAL` total with more digits than a double holds, a `BIGINT` above 2^53). That keeps the value exact on PostgreSQL and MariaDB. SQL Server is the exception: its driver hands `DECIMAL` and `NUMERIC` to rnxORM as JavaScript numbers, so a large total is already rounded there. Check `typeof` before doing arithmetic on large totals. [#54](https://github.com/BaryoDev/rnxORM/issues/54) tracks making the type say so.
 
 ### Projections (Select)
 
@@ -819,7 +825,7 @@ new ModelBuilder().entity(User).hasQueryFilter({ property: 'isDeleted', operator
 
 
 ```typescript
-import { DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
+import { CascadeOption, DbContext, ModelBuilder, PostgreSQLProvider } from "rnxorm";
 
 export class AppDbContext extends DbContext {
   constructor() {
@@ -842,7 +848,7 @@ export class AppDbContext extends DbContext {
       .hasOne(p => p.author, User)
         .withMany(u => u.posts)
         .hasForeignKey('authorId')
-        .onDelete('CASCADE');
+        .onDelete(CascadeOption.Cascade);
 
     // Configure many-to-many
     modelBuilder.entity(Student)
@@ -882,8 +888,8 @@ export class AppDbContext extends DbContext {
   - `.withOne(selector)` - Inverse for one-to-one
   - `.withMany(selector)` - Inverse for one-to-many
   - `.hasForeignKey(column)` - Set foreign key column
-  - `.onDelete(action)` - Set ON DELETE behavior
-  - `.onUpdate(action)` - Set ON UPDATE behavior
+  - `.onDelete(action)` - Set ON DELETE behavior (a `CascadeOption`)
+  - `.onUpdate(action)` - Set ON UPDATE behavior (a `CascadeOption`)
 - `.hasMany(selector, type)` - Configure one-to-many
 - `.hasManyToMany(selector, type, options)` - Configure many-to-many
   - `.usingJoinTable(table, leftKey, rightKey)` - Configure join table
@@ -896,27 +902,28 @@ export class AppDbContext extends DbContext {
 import { Entity, Column, PrimaryKey, Index, Unique } from "rnxorm";
 
 @Entity("users")
-@Index(["email"], { unique: true })
-@Index(["lastName", "firstName"])
-@Unique(["username"])
 export class User {
   @PrimaryKey()
   id!: number;
 
   @Column()
-  @Unique()
+  @Index({ unique: true, name: "idx_user_email" })
   email!: string;
 
   @Column()
+  @Unique()
   username!: string;
 
   @Column()
   firstName!: string;
 
   @Column()
+  @Index()
   lastName!: string;
 }
 ```
+
+`@Index()` and `@Unique()` are property decorators. Each covers the one column it sits on. A composite index needs the fluent API (`hasCompositeIndex()`), shown next.
 
 ### Using Fluent API
 
@@ -1364,10 +1371,10 @@ protected onModelCreating(modelBuilder: ModelBuilder): void {
     modelBuilder.entity(User)
         // Timestamp shadow properties
         .shadowProperty('created_at', 'timestamp', {
-            defaultValue: 'CURRENT_TIMESTAMP'
+            nullable: true
         })
         .shadowProperty('updated_at', 'timestamp', {
-            defaultValue: 'CURRENT_TIMESTAMP'
+            nullable: true
         })
         // Audit shadow properties
         .shadowProperty('created_by_id', 'integer', {
@@ -1419,12 +1426,14 @@ export class User {
 
 **Audit Timestamps:**
 ```typescript
+// rnxORM creates the columns and inserts NULL into them, so a DDL DEFAULT
+// never runs. Fill them with a trigger added in a migration.
 modelBuilder.entity(Order)
     .shadowProperty('created_at', 'timestamp', {
-        defaultValue: 'CURRENT_TIMESTAMP'
+        nullable: true
     })
     .shadowProperty('updated_at', 'timestamp', {
-        defaultValue: 'CURRENT_TIMESTAMP'
+        nullable: true
     });
 ```
 
@@ -1432,10 +1441,10 @@ modelBuilder.entity(Order)
 ```typescript
 modelBuilder.entity(Document)
     .shadowProperty('db_created_at', 'timestamp', {
-        defaultValue: 'NOW()'
+        nullable: true
     })
     .shadowProperty('db_last_modified', 'timestamp', {
-        defaultValue: 'NOW()'
+        nullable: true
     })
     .shadowProperty('db_version', 'integer', {
         defaultValue: 1
@@ -1613,11 +1622,13 @@ const users = await db.set(User)
     .fromSqlRaw('SELECT * FROM users WHERE age > $1', [18])
     .toList(); // Deleted users are filtered out
 
-// Bypass filters if needed
-const allUsers = await db.set(User)
+// toListNoTracking() skips tracking, not the filter
+const untracked = await db.set(User)
     .fromSqlRaw('SELECT * FROM users')
-    .toListNoTracking(); // No filters, no tracking
+    .toListNoTracking(); // Deleted users are still filtered out
 ```
+
+A raw query has no `ignoreQueryFilters()`. The filter runs in memory on the rows your SQL returns, for `toList()`, `toListNoTracking()`, `first()` and `count()` alike. A filter condition that uses `LIKE`, `ILIKE` or `NOT LIKE` has no in-memory equivalent and is not applied to raw results, so put that condition in your SQL. `first()` and `count()` fetch every row to do it. `count()` returns the number of rows your SQL returned, so a `SELECT COUNT(*)` query counts as 1. For a count over a large table, map the aggregate row to a keyless entity and read it with `first()`.
 
 ### When to Use Raw SQL
 
@@ -1631,7 +1642,7 @@ const allUsers = await db.set(User)
 ⚠️ **Important Notes:**
 - Always use parameterized queries to prevent SQL injection
 - Column names in raw SQL should match database column names (not property names)
-- Results are still subject to global query filters (unless using `toListNoTracking()`)
+- Results are still subject to global query filters, including with `toListNoTracking()`
 - Value converters are applied to results
 
 ## Keyless Entity Types
@@ -1664,7 +1675,7 @@ export class AppDbContext extends DbContext {
 
 ### Querying Keyless Entities
 
-Keyless entities work just like regular entities:
+Keyless entities work just like regular entities. Rows are mapped by column name, and a column defaults to the property name in lower case, so the view here must expose `username`, `ordercount`, `totalspent` and `lastorderdate` (or set `@Column({ name })` to match the view).
 
 ```typescript
 // Query the view
@@ -1680,8 +1691,8 @@ const bigSpenders = await db.set(UserSummary)
 const topSummaries = await db.set(UserSummary)
     .fromSqlRaw(`
         SELECT * FROM vw_user_summary
-        WHERE order_count > $1
-        ORDER BY total_spent DESC
+        WHERE ordercount > $1
+        ORDER BY totalspent DESC
         LIMIT 10
     `, [5])
     .toList();
@@ -1741,11 +1752,11 @@ modelBuilder.entity(OrderStatistics)
 const stats = await db.set(OrderStatistics)
     .fromSqlRaw(`
         SELECT
-            customer_id,
-            COUNT(*) as total_orders,
-            AVG(total) as avg_order_value,
-            MIN(created_at) as first_order,
-            MAX(created_at) as last_order
+            customer_id AS customerid,
+            COUNT(*) AS totalorders,
+            AVG(total) AS avgordervalue,
+            MIN(created_at) AS firstorder,
+            MAX(created_at) AS lastorder
         FROM orders
         GROUP BY customer_id
     `)
@@ -1881,7 +1892,7 @@ console.log(loadedOrder.shippingAddress.city); // 'Springfield'
 
 ## Explicit Loading *(Planned)*
 
-> **Note**: Explicit loading is planned for a future release. The API surface is defined but currently throws a "not implemented" error. Use eager loading (`.include()`) for now.
+> **Note**: Explicit loading is planned for a future release. The API surface is defined, but `reference().load()`, `collection().load()` and `collection().query()` throw. Use eager loading (`.include()`) for now.
 
 Explicit loading will allow you to load related entities on-demand after the initial query, giving you fine-grained control over when related data is fetched.
 
@@ -1987,10 +1998,11 @@ export class Product {
 protected onModelCreating(modelBuilder: ModelBuilder): void {
     modelBuilder.entity(Product)
         .property(p => p.rowVersion)
-        .hasDefaultValue(1)
         .isConcurrencyToken();
 }
 ```
+
+Set the first value yourself when you create the entity (`product.rowVersion = 1`). `hasDefaultValue()` does not do it for you (see [Default Values & Computed Columns](#default-values--computed-columns-planned)).
 
 ### How It Works
 
@@ -2161,7 +2173,7 @@ If you change the type of a property (e.g., from `string` to `number`), rnxORM a
 
 1.  **Detection**: It checks if the database column type matches the TypeScript type.
 2.  **Auto-Fix**: It attempts to migrate the column using `ALTER COLUMN ... TYPE ... USING ...`.
-3.  **Safety**: If the existing data is incompatible with the new type (e.g., converting "abc" to integer), the migration **fails gracefully** and the column is left unchanged to prevent data loss.
+3.  **Failure is silent**: If the existing data does not fit the new type (converting "abc" to integer, for example), the database rejects the change, rnxORM swallows the error, and the column keeps its old type. Nothing is logged, so check the column yourself after a type change.
 
 ## Migrations
 
