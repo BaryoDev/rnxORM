@@ -1,6 +1,6 @@
 # rnxORM Test Suite Summary
 
-## Current state: 534 tests passing. Mock by default, real databases via docker and CI
+## Current state: 681 tests in 31 suites passing at 2.4.0. Mock by default, real databases via docker and CI
 
 The default `npm test` run uses the in-memory `MockDatabaseProvider` (fast, no
 infrastructure). The same suite runs against **real PostgreSQL, MariaDB,
@@ -21,27 +21,36 @@ docker compose -f docker-compose.test.yml down -v
 
 | Suite | Tests | What it validates |
 |-------|-------|-------------------|
-| ChangeTracker | 49 | Entity state transitions, dirty detection (100% coverage) |
-| EntityEntry | 22 | Original values, modified-property detection (100% coverage) |
+| ChangeTracker | 24 | Entity state transitions, dirty detection |
+| EntityEntry | 32 | Original values, modified-property detection |
 | MetadataStorage | 20 | Decorator metadata registration |
 | DbContext | 4 | Context construction, DbSet access |
-| SqlGeneration | 61 | **Exact SQL strings per dialect**: pagination (LIMIT/OFFSET vs OFFSET/FETCH), placeholders ($n / @pN / ?), aggregates, INSERT id-retrieval (RETURNING / OUTPUT INSERTED / insertId), IDENTITY_INSERT wrapping, concurrency-token UPDATE, projections, GROUP BY/HAVING, raw SQL passthrough |
+| SqlGeneration | 65 | **Exact SQL strings per dialect**: pagination (LIMIT/OFFSET vs OFFSET/FETCH), placeholders ($n / @pN / ?), aggregates, INSERT id-retrieval (RETURNING / OUTPUT INSERTED / insertId), IDENTITY_INSERT wrapping, concurrency-token UPDATE, projections, GROUP BY/HAVING, raw SQL passthrough |
 | QueryFilterSql | 33 | **SQL-translated global query filters**: WHERE clause generation per dialect, placeholder numbering after user conditions, find()/count()/aggregate/projection coverage, dynamic (function) values, ignoreQueryFilters(), in-memory filtering of raw SQL results |
-| EagerLoading | 8 | `.include()` for all four relation types: batched `WHERE ... IN` SQL, FK deduplication, entity stitching, empty-collection and null-FK edge cases |
+| EagerLoading | 9 | `.include()` for all four relation types: batched `WHERE ... IN` SQL, FK deduplication, entity stitching, empty-collection and null-FK edge cases |
 | RelationshipBuilder | 5 | ModelBuilder relations: hasOne/hasMany/hasManyToMany metadata, foreign keys, inverse sides, cascade options, join-table defaults and overrides |
-| ValueConversionAndKeyless | 6 | Value converters applied on insert/read/update; keyless entities (query mapping, ensureCreated skip, saveChanges no-op) |
+| ValueConversionAndKeyless | 14 | Value converters applied on insert/read/update; keyless entities (query mapping, ensureCreated skip, saveChanges no-op) |
 | TrackingTransactionsAndSchema | 9 | asNoTracking (untracked, no persistence), saveChanges transaction begin/commit and rollback-on-error, executeSqlRaw row counts, shadow columns in INSERT, ensureCreated add-column and type-migration paths |
-| ProviderTypeMapping | 10 | Real providers' type-mapping table (pins the README table), placeholder syntax per dialect, dialect ids, SqlCaptureProvider parity with real providers |
-| MigrationBuilder | ~40 | Per-dialect DDL: createTable, auto-increment syntax, defaults, alter/rename, indexes, foreign keys |
-| Migrator | ~34 | History table per dialect, migrate/revert/revertTo/status, transaction wrapping, rollback on error |
-| MigrationCli | 13 | migration:create scaffolding, config resolution (default + --config), createMigrator() factory shapes, run/revert/status dispatch |
-| ModelBuilder | 12 | Fluent API metadata: toTable, hasKey, hasNoKey, indexes, constraints, property config, conversions, shadow properties, seeding, query filters |
+| ProviderTypeMapping | 14 | Real providers' type-mapping table (pins the README table), placeholder syntax per dialect, dialect ids, SqlCaptureProvider parity with real providers |
+| MigrationBuilder | 56 | Per-dialect DDL: createTable, auto-increment syntax, defaults, alter/rename, indexes, foreign keys |
+| Migrator | 21 | History table per dialect, migrate/revert/revertTo/status, transaction wrapping, rollback on error |
+| MigrationCli | 22 | migration:create scaffolding, config resolution (default + --config), createMigrator() factory shapes, run/revert/status dispatch |
+| ModelBuilder | 17 | Fluent API metadata: toTable, hasKey, hasNoKey, indexes, constraints, property config, conversions, shadow properties, seeding, query filters |
 | ConcurrencyToken | 2 | End-to-end optimistic concurrency: token increment on save, violation when a competing context saved first |
 | PropertyCapture | 52 | Recording-Proxy selector capture: property/projection/aggregate classification, nested, computed and short-circuit (`||`/`??`/ternary) selectors as `opaque`, `g.key`, `average` alias |
-| Injection | 90 | Identifier/operator validation: closed operator set (incl. `IN`/`NOT IN`/`IS`/`IS NOT` expansion), metadata-checked columns, having-expression shapes, non-integer `skip()`/`take()` payloads, end-to-end rejection of injection payloads through `where()`/`orderBy()`/`having()`/`skip()`/`take()` |
-| QueryFilterCoverage | 23 | Structured filters proven on every read path (count, pagination per dialect, all(), aggregates, select, find, groupBy incl. having placeholder ordering); legacy-lambda limitations pinned |
+| Injection | 94 | Identifier/operator validation: closed operator set (incl. `IN`/`NOT IN`/`IS`/`IS NOT` expansion), metadata-checked columns, having-expression shapes, non-integer `skip()`/`take()` payloads, end-to-end rejection of injection payloads through `where()`/`orderBy()`/`having()`/`skip()`/`take()` |
+| QueryFilterCoverage | 32 | Structured filters proven on every read path (count, pagination per dialect, all(), aggregates, select, find, groupBy incl. having placeholder ordering); legacy-lambda limitations pinned |
 | EntityMapper | 15 | row to entity characterization for both mapping paths: renamed columns, converters, shadow-column exclusion, tracked vs asNoTracking |
 | IdentityMap | 18 | Same tracked instance on repeated loads (find/toList) and through `include()`, entities entering tracking via attach/update/add, value-converted keys, local modifications survive re-query, eviction on delete/clear, asNoTracking excluded, per-context isolation |
+| ChangeDetection | 27 | Change detection by value: equal Dates are not rewritten, nested object and array edits are detected, `include()` does not dirty the roots, `update()` on a detached entity writes every non-key column |
+| IncludeFilters | 8 | Query filters applied to eager-loaded relations (one-to-many, many-to-one, many-to-many), placeholder numbering after the key list, `ignoreQueryFilters()` through `include()` and `groupBy()` |
+| MetadataScope | 8 | Model scoped per context type: two contexts mapping one entity do not retarget each other, filters do not leak, interleaved queries resolve the right model, the decorator registry is left unmodified |
+| MigrationInjection | 28 | Migration identifier validation: injected table, column and type names rejected, the SQL Server `sp_rename` literal, string defaults escaped |
+| NumericDefaults | 8 | A bare `number` column maps to decimal, an explicit integer and the primary key stay integer, decimal precision reaches the DDL on every dialect |
+| NumericPrecision | 10 | Generated keys above 2^53 and DECIMAL sums and averages are not rounded, `count()` guards |
+| ProviderConfig | 11 | TLS settings per provider (SQL Server encrypts by default), `driverOptions` forwarding, SQL Server connect idempotence |
+| ProviderTransactions | 4 | `saveChanges()` inside a caller-opened transaction does not commit or roll it back, and still wraps its own when none is open |
+| NumericColumns (integration) | 1 | A bare `number` column round-trips 19.99. Per provider when run with USE_REAL_DB |
 | ActualApi (integration) | 18 | CRUD, all documented comparison operators (incl. LIKE, IN/NOT IN, IS/IS NOT with real placeholder expansion), pagination and its runtime validation, ordering, bulk ops, SQL-injection safety, unicode. Per provider when run with USE_REAL_DB |
 
 ## What the real-database run has verified

@@ -4,9 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.2.x   | Yes |
-| 2.1.x   | Security fixes only |
-| < 2.1   | No |
+| 2.4.x   | Yes |
+| 2.3.x   | Security fixes only |
+| < 2.3   | No |
 
 ## Reporting a vulnerability
 
@@ -66,7 +66,7 @@ Honest scope, so you can threat-model correctly:
   `ON DELETE` must be one of the four referential actions. On 2.2.0 and
   earlier, an app that built migration operations from request data (the
   "custom fields per tenant" shape) had an injection point: a default value of
-  `x'; DROP TABLE users; --` closed the literal and ran.
+  `x'; DELETE FROM users; --` closed the literal and ran.
   `migration:create` also validates the migration name, which used to be
   interpolated into both the output path (so `../../../../tmp/pwned` wrote
   outside the migrations directory) and the generated source.
