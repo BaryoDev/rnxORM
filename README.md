@@ -698,7 +698,7 @@ author!: User;
 
 rnxORM provides a LINQ-style API for querying data.
 
-> **How lambda selectors are translated**: TypeScript has no expression trees, so selectors are not parsed. rnxORM calls the selector with a recording Proxy (`src/core/expressions/PropertyCapture.ts`) and reads which properties it touched. Simple property accesses and object literals translate to SQL (`SELECT col AS alias`, `GROUP BY`, SQL aggregates). A projected property that is not a mapped column throws, and so does a nested path such as `u => u.address.city`. Computed selectors (template strings, arithmetic) **fall back to fetching the rows and projecting in memory**, so check performance on large tables.
+> **How lambda selectors are translated**: TypeScript has no expression trees, so selectors are not parsed. rnxORM calls the selector with a recording Proxy (`src/core/expressions/PropertyCapture.ts`) and reads which properties it touched. Simple property accesses and object literals translate to SQL (`SELECT col AS alias`, `GROUP BY`, SQL aggregates). A projected property that is not a mapped column throws. In `select()`, a selector the capture cannot name as columns (template strings, arithmetic, a nested path such as `u => u.address.city`) **falls back to fetching the rows and projecting in memory**, so check performance on large tables. The APIs that need exactly one column (`include()`, `sum()`, `average()`, `min()`, `max()`) have no such fallback and throw on a nested or computed selector.
 
 ### Aggregations
 
@@ -720,7 +720,7 @@ const userCount = await users.count();
 const adultCount = await users.where("age", ">=", 18).count();
 ```
 
-`sum()` and `average()` are typed as `number`, but they return the database's own string when the value does not fit a JavaScript number exactly (a `DECIMAL` total with more digits than a double holds, a `BIGINT` above 2^53). That keeps the value exact. Check `typeof` before doing arithmetic on large totals. [#54](https://github.com/BaryoDev/rnxORM/issues/54) tracks making the type say so.
+`sum()` and `average()` are typed as `number`, but they return the database's own string when the value does not fit a JavaScript number exactly (a `DECIMAL` total with more digits than a double holds, a `BIGINT` above 2^53). That keeps the value exact on PostgreSQL and MariaDB. SQL Server is the exception: its driver hands `DECIMAL` and `NUMERIC` to rnxORM as JavaScript numbers, so a large total is already rounded there. Check `typeof` before doing arithmetic on large totals. [#54](https://github.com/BaryoDev/rnxORM/issues/54) tracks making the type say so.
 
 ### Projections (Select)
 
@@ -1426,8 +1426,8 @@ export class User {
 
 **Audit Timestamps:**
 ```typescript
-// rnxORM creates the columns. Fill them with a database default or trigger
-// added in a migration, since a shadow default cannot be a SQL expression.
+// rnxORM creates the columns and inserts NULL into them, so a DDL DEFAULT
+// never runs. Fill them with a trigger added in a migration.
 modelBuilder.entity(Order)
     .shadowProperty('created_at', 'timestamp', {
         nullable: true
@@ -1628,7 +1628,7 @@ const untracked = await db.set(User)
     .toListNoTracking(); // Deleted users are still filtered out
 ```
 
-A raw query has no `ignoreQueryFilters()`. The filter runs in memory on the rows your SQL returns, for `toList()`, `toListNoTracking()`, `first()` and `count()` alike. `first()` and `count()` fetch every row to do it, so put the row limit or `COUNT(*)` in the SQL when that matters.
+A raw query has no `ignoreQueryFilters()`. The filter runs in memory on the rows your SQL returns, for `toList()`, `toListNoTracking()`, `first()` and `count()` alike. `first()` and `count()` fetch every row to do it. `count()` returns the number of rows your SQL returned, so a `SELECT COUNT(*)` query counts as 1. For a count over a large table, map the aggregate row to a keyless entity and read it with `first()`.
 
 ### When to Use Raw SQL
 
