@@ -281,7 +281,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 
 ### Partial ⚠️
 
-- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`). TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. Nested paths (`u => u.address.city`) throw instead of silently resolving to the wrong column. See [LINQ-Style Query API](#linq-style-query-api)
+- **LINQ-Style Projections (`select`, `groupBy`)**: Lambda selectors are resolved by a recording Proxy (`src/core/expressions/PropertyCapture.ts`). TypeScript has no expression trees, so this is capture, not parsing. Simple shapes (`u => ({ name: u.name })`, `g.count()`, `g.sum(u => u.prop)`, `g.key`) translate to SQL with mapped column names; a projected property that is not a mapped column **throws**; computed selectors (template strings, arithmetic) fall back to fetching rows and projecting in memory. A nested path (`u => u.address.city`) throws in `groupBy()` instead of silently resolving to the wrong column, and in `select()` it falls back to in-memory projection like a computed selector. See [LINQ-Style Query API](#linq-style-query-api)
 - **Global Query Filters (predicate form)**: the legacy `hasQueryFilter(u => ...)` predicate form runs **in memory after rows are fetched**. It is never translated to SQL, and cannot be combined with `skip()`/`take()`/`first()`/`single()`, which throw rather than return a wrong answer. Prefer the structured-condition form, which compiles to SQL and paginates correctly. See [Global Query Filters](#global-query-filters)
 - **Raw SQL Queries**: `fromSqlRaw()`/`executeSqlRaw()` work, but parameter placeholders are **not** translated between dialects. Write `$1` for PostgreSQL, `@p0` for SQL Server, `?` for MariaDB. Global query filters on raw SQL results are evaluated in memory
 - **Keyless Entity Types**: `hasNoKey()` works for querying views; read-only behavior is not enforced (no error if you try to track one)
@@ -1628,7 +1628,7 @@ const untracked = await db.set(User)
     .toListNoTracking(); // Deleted users are still filtered out
 ```
 
-A raw query has no `ignoreQueryFilters()`. The filter runs in memory on the rows your SQL returns, for `toList()`, `toListNoTracking()`, `first()` and `count()` alike. `first()` and `count()` fetch every row to do it. `count()` returns the number of rows your SQL returned, so a `SELECT COUNT(*)` query counts as 1. For a count over a large table, map the aggregate row to a keyless entity and read it with `first()`.
+A raw query has no `ignoreQueryFilters()`. The filter runs in memory on the rows your SQL returns, for `toList()`, `toListNoTracking()`, `first()` and `count()` alike. A filter condition that uses `LIKE`, `ILIKE` or `NOT LIKE` has no in-memory equivalent and is not applied to raw results, so put that condition in your SQL. `first()` and `count()` fetch every row to do it. `count()` returns the number of rows your SQL returned, so a `SELECT COUNT(*)` query counts as 1. For a count over a large table, map the aggregate row to a keyless entity and read it with `first()`.
 
 ### When to Use Raw SQL
 
