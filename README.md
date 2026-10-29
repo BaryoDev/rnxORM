@@ -362,12 +362,14 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Query filters on every read path incl. `groupBy()`, having-placeholder ordering, legacy-lambda limitations | `test/unit/QueryFilterCoverage.test.ts` |
 | row to entity mapping characterization (both paths, converters, shadow columns, tracking) | `test/unit/EntityMapper.test.ts` |
 | Identity map (same instance on re-query, eager-loaded relations, `attach()`/`update()`, converted keys, eviction, no-tracking exclusion) | `test/unit/IdentityMap.test.ts` |
+| One translator per dialect renders every statement (select, insert, update, delete, DDL); no dialect branches outside `src/providers` | `test/unit/translators/*.test.ts`, `test/unit/EnsureCreatedWiring.test.ts`, `test/unit/NoDialectBranches.test.ts`, `test/support/sqlite/` (a fourth dialect added without touching `src/`) |
+| Per-context models (`onModelCreating`) apply to where, aggregates, grouping, ordering and change tracking | `test/unit/WhereAggregateContextModel.test.ts`, `test/unit/OrderByContextModel.test.ts`, `test/unit/TrackingContextModel.test.ts` |
 
 If a claim in this README is not represented in this map or the linked suites, treat it as unverified and [open an issue](https://github.com/BaryoDev/rnxORM/issues).
 
 ### Testing status
 
-The test suite (681 tests in 31 suites at 2.4.0, all passing) runs against an **in-memory mock provider** by default. It validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`.
+The test suite (681 tests in 31 suites at 2.4.0, all passing) runs against an **in-memory mock provider** by default. It validates the ORM's tracking, metadata, eager loading, and per-dialect SQL-generation logic without infrastructure. The same suite also runs against **real PostgreSQL 16, MariaDB 11, and SQL Server 2022** containers on every pull request and push to `main` (`.github/workflows/integration.yml`), and locally via `docker compose -f docker-compose.test.yml up -d --wait && npm run test:integration`. `npm run test:integration:sqlite` runs the same integration suite on an in-process SQLite database with no Docker; it proves the translator boundary, not the shipped providers.
 
 ## Type Mapping
 
@@ -2549,18 +2551,32 @@ rnxORM automatically creates a `__MigrationHistory` table to track applied migra
 
 ## Custom Database Providers
 
-You can create a custom database provider by implementing the `IDatabaseProvider` interface. Every provider must implement `getDialect()` which returns a string identifier used internally for dialect-specific SQL generation (e.g., pagination, migrations).
+A provider runs SQL. A translator writes it. To add a database, implement
+`IDatabaseProvider` and return a `SqlTranslator` subclass from `getTranslator()`.
+Every query, insert, update, delete and DDL statement (`ensureCreated()` and
+migrations) is rendered by that translator, so the ORM never branches on the
+dialect. `getDialect()` is for display and diagnostics only.
 
 ```typescript
-import { IDatabaseProvider } from "rnxorm";
+import { IDatabaseProvider, SqlTranslator, PostgresTranslator } from "rnxorm";
 
-class SQLiteProvider implements IDatabaseProvider {
-    getDialect(): string {
-        return 'sqlite'; // Used for dialect-specific SQL branches
-    }
-    // ... implement remaining interface methods
+class MyProvider implements IDatabaseProvider {
+    private translator = new PostgresTranslator(); // or your own subclass
+
+    getDialect() { return 'postgresql' as const; }
+    getTranslator(): SqlTranslator { return this.translator; }
+    // ... connect, disconnect, query, beginTransaction, and the schema
+    // helpers (mapType, getSchemaColumnsQuery, normalizeType, isTypeMismatch)
 }
 ```
+
+A provider that speaks an existing dialect can return the built-in translator
+(`PostgresTranslator`, `MsSqlTranslator`, `MariaDbTranslator`). A new dialect
+subclasses `SqlTranslator` and implements its abstract members: placeholders,
+pagination, case-insensitive `LIKE`, type mapping, and the DDL pieces (quoting,
+auto-increment columns, alter, rename, drop index, migration history table).
+`test/support/sqlite/` is a complete example: a SQLite provider and translator
+that run the integration suite without a server.
 
 `query()` must always run on the pool. `beginTransaction()` must acquire its own
 connection, run `BEGIN` on it, and return an `ITransaction` whose `query()` runs
