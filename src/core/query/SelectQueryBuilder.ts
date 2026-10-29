@@ -1,11 +1,11 @@
 import { DbContext } from "../DbContext";
 import { QueryState } from "../QueryState";
 import { DatabaseRow } from "../types";
-import { capture } from "../expressions/PropertyCapture";
+import { capture, resolveColumn } from "../expressions/PropertyCapture";
 import { buildWhere } from "../expressions/conditions";
 import { queryFilterPredicates } from "../QueryFilter";
 import { toCount } from "../Numerics";
-import { assertAlias, assertColumn, assertLimit } from "../Identifiers";
+import { assertAlias, assertColumn, assertLimit, WhereOperator } from "../Identifiers";
 import { Predicate } from "./model/Predicate";
 import { SelectItem } from "./model/SelectModel";
 import { mapRowToEntity } from "./EntityMapper";
@@ -60,10 +60,8 @@ export class SelectQueryBuilder<T, TResult> {
      */
     where(condition: (entity: T) => Predicate): this;
     /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
-    where(column: keyof T & string, operator: string, value: any): this;
-    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
-    where(column: string, operator: string, value: any): this;
-    where(first: string | ((entity: T) => Predicate), operator?: string, value?: any): this {
+    where(column: keyof T & string, operator: WhereOperator, value: any): this;
+    where(first: (keyof T & string) | ((entity: T) => Predicate), operator?: string, value?: any): this {
         this.state.predicates.push(buildWhere(this.entityType, first, operator, value));
         return this;
     }
@@ -72,9 +70,9 @@ export class SelectQueryBuilder<T, TResult> {
      * Order results by column ascending
      */
     orderBy(column: keyof T & string): this;
-    orderBy(column: string): this;
-    orderBy(column: string): this {
-        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
+    orderBy(selector: (entity: T) => unknown): this;
+    orderBy(column: (keyof T & string) | ((entity: T) => unknown)): this {
+        this.state.orderByColumns.push({ column: this.orderColumn(column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -82,10 +80,16 @@ export class SelectQueryBuilder<T, TResult> {
      * Order results by column descending
      */
     orderByDescending(column: keyof T & string): this;
-    orderByDescending(column: string): this;
-    orderByDescending(column: string): this {
-        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
+    orderByDescending(selector: (entity: T) => unknown): this;
+    orderByDescending(column: (keyof T & string) | ((entity: T) => unknown)): this {
+        this.state.orderByColumns.push({ column: this.orderColumn(column, 'orderByDescending'), direction: 'DESC' });
         return this;
+    }
+
+    private orderColumn(column: string | ((entity: T) => unknown), apiName: string): string {
+        return typeof column === 'function'
+            ? resolveColumn(column, this.entityType, apiName)
+            : assertColumn(this.entityType, column, apiName);
     }
 
     /**

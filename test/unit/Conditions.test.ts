@@ -198,8 +198,8 @@ describe('condition builders: SQL per dialect', () => {
 
     it('checks the column before the operator on the string path', () => {
         const { db } = makeDb('postgresql');
-        expect(() => db.set(CbUser).where('nope', 'IN', 5 as any)).toThrow(/not a mapped column or property/);
-        expect(() => db.set(CbUser).where('a.b', '=', 'x')).toThrow(/not a mapped column or property/);
+        expect(() => db.set(CbUser).where('nope' as any, 'IN', 5 as any)).toThrow(/not a mapped column or property/);
+        expect(() => db.set(CbUser).where('a.b' as any, '=', 'x')).toThrow(/not a mapped column or property/);
     });
 
     it('rejects a non-array for inArray and notInArray', () => {

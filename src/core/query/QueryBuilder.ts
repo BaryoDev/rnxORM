@@ -6,7 +6,7 @@ import { resolveColumn, resolvePropertyName } from "../expressions/PropertyCaptu
 import { buildWhere } from "../expressions/conditions";
 import { queryFilterPredicates } from "../QueryFilter";
 import { toCount, toExactNumber } from "../Numerics";
-import { assertColumn, assertLimit, convertValueToDb, columnTypeOf } from "../Identifiers";
+import { assertColumn, assertLimit, convertValueToDb, columnTypeOf, WhereOperator } from "../Identifiers";
 import { Predicate } from "./model/Predicate";
 import { AggregateFn } from "./model/Operand";
 import { SelectModel } from "./model/SelectModel";
@@ -43,10 +43,8 @@ export class QueryBuilder<T> {
      */
     where(condition: (entity: T) => Predicate): this;
     /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
-    where(column: keyof T & string, operator: string, value: any): this;
-    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
-    where(column: string, operator: string, value: any): this;
-    where(first: string | ((entity: T) => Predicate), operator?: string, value?: any): this {
+    where(column: keyof T & string, operator: WhereOperator, value: any): this;
+    where(first: (keyof T & string) | ((entity: T) => Predicate), operator?: string, value?: any): this {
         // The lambda is recorded, the string form is validated against metadata and a
         // closed operator set (issues #13/#24). Both resolve through one path, and
         // values are always bound as parameters.
@@ -82,9 +80,9 @@ export class QueryBuilder<T> {
      * Order results by column ascending
      */
     orderBy(column: keyof T & string): this;
-    orderBy(column: string): this;
-    orderBy(column: string): this {
-        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderBy'), direction: 'ASC' });
+    orderBy(selector: (entity: T) => unknown): this;
+    orderBy(column: (keyof T & string) | ((entity: T) => unknown)): this {
+        this.state.orderByColumns.push({ column: this.orderColumn(column, 'orderBy'), direction: 'ASC' });
         return this;
     }
 
@@ -92,10 +90,16 @@ export class QueryBuilder<T> {
      * Order results by column descending
      */
     orderByDescending(column: keyof T & string): this;
-    orderByDescending(column: string): this;
-    orderByDescending(column: string): this {
-        this.state.orderByColumns.push({ column: assertColumn(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
+    orderByDescending(selector: (entity: T) => unknown): this;
+    orderByDescending(column: (keyof T & string) | ((entity: T) => unknown)): this {
+        this.state.orderByColumns.push({ column: this.orderColumn(column, 'orderByDescending'), direction: 'DESC' });
         return this;
+    }
+
+    private orderColumn(column: string | ((entity: T) => unknown), apiName: string): string {
+        return typeof column === 'function'
+            ? resolveColumn(column, this.entityType, apiName)
+            : assertColumn(this.entityType, column, apiName);
     }
 
     /**

@@ -407,7 +407,7 @@ price!: number;
 
 ## Query Operators
 
-`.where(column, operator, value)` validates both identifier arguments at runtime before any SQL is assembled: the **column** must be a mapped property or column of the entity (renamed columns resolve to their mapped name), and the **operator** must come from the closed set `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`. Anything else throws. Values are always bound as parameters (never interpolated). The same validation guards `orderBy()`, `orderByDescending()`, `having()` (aggregate-over-mapped-column shapes only), and structured query-filter conditions.
+`.where(column, operator, value)` types its column as `keyof T` and its operator as the closed set below, and validates both at runtime before any SQL is assembled: the **column** must be a mapped property or column of the entity (renamed columns resolve to their mapped name), and the **operator** must come from the closed set `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`. Anything else throws. Values are always bound as parameters (never interpolated). The same validation guards `orderBy()`, `orderByDescending()`, `having()` (aggregate-over-mapped-column shapes only), and structured query-filter conditions.
 
 `IN` / `NOT IN` take an **array** and expand to one placeholder per element; an empty array compiles to the constant `1 = 0` (`IN`) or `1 = 1` (`NOT IN`) instead of invalid SQL. `IS` / `IS NOT` take **`null`** and emit `IS NULL` / `IS NOT NULL`, binding nothing. Passing a non-array to `IN`, or a non-null value to `IS`, throws.
 
@@ -427,7 +427,7 @@ Available: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `like`, `notLike`, `ilike`, `in
 
 The three-argument form `.where('age', '>', 18)` still works and builds the same SQL, but it is deprecated and will be removed in 4.0.
 
-`where()`, `orderBy()`, and `orderByDescending()` on `DbSet`, `QueryBuilder`, and `SelectQueryBuilder` carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. (Grouped `orderBy()` stays string-only: it also accepts projection aliases, which are not properties of `T`.) The plain-string forms remain supported for dynamic columns. Now safe to use with untrusted input like `orderBy(req.query.sort)`, which throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
+`where()`, `orderBy()`, and `orderByDescending()` on `DbSet`, `QueryBuilder`, and `SelectQueryBuilder` carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. (Grouped `orderBy()` stays string-only: it also accepts projection aliases, which are not properties of `T`.) The plain-string overloads are gone: a raw `string` column or operator does not compile, and `orderBy` also takes a selector (`orderBy(u => u.name)`). A dynamic column needs an `as any` cast, and an unmapped one still throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
 
 `skip()` and `take()` require a non-negative integer. They are the only query arguments interpolated into SQL rather than bound, so they are checked at runtime. TypeScript's `number` type does not survive to runtime.
 
@@ -438,7 +438,7 @@ users.where("name", "LIKE", "%doe%");
 users.where("name", "ILIKE", "%doe%"); // ILIKE is PostgreSQL-only
 users.where("status", "IN", ["active", "trial"]); // status IN ($1, $2)
 users.where("deletedAt", "IS", null);             // deletedat IS NULL
-users.where("age; DELETE FROM users", "=", 1); // throws: not a mapped column
+users.where("age; DELETE FROM users" as any, "=", 1); // throws: not a mapped column
 users.take("10; DELETE FROM users" as any);    // throws: not a non-negative integer
 ```
 

@@ -221,21 +221,52 @@ describe('query API rejects untrusted identifiers end-to-end', () => {
         return { db: new DbContext(provider), provider };
     }
 
-    it('where() rejects an injected column before any SQL is built', () => {
+    it('where() does not compile with an injected column', () => {
+        const { db } = makeDb();
+        const compileOnly = () =>
+            // @ts-expect-error a raw string is not a column of InjProduct
+            db.set(InjProduct).where('name; DROP TABLE inj_products; --', '=', 'x');
+        expect(compileOnly).toBeInstanceOf(Function);
+    });
+
+    it('where() does not compile with an injected operator', () => {
+        const { db } = makeDb();
+        const compileOnly = () =>
+            // @ts-expect-error the operator must be one of the known comparison operators
+            db.set(InjProduct).where('name', '= 1 OR 1', 'x');
+        expect(compileOnly).toBeInstanceOf(Function);
+    });
+
+    it('orderBy() does not compile with the classic sortable-table payload', () => {
+        const { db } = makeDb();
+        const compileOnly = () => [
+            // @ts-expect-error a raw string is not a column of InjProduct
+            db.set(InjProduct).orderBy('name; SELECT pg_sleep(10)'),
+            // @ts-expect-error same for the descending form
+            db.set(InjProduct).orderByDescending('name; SELECT pg_sleep(10)'),
+        ];
+        expect(compileOnly).toBeInstanceOf(Function);
+    });
+
+    it('an as any column still throws a column validation error', () => {
         const { db, provider } = makeDb();
-        expect(() => db.set(InjProduct).where('name; DROP TABLE inj_products; --', '=', 'x'))
-            .toThrow(/InjProduct/);
+        const payload = 'name; DROP TABLE inj_products; --' as any;
+        expect(() => db.set(InjProduct).where(payload, '=', 'x')).toThrow(/InjProduct/);
+        expect(() => db.set(InjProduct).orderBy(payload)).toThrow(/InjProduct/);
+        expect(() => db.set(InjProduct).orderByDescending(payload)).toThrow(/InjProduct/);
+        expect(() => db.set(InjProduct).select(p => p.name).orderBy(payload)).toThrow(/InjProduct/);
         expect(provider.calls).toHaveLength(0);
     });
 
-    it('where() rejects an injected operator', () => {
+    it('an as any operator still throws', () => {
         const { db } = makeDb();
-        expect(() => db.set(InjProduct).where('name', '= 1 OR 1', 'x')).toThrow(/not supported/);
+        expect(() => db.set(InjProduct).where('name', '= 1 OR 1' as any, 'x')).toThrow(/not supported/);
     });
 
-    it('orderBy() rejects the classic sortable-table payload', () => {
-        const { db } = makeDb();
-        expect(() => db.set(InjProduct).orderBy('name; SELECT pg_sleep(10)')).toThrow(/InjProduct/);
+    it('orderBy() accepts a selector', async () => {
+        const { db, provider } = makeDb();
+        await db.set(InjProduct).orderBy(p => p.price).toList();
+        expect(provider.lastCall!.sql).toContain('ORDER BY unit_price ASC');
     });
 
     it('having() rejects non-aggregate expressions', () => {
