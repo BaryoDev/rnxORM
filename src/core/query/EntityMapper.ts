@@ -43,7 +43,7 @@ export function mapRowToEntity<T>(
     const metadata = (context?.metadata ?? MetadataStorage.get()).getEntity(entityType);
     const track = !noTracking && !!context;
 
-    // Identity map lookup (see DbSet.mapRowToEntity for rationale).
+    // Identity map lookup (tracked instance wins over fresh database values, EF Core semantics).
     const pk = track ? resolvePkValue(metadata, row) : null;
     if (pk) {
         const existing = context!.changeTracker.findByKey(entityType, pk.pkValue);
