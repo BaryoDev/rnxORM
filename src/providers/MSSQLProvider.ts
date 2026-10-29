@@ -1,5 +1,5 @@
 import * as mssql from "mssql";
-import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
+import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
 import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
@@ -35,9 +35,61 @@ const NORMALIZE_MAP: Readonly<Record<string, string>> = {
     'datetime': 'timestamp',
 };
 
+async function runRequest(
+    request: mssql.Request,
+    text: string,
+    params?: QueryParameter[]
+): Promise<QueryResult> {
+    if (params) {
+        params.forEach((param, index) => {
+            request.input(`p${index}`, param);
+        });
+    }
+
+    const result = await request.query(text);
+
+    return {
+        rows: result.recordset || [],
+        rowCount: result.rowsAffected[0] || 0,
+    };
+}
+
+/** A transaction on its own pooled connection, released when it ends. */
+class MSSQLTransaction implements ITransaction {
+    #transaction: mssql.Transaction | null;
+
+    constructor(transaction: mssql.Transaction) {
+        this.#transaction = transaction;
+    }
+
+    get isOpen(): boolean {
+        return this.#transaction !== null;
+    }
+
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
+        if (!this.#transaction) {
+            throw new Error('The transaction has already ended.');
+        }
+        return runRequest(new mssql.Request(this.#transaction), text, params);
+    }
+
+    async commit(): Promise<void> {
+        const transaction = this.#transaction;
+        if (!transaction) return;
+        this.#transaction = null;
+        await transaction.commit();
+    }
+
+    async rollback(): Promise<void> {
+        const transaction = this.#transaction;
+        if (!transaction) return;
+        this.#transaction = null;
+        await transaction.rollback();
+    }
+}
+
 export class MSSQLProvider implements IDatabaseProvider {
     #pool: mssql.ConnectionPool | null = null;
-    #transaction: mssql.Transaction | null = null;
     private config: mssql.config;
 
     getDialect(): Dialect {
@@ -129,57 +181,14 @@ export class MSSQLProvider implements IDatabaseProvider {
         if (!this.#pool) {
             throw new Error("Not connected to database");
         }
-
-        const request = this.#transaction
-            ? new mssql.Request(this.#transaction)
-            : this.#pool.request();
-
-        if (params) {
-            params.forEach((param, index) => {
-                request.input(`p${index}`, param);
-            });
-        }
-
-        const result = await request.query(text);
-
-        return {
-            rows: result.recordset || [],
-            rowCount: result.rowsAffected[0] || 0,
-        };
+        return runRequest(this.#pool.request(), text, params);
     }
 
-    async beginTransaction(): Promise<void> {
-        // Overwriting this.#transaction orphaned the previous one: never
-        // committed, never rolled back, holding its pooled connection and its
-        // locks until the pool timed it out (issue #38).
-        if (this.#transaction) {
-            throw new Error(
-                'A transaction is already open on this provider. Nested transactions are ' +
-                'not supported; commit or roll back the current one first, or use a ' +
-                'separate DbContext.'
-            );
-        }
+    async beginTransaction(): Promise<ITransaction> {
         if (!this.#pool) await this.connect();
-        this.#transaction = new mssql.Transaction(this.#pool!);
-        await this.#transaction.begin();
-    }
-
-    async commitTransaction(): Promise<void> {
-        if (this.#transaction) {
-            await this.#transaction.commit();
-            this.#transaction = null;
-        }
-    }
-
-    async rollbackTransaction(): Promise<void> {
-        if (this.#transaction) {
-            await this.#transaction.rollback();
-            this.#transaction = null;
-        }
-    }
-
-    isInTransaction(): boolean {
-        return this.#transaction !== null;
+        const transaction = new mssql.Transaction(this.#pool!);
+        await transaction.begin();
+        return new MSSQLTransaction(transaction);
     }
 
     mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES,

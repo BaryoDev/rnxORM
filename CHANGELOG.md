@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Breaking
+
+- **Explicit transaction handle** (issue #52). `IDatabaseProvider.beginTransaction()`
+  now returns an `ITransaction` (`query`, `commit`, `rollback`, `isOpen`), and
+  `commitTransaction()`, `rollbackTransaction()` and `isInTransaction()` are
+  gone from the provider interface. The provider keeps no transaction state:
+  `provider.query()` always runs on the pool, and each handle holds its own
+  connection until it is committed or rolled back. A custom provider must move
+  to the new shape; the three built-in providers already have.
+  `DbContext` holds the current handle, so two contexts on one provider can
+  each run a transaction. `db.beginTransaction()` returns the handle and
+  `db.commitTransaction()` and `db.rollbackTransaction()` still work.
+  `MigrationBuilder` takes an optional second constructor argument, the
+  executor its statements run on, and `Migrator` passes each migration its own
+  handle. `connect()` no longer pins a connection for later queries; it only
+  checks that one can be opened.
+
 ### Fixed
 
 - **One metadata registry per process** (issue #53). A second copy of the

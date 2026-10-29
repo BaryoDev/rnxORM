@@ -1,4 +1,4 @@
-import { IDatabaseProvider, QueryResult } from '../../src/providers/IDatabaseProvider';
+import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
 
@@ -44,7 +44,9 @@ export class SqlCaptureProvider implements IDatabaseProvider {
         this.calls = [];
         this.resultQueue = [];
         this.transactionCalls = [];
-        this.transactionDepth = 0;
+        this.queryConnections = [];
+        this.openTransactions = 0;
+        this.failWhen = undefined;
     }
 
     getDialect(): Dialect {
@@ -60,32 +62,57 @@ export class SqlCaptureProvider implements IDatabaseProvider {
     }
 
     async query(text: string, params?: any[]): Promise<QueryResult> {
+        return this.record('pool', text, params);
+    }
+
+    /**
+     * Which connection ran each entry of `calls`: 'pool' for a plain
+     * provider.query(), 'tx1', 'tx2', ... for a transaction handle.
+     */
+    public queryConnections: string[] = [];
+
+    /** When set, a statement it returns an error for is recorded, then throws. */
+    public failWhen?: (sql: string) => Error | undefined;
+
+    private record(connection: string, text: string, params?: any[]): QueryResult {
         this.calls.push({ sql: text, params });
+        this.queryConnections.push(connection);
+        const failure = this.failWhen?.(text);
+        if (failure) throw failure;
         return this.resultQueue.length > 0 ? this.resultQueue.shift()! : this.defaultResult;
     }
 
     /** Transaction lifecycle calls, in order, so tests can assert nesting. */
     public transactionCalls: ('begin' | 'commit' | 'rollback')[] = [];
 
-    private transactionDepth = 0;
+    /** Handles begun and not yet committed or rolled back. */
+    public openTransactions = 0;
 
-    async beginTransaction(): Promise<void> {
+    private transactionCount = 0;
+
+    async beginTransaction(): Promise<ITransaction> {
         this.transactionCalls.push('begin');
-        this.transactionDepth++;
-    }
-
-    async commitTransaction(): Promise<void> {
-        this.transactionCalls.push('commit');
-        this.transactionDepth = Math.max(0, this.transactionDepth - 1);
-    }
-
-    async rollbackTransaction(): Promise<void> {
-        this.transactionCalls.push('rollback');
-        this.transactionDepth = Math.max(0, this.transactionDepth - 1);
-    }
-
-    isInTransaction(): boolean {
-        return this.transactionDepth > 0;
+        this.openTransactions++;
+        const id = `tx${++this.transactionCount}`;
+        let open = true;
+        const end = (call: 'commit' | 'rollback') => async () => {
+            if (!open) return;
+            open = false;
+            this.transactionCalls.push(call);
+            this.openTransactions--;
+        };
+        return {
+            id,
+            get isOpen() {
+                return open;
+            },
+            query: async (text: string, params?: any[]) => {
+                if (!open) throw new Error('The transaction has already ended.');
+                return this.record(id, text, params);
+            },
+            commit: end('commit'),
+            rollback: end('rollback'),
+        } as ITransaction & { id: string };
     }
 
     getParameterPlaceholder(index: number): string {

@@ -1,5 +1,5 @@
 import * as mariadb from "mariadb";
-import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
+import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
 import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
@@ -34,12 +34,72 @@ const NORMALIZE_MAP: Readonly<Record<string, string>> = {
     'varchar': 'varchar',
 };
 
+async function runQuery(
+    conn: mariadb.Connection,
+    text: string,
+    params?: QueryParameter[]
+): Promise<QueryResult> {
+    const result = await conn.query(text, params);
+
+    // MariaDB returns different formats depending on query type
+    const rows = Array.isArray(result) ? result : [result];
+    const rowCount = result.affectedRows !== undefined ? result.affectedRows : rows.length;
+
+    return {
+        rows: rows,
+        rowCount: rowCount,
+        // mariadb returns insertId as a BigInt. Number() truncated
+        // anything above 2^53 into a wrong key (issue #39).
+        insertId: result.insertId !== undefined && result.insertId !== null
+            ? toExactNumber(result.insertId)
+            : undefined,
+    };
+}
+
+/** A transaction pinned to one pooled connection, released when it ends. */
+class MariaDBTransaction implements ITransaction {
+    #conn: mariadb.PoolConnection | null;
+
+    constructor(conn: mariadb.PoolConnection) {
+        this.#conn = conn;
+    }
+
+    get isOpen(): boolean {
+        return this.#conn !== null;
+    }
+
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
+        if (!this.#conn) {
+            throw new Error('The transaction has already ended.');
+        }
+        return runQuery(this.#conn, text, params);
+    }
+
+    async commit(): Promise<void> {
+        const conn = this.#conn;
+        if (!conn) return;
+        this.#conn = null;
+        try {
+            await conn.commit();
+        } finally {
+            await conn.release();
+        }
+    }
+
+    async rollback(): Promise<void> {
+        const conn = this.#conn;
+        if (!conn) return;
+        this.#conn = null;
+        try {
+            await conn.rollback();
+        } finally {
+            await conn.release();
+        }
+    }
+}
+
 export class MariaDBProvider implements IDatabaseProvider {
     #pool: mariadb.Pool;
-    #connection: mariadb.PoolConnection | null = null;
-    #inTransaction: boolean = false;
-    /** Whether the transaction acquired the connection it runs on. */
-    #connectionOwnedByTransaction = false;
 
     getDialect(): Dialect {
         return 'mariadb';
@@ -85,100 +145,34 @@ export class MariaDBProvider implements IDatabaseProvider {
     }
 
     async connect(): Promise<void> {
-        this.#connection = await this.#pool.getConnection();
+        // Fail fast on bad credentials or an unreachable host. The connection
+        // goes straight back: queries use the pool, never a pinned connection.
+        const conn = await this.#pool.getConnection();
+        await conn.release();
     }
 
     async disconnect(): Promise<void> {
-        if (this.#connection) {
-            await this.#connection.release();
-            this.#connection = null;
-        }
         await this.#pool.end();
     }
 
     async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
-        const conn = this.#connection || await this.#pool.getConnection();
-
+        const conn = await this.#pool.getConnection();
         try {
-            const result = await conn.query(text, params);
-
-            // MariaDB returns different formats depending on query type
-            const rows = Array.isArray(result) ? result : [result];
-            const rowCount = result.affectedRows !== undefined ? result.affectedRows : rows.length;
-
-            return {
-                rows: rows,
-                rowCount: rowCount,
-                // mariadb returns insertId as a BigInt. Number() truncated
-                // anything above 2^53 into a wrong key (issue #39).
-                insertId: result.insertId !== undefined && result.insertId !== null
-                    ? toExactNumber(result.insertId)
-                    : undefined,
-            };
+            return await runQuery(conn, text, params);
         } finally {
-            if (!this.#connection) {
-                await conn.release();
-            }
+            await conn.release();
         }
     }
 
-    async beginTransaction(): Promise<void> {
-        // A second START TRANSACTION is an implicit COMMIT of the first on
-        // MariaDB, so nesting silently ends the outer unit of work (issue #38).
-        if (this.#inTransaction) {
-            throw new Error(
-                'A transaction is already open on this provider. Nested transactions are ' +
-                'not supported; commit or roll back the current one first, or use a ' +
-                'separate DbContext.'
-            );
-        }
-
-        // Claim the slot before the first await. Setting it only after BEGIN
-        // left a window where two concurrent callers both passed the guard
-        // above and then collided on the same provider state.
-        this.#inTransaction = true;
+    async beginTransaction(): Promise<ITransaction> {
+        const conn = await this.#pool.getConnection();
         try {
-            if (!this.#connection) {
-                await this.connect();
-                this.#connectionOwnedByTransaction = true;
-            }
-            await this.#connection?.beginTransaction();
+            await conn.beginTransaction();
         } catch (error) {
-            // Starting failed, so release the claim and any connection it took.
-            this.#inTransaction = false;
-            if (this.#connectionOwnedByTransaction && this.#connection) {
-                await this.#connection.release();
-                this.#connection = null;
-                this.#connectionOwnedByTransaction = false;
-            }
+            await conn.release();
             throw error;
         }
-    }
-
-    async commitTransaction(): Promise<void> {
-        if (!this.#connection || !this.#inTransaction) return;
-        await this.#connection.commit();
-        await this.endTransaction();
-    }
-
-    async rollbackTransaction(): Promise<void> {
-        if (!this.#connection || !this.#inTransaction) return;
-        await this.#connection.rollback();
-        await this.endTransaction();
-    }
-
-    isInTransaction(): boolean {
-        return this.#inTransaction;
-    }
-
-    /** Release the transaction's connection only if the transaction acquired it. */
-    private async endTransaction(): Promise<void> {
-        this.#inTransaction = false;
-        if (this.#connectionOwnedByTransaction && this.#connection) {
-            await this.#connection.release();
-            this.#connection = null;
-            this.#connectionOwnedByTransaction = false;
-        }
+        return new MariaDBTransaction(conn);
     }
 
     mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);

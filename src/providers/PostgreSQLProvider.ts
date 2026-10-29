@@ -1,5 +1,5 @@
 import { Pool, PoolClient } from "pg";
-import { DatabaseConfig, IDatabaseProvider, QueryResult } from "./IDatabaseProvider";
+import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
 import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
@@ -33,18 +33,58 @@ const NORMALIZE_MAP: Readonly<Record<string, string>> = {
     'double precision': 'double',
 };
 
+function toQueryResult(result: { rows: any[]; rowCount: number | null }): QueryResult {
+    return {
+        rows: result.rows,
+        rowCount: result.rowCount || 0,
+    };
+}
+
+/** A transaction pinned to one pooled client, released when it ends. */
+class PostgreSQLTransaction implements ITransaction {
+    #client: PoolClient | null;
+
+    constructor(client: PoolClient) {
+        this.#client = client;
+    }
+
+    get isOpen(): boolean {
+        return this.#client !== null;
+    }
+
+    async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
+        if (!this.#client) {
+            throw new Error('The transaction has already ended.');
+        }
+        return toQueryResult(await this.#client.query(text, params));
+    }
+
+    commit(): Promise<void> {
+        return this.#end('COMMIT');
+    }
+
+    rollback(): Promise<void> {
+        return this.#end('ROLLBACK');
+    }
+
+    /** Run the closing statement, then release the client even if it fails. */
+    async #end(statement: string): Promise<void> {
+        const client = this.#client;
+        if (!client) return;
+        this.#client = null;
+        try {
+            await client.query(statement);
+            client.release();
+        } catch (error) {
+            // The connection's state is unknown, so drop it from the pool.
+            client.release(error instanceof Error ? error : true);
+            throw error;
+        }
+    }
+}
+
 export class PostgreSQLProvider implements IDatabaseProvider {
     #pool: Pool;
-    #client: PoolClient | null = null;
-    /**
-     * Whether this provider currently holds an open transaction, and whether
-     * the client it runs on was acquired for that transaction. A client the
-     * caller acquired through connect() must outlive the transaction: commit
-     * used to release it, after which every later query silently drew an
-     * arbitrary pool connection (issue #38).
-     */
-    #transactionOpen = false;
-    #clientOwnedByTransaction = false;
 
     getDialect(): Dialect {
         return 'postgresql';
@@ -93,84 +133,29 @@ export class PostgreSQLProvider implements IDatabaseProvider {
     }
 
     async connect(): Promise<void> {
-        this.#client = await this.#pool.connect();
+        // Fail fast on bad credentials or an unreachable host. The client goes
+        // straight back: queries use the pool, never a pinned connection.
+        const client = await this.#pool.connect();
+        client.release();
     }
 
     async disconnect(): Promise<void> {
-        if (this.#client) {
-            this.#client.release();
-            this.#client = null;
-        }
         await this.#pool.end();
     }
 
     async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
-        const result = this.#client
-            ? await this.#client.query(text, params)
-            : await this.#pool.query(text, params);
-
-        return {
-            rows: result.rows,
-            rowCount: result.rowCount || 0,
-        };
+        return toQueryResult(await this.#pool.query(text, params));
     }
 
-    async beginTransaction(): Promise<void> {
-        if (this.#transactionOpen) {
-            throw new Error(
-                'A transaction is already open on this provider. Nested transactions are ' +
-                'not supported; commit or roll back the current one first, or use a ' +
-                'separate DbContext.'
-            );
-        }
-        // Claim the slot before the first await. Setting it only after BEGIN
-        // left a window where two concurrent callers both passed the guard
-        // above and then collided on the same provider state.
-        this.#transactionOpen = true;
+    async beginTransaction(): Promise<ITransaction> {
+        const client = await this.#pool.connect();
         try {
-            if (!this.#client) {
-                await this.connect();
-                this.#clientOwnedByTransaction = true;
-            }
-            await this.#client?.query('BEGIN');
+            await client.query('BEGIN');
         } catch (error) {
-            // Starting failed, so release the claim and any client it took.
-            this.#transactionOpen = false;
-            if (this.#clientOwnedByTransaction && this.#client) {
-                this.#client.release();
-                this.#client = null;
-                this.#clientOwnedByTransaction = false;
-            }
+            client.release(error instanceof Error ? error : true);
             throw error;
         }
-    }
-
-    async commitTransaction(): Promise<void> {
-        if (!this.#transactionOpen || !this.#client) return;
-        await this.#client.query('COMMIT');
-        this.endTransaction();
-    }
-
-    async rollbackTransaction(): Promise<void> {
-        if (!this.#transactionOpen || !this.#client) return;
-        await this.#client.query('ROLLBACK');
-        this.endTransaction();
-    }
-
-    isInTransaction(): boolean {
-        return this.#transactionOpen;
-    }
-
-    /**
-     * Release the transaction's client only if the transaction acquired it.
-     */
-    private endTransaction(): void {
-        this.#transactionOpen = false;
-        if (this.#clientOwnedByTransaction && this.#client) {
-            this.#client.release();
-            this.#client = null;
-            this.#clientOwnedByTransaction = false;
-        }
+        return new PostgreSQLTransaction(client);
     }
 
     mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);

@@ -1,6 +1,7 @@
 import { DbContext } from "../core/DbContext";
 import { Migration, MigrationRecord } from "./Migration";
-import { MigrationBuilder } from "./MigrationBuilder";
+import { MigrationBuilder, SqlExecutor } from "./MigrationBuilder";
+import { ITransaction } from "../providers/IDatabaseProvider";
 
 /**
  * Coerce a driver-supplied timestamp to a Date.
@@ -114,12 +115,12 @@ export class Migrator {
     /**
      * Record a migration as applied
      */
-    private async recordMigration(migration: Migration): Promise<void> {
+    private async recordMigration(migration: Migration, executor: SqlExecutor): Promise<void> {
         const provider = this.context.getProvider();
         const placeholder1 = provider.getParameterPlaceholder(1);
         const placeholder2 = provider.getParameterPlaceholder(2);
 
-        await provider.query(
+        await executor.query(
             `INSERT INTO ${Migrator.HISTORY_TABLE} (migration_id, migration_name) VALUES (${placeholder1}, ${placeholder2})`,
             [migration.id, migration.name]
         );
@@ -128,14 +129,30 @@ export class Migrator {
     /**
      * Remove a migration record
      */
-    private async removeMigrationRecord(migrationId: string): Promise<void> {
+    private async removeMigrationRecord(migrationId: string, executor: SqlExecutor): Promise<void> {
         const provider = this.context.getProvider();
         const placeholder = provider.getParameterPlaceholder(1);
 
-        await provider.query(
+        await executor.query(
             `DELETE FROM ${Migrator.HISTORY_TABLE} WHERE migration_id = ${placeholder}`,
             [migrationId]
         );
+    }
+
+    /**
+     * Run work in its own transaction: commit when it resolves, roll back when
+     * it throws. Each migration gets a fresh handle on its own connection.
+     */
+    private async inTransaction(work: (transaction: ITransaction) => Promise<void>): Promise<void> {
+        const transaction = await this.context.getProvider().beginTransaction();
+        try {
+            await work(transaction);
+            await transaction.commit();
+        } catch (error) {
+            // Do not let a failed rollback hide the error that caused it.
+            await transaction.rollback().catch(() => undefined);
+            throw error;
+        }
     }
 
     /**
@@ -177,24 +194,20 @@ export class Migrator {
         console.log(`Found ${pending.length} pending migration(s):`);
         pending.forEach(m => console.log(`  - ${m.id}_${m.name}`));
 
-        const provider = this.context.getProvider();
-
         for (const migration of pending) {
             console.log(`Applying migration: ${migration.id}_${migration.name}...`);
 
             try {
-                await provider.beginTransaction();
+                await this.inTransaction(async (transaction) => {
+                    const builder = new MigrationBuilder(this.context.getProvider(), transaction);
+                    await migration.up(builder);
+                    await builder.execute();
 
-                const builder = new MigrationBuilder(provider);
-                await migration.up(builder);
-                await builder.execute();
-
-                await this.recordMigration(migration);
-                await provider.commitTransaction();
+                    await this.recordMigration(migration, transaction);
+                });
 
                 console.log(`✓ Applied: ${migration.id}_${migration.name}`);
             } catch (error) {
-                await provider.rollbackTransaction();
                 console.error(`✗ Failed to apply migration: ${migration.id}_${migration.name}`);
                 console.error(error);
                 throw error;
@@ -220,22 +233,18 @@ export class Migrator {
         const lastMigration = applied[applied.length - 1];
         console.log(`Reverting migration: ${lastMigration.id}_${lastMigration.name}...`);
 
-        const provider = this.context.getProvider();
-
         try {
-            await provider.beginTransaction();
+            await this.inTransaction(async (transaction) => {
+                const builder = new MigrationBuilder(this.context.getProvider(), transaction);
+                await lastMigration.down(builder);
+                await builder.execute();
 
-            const builder = new MigrationBuilder(provider);
-            await lastMigration.down(builder);
-            await builder.execute();
-
-            await this.removeMigrationRecord(lastMigration.id);
-            await provider.commitTransaction();
+                await this.removeMigrationRecord(lastMigration.id, transaction);
+            });
 
             console.log(`✓ Reverted: ${lastMigration.id}_${lastMigration.name}`);
             return true;
         } catch (error) {
-            await provider.rollbackTransaction();
             console.error(`✗ Failed to revert migration: ${lastMigration.id}_${lastMigration.name}`);
             console.error(error);
             throw error;
@@ -259,26 +268,23 @@ export class Migrator {
 
         console.log(`Reverting ${migrationsToRevert.length} migration(s) to ${targetMigrationId}...`);
 
-        const provider = this.context.getProvider();
         let revertedCount = 0;
 
         for (const migration of migrationsToRevert) {
             console.log(`Reverting: ${migration.id}_${migration.name}...`);
 
             try {
-                await provider.beginTransaction();
+                await this.inTransaction(async (transaction) => {
+                    const builder = new MigrationBuilder(this.context.getProvider(), transaction);
+                    await migration.down(builder);
+                    await builder.execute();
 
-                const builder = new MigrationBuilder(provider);
-                await migration.down(builder);
-                await builder.execute();
-
-                await this.removeMigrationRecord(migration.id);
-                await provider.commitTransaction();
+                    await this.removeMigrationRecord(migration.id, transaction);
+                });
 
                 console.log(`✓ Reverted: ${migration.id}_${migration.name}`);
                 revertedCount++;
             } catch (error) {
-                await provider.rollbackTransaction();
                 console.error(`✗ Failed to revert migration: ${migration.id}_${migration.name}`);
                 console.error(error);
                 throw error;

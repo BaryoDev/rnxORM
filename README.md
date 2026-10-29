@@ -185,14 +185,36 @@ try {
 }
 ```
 
-Nesting is not supported: a second `beginTransaction()` throws rather than
-silently ending the first (which is what MariaDB and SQL Server would otherwise
-do).
+`beginTransaction()` also returns the transaction handle. The context keeps it
+as its current transaction, so queries, `executeSqlRaw()` and `saveChanges()`
+run inside it until it ends. You can end it through the context
+(`db.commitTransaction()`) or through the handle (`tx.commit()`); the context
+notices either way.
 
-**One `DbContext` per request.** Transaction state lives on the provider
-instance, so two concurrent requests sharing a context share its transaction,
-and one request's commit ends the other's unit of work. Build a context per
-request and dispose it when the request finishes.
+```typescript
+const tx = await db.beginTransaction();
+await tx.query('UPDATE accounts SET balance = balance - 10 WHERE id = $1', [1]);
+await tx.commit();               // releases the connection
+```
+
+The handle owns one database connection for its lifetime and releases it on
+commit or rollback. The provider itself keeps no transaction state, and
+`provider.query()` always runs on the pool, outside any transaction.
+
+Two contexts on one provider are two independent units of work, so each can
+hold its own transaction at the same time. Nesting on a single context is not
+supported: a second `beginTransaction()` throws rather than silently ending the
+first (which is what MariaDB and SQL Server would otherwise do). There are no
+savepoints.
+
+**One `DbContext` per request.** The current transaction lives on the context,
+so two concurrent requests sharing a context share its transaction, and one
+request's commit ends the other's unit of work. Build a context per request and
+dispose it when the request finishes.
+
+Migrations run each migration in its own handle, and `MigrationBuilder` takes
+an optional second constructor argument, the object its statements run on
+(default: the provider).
 
 ### 3. Basic CRUD Operations with Change Tracking
 
@@ -255,7 +277,7 @@ Every ✅ and ⚠️ claim is **evidence-based**: it is backed by automated test
 
 - **Multi-Database Support**: PostgreSQL, SQL Server, MariaDB/MySQL providers
 - **Change Tracking & SaveChanges()**: EF Core-style automatic change detection and batch persistence
-- **Transactions**: `saveChanges()` wraps its writes in a transaction, or enlists in one you opened with `beginTransaction()` rather than nesting. Transaction state lives on the provider, so a `DbContext` in a transaction must not be shared across concurrent requests: use one context per request. See [Transactions](#transactions)
+- **Transactions**: `saveChanges()` wraps its writes in a transaction, or enlists in one you opened with `beginTransaction()` rather than nesting. The current transaction lives on the `DbContext`, so a context in a transaction must not be shared across concurrent requests: use one context per request. See [Transactions](#transactions)
 - **Concurrency Tokens**: Optimistic concurrency control via `isConcurrencyToken()` (token check in UPDATE WHERE clause, auto-increment on save, conflict detection)
 - **Data Seeding**: Idempotent seeding via `hasData()` in ModelBuilder
 - **Decorators**: `@Entity`, `@Column`, `@PrimaryKey`, `@Index`, `@Unique`
@@ -304,6 +326,7 @@ Each implemented feature maps to the automated tests that prove it. Unit suites 
 | Multi-database support (3 providers) | `test/integration/ActualApi.test.ts` against real containers in CI (`.github/workflows/integration.yml`) |
 | Change tracking & state transitions | `test/unit/ChangeTracker.test.ts`, `test/unit/EntityEntry.test.ts` |
 | `saveChanges()` transaction wrapping & rollback on error | `test/unit/TrackingTransactionsAndSchema.test.ts` |
+| Transaction handle (independent contexts, pool vs transaction connection, caller-owned transactions) | `test/unit/ProviderTransactions.test.ts`, `test/integration/Transactions.test.ts` |
 | `asNoTracking()` (untracked, changes not persisted) | `test/unit/TrackingTransactionsAndSchema.test.ts` |
 | Concurrency tokens (end-to-end conflict detection) | `test/unit/ConcurrencyToken.test.ts`, `test/unit/SqlGeneration.test.ts` |
 | Per-dialect SQL: pagination, placeholders, generated-key retrieval, IDENTITY_INSERT | `test/unit/SqlGeneration.test.ts` (exact SQL strings), verified on real engines by the integration run |
@@ -2510,6 +2533,11 @@ class SQLiteProvider implements IDatabaseProvider {
     // ... implement remaining interface methods
 }
 ```
+
+`query()` must always run on the pool. `beginTransaction()` must acquire its own
+connection, run `BEGIN` on it, and return an `ITransaction` whose `query()` runs
+on that connection and whose `commit()` and `rollback()` release it. Keep no
+transaction state on the provider.
 
 Built-in dialect identifiers: `'postgresql'`, `'mssql'`, `'mariadb'`.
 
