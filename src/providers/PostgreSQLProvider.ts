@@ -1,4 +1,5 @@
-import { Pool, PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
+import { loadDriver } from "./loadDriver";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
@@ -129,7 +130,16 @@ export class PostgreSQLProvider implements IDatabaseProvider {
             // default (and PGSSLMODE) still applies when they did not.
             ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
         };
-        this.#pool = new Pool(this.#poolConfig);
+        const pg = loadDriver<typeof import("pg")>("PostgreSQLProvider", "pg", () => {
+            // eslint-disable-next-line no-useless-catch
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                return require("pg");
+            } catch (error) {
+                throw error;
+            }
+        });
+        this.#pool = new pg.Pool(this.#poolConfig);
     }
 
     async connect(): Promise<void> {

@@ -1,4 +1,5 @@
-import * as mariadb from "mariadb";
+import type * as mariadb from "mariadb";
+import { loadDriver } from "./loadDriver";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
@@ -139,7 +140,16 @@ export class MariaDBProvider implements IDatabaseProvider {
             idleTimeout: config.idleTimeoutMillis || 30000,
             ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
         };
-        this.#pool = mariadb.createPool(this.#poolConfig);
+        const driver = loadDriver<typeof mariadb>("MariaDBProvider", "mariadb", () => {
+            // eslint-disable-next-line no-useless-catch
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                return require("mariadb");
+            } catch (error) {
+                throw error;
+            }
+        });
+        this.#pool = driver.createPool(this.#poolConfig);
     }
 
     async connect(): Promise<void> {

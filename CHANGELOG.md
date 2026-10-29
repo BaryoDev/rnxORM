@@ -2,8 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- **ES module support.** `rnxorm` now has an `exports` map, so both `import` and
+  `require` work. The ES entry is a thin wrapper over the CommonJS build, so
+  there is still one copy of the code and one metadata registry.
+
 ### Breaking
 
+- **Drivers are optional peer dependencies** (issue #10). `pg`, `mssql` and
+  `mariadb` are no longer installed with `rnxorm`. The app installs the one it
+  uses (`pg` 8, `mssql` 10 or 11, `mariadb` 3). A provider loads its driver
+  when it is constructed and throws an error naming the package if it is
+  missing. Importing `rnxorm` loads no driver.
+- **Deep imports are closed.** The `exports` map only exposes `rnxorm` and
+  `rnxorm/package.json`, so `rnxorm/dist/...` now fails with
+  `ERR_PACKAGE_PATH_NOT_EXPORTED`.
 - **Explicit transaction handle** (issue #52). `IDatabaseProvider.beginTransaction()`
   now returns an `ITransaction` (`query`, `commit`, `rollback`, `isOpen`), and
   `commitTransaction()`, `rollbackTransaction()` and `isInTransaction()` are
