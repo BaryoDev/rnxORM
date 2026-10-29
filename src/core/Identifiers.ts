@@ -1,6 +1,6 @@
 import { MetadataStorage } from "./MetadataStorage";
 import { IDatabaseProvider } from "../providers/IDatabaseProvider";
-import { Operand } from "./query/model/Operand";
+import { AggregateFn, Operand } from "./query/model/Operand";
 import { Predicate } from "./query/model/Predicate";
 
 /**
@@ -193,22 +193,31 @@ export function findColumn(
 /**
  * Validate the first argument of `having()`: either a mapped column reference
  * or an aggregate expression over one (`COUNT(*)`, `SUM(price)`, ...).
- * Returns the string to embed in SQL.
+ * Returns the operand the translator renders.
  * @throws when the expression is neither
  */
 export function assertHavingExpression(
     entityType: new (...args: any[]) => any,
     expression: string,
     apiName: string
-): string {
+): Operand {
     const aggregate = expression.trim().match(AGGREGATE_EXPRESSION);
     if (aggregate) {
-        const fn = aggregate[1].toUpperCase();
+        const fn = aggregate[1].toLowerCase() as AggregateFn;
         const inner = aggregate[2];
-        if (inner === '*') return `${fn}(*)`;
-        return `${fn}(${assertColumn(entityType, inner, apiName)})`;
+        if (inner === '*') return { kind: 'agg', fn };
+        const column = assertColumn(entityType, inner, apiName);
+        return { kind: 'agg', fn, column, columnType: columnTypeOf(entityType, column) };
     }
-    return assertColumn(entityType, expression, apiName);
+    return { kind: 'column', name: assertColumn(entityType, expression, apiName) };
+}
+
+/** The declared type of a mapped column, by database column name. */
+export function columnTypeOf(
+    entityType: new (...args: any[]) => any,
+    columnName: string
+): string | undefined {
+    return MetadataStorage.get().getEntity(entityType)?.columns.find(c => c.columnName === columnName)?.type;
 }
 
 /**
@@ -259,13 +268,13 @@ export function assertAlias(name: string, apiName: string): string {
  * entry point that also applies the column's value converter.
  */
 export function operatorToPredicate(
-    column: string,
+    column: string | Operand,
     operator: string,
     value: any,
     apiName: string = 'where'
 ): Predicate {
     const sqlOperator = assertOperator(operator, apiName);
-    const left: Operand = { kind: 'column', name: column };
+    const left: Operand = typeof column === 'string' ? { kind: 'column', name: column } : column;
 
     switch (sqlOperator) {
         case '=': return { op: 'eq', left, value };

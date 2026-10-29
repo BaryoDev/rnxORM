@@ -325,6 +325,38 @@ const shared: Case[] = [
         params: ['A%', 10],
     },
     {
+        name: 'aggregates carry a column type and still render the same text',
+        model: {
+            table: T,
+            items: [
+                { operand: { kind: 'agg', fn: 'sum', column: 'age', columnType: 'decimal' }, alias: 'total' },
+                { operand: { kind: 'agg', fn: 'avg', column: 'age', columnType: 'decimal' }, alias: 'mean' },
+                { operand: { kind: 'agg', fn: 'min', column: 'age', columnType: 'int' }, alias: 'lo' },
+                { operand: { kind: 'agg', fn: 'max', column: 'age', columnType: 'int' }, alias: 'hi' },
+            ],
+        },
+        text: `SELECT SUM(age) as total, AVG(age) as mean, MIN(age) as lo, MAX(age) as hi FROM ${T}`,
+        params: [],
+    },
+    {
+        name: 'having over a typed aggregate with where params first',
+        model: {
+            table: T,
+            items: [{ operand: col('age') }, { operand: agg('count'), alias: 'n' }],
+            where: { op: 'gt', left: col('age'), value: 18 },
+            groupBy: ['age'],
+            having: {
+                op: 'and',
+                parts: [
+                    { op: 'gt', left: { kind: 'agg', fn: 'avg', column: 'age', columnType: 'decimal' }, value: 30 },
+                    { op: 'lte', left: agg('count'), value: 9 },
+                ],
+            },
+        },
+        text: `SELECT age, COUNT(*) as n FROM ${T} WHERE age > {1} GROUP BY age HAVING AVG(age) > {2} AND COUNT(*) <= {3}`,
+        params: [18, 30, 9],
+    },
+    {
         name: 'order by column and alias',
         model: {
             table: T,

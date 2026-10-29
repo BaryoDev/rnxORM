@@ -169,16 +169,16 @@ describe('assertColumn', () => {
 
 describe('assertHavingExpression', () => {
     it('allows COUNT(*)', () => {
-        expect(assertHavingExpression(InjProduct, 'COUNT(*)', 'having')).toBe('COUNT(*)');
+        expect(assertHavingExpression(InjProduct, 'COUNT(*)', 'having')).toEqual({ kind: 'agg', fn: 'count' });
     });
 
     it('allows aggregates over mapped properties, resolving the column', () => {
-        expect(assertHavingExpression(InjProduct, 'SUM(price)', 'having')).toBe('SUM(unit_price)');
-        expect(assertHavingExpression(InjProduct, 'avg( unit_price )', 'having')).toBe('AVG(unit_price)');
+        expect(assertHavingExpression(InjProduct, 'SUM(price)', 'having')).toMatchObject({ kind: 'agg', fn: 'sum', column: 'unit_price' });
+        expect(assertHavingExpression(InjProduct, 'avg( unit_price )', 'having')).toMatchObject({ kind: 'agg', fn: 'avg', column: 'unit_price' });
     });
 
     it('allows a bare mapped column', () => {
-        expect(assertHavingExpression(InjProduct, 'name', 'having')).toBe('name');
+        expect(assertHavingExpression(InjProduct, 'name', 'having')).toEqual({ kind: 'column', name: 'name' });
     });
 
     it.each([
