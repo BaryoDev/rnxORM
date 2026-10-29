@@ -180,6 +180,7 @@ export abstract class SqlTranslator {
     }
 
     translateUpdate(model: UpdateModel): SqlStatement {
+        if (model.set.length === 0) throw new Error(`UPDATE ${model.table} has no columns to set`);
         const state: RenderState = { params: [] };
         const set = model.set
             .map((a) => `${this.quoteIdentifier(a.column)} = ${this.bind(a.value, state)}`)

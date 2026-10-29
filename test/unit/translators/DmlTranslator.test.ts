@@ -101,6 +101,10 @@ describe('DML translation', () => {
                 expect(stmt.text).toBe(fill('UPDATE users SET name = {1} WHERE id = {2}', dialect));
                 expect(stmt.params).toEqual(['Bob', 5]);
             });
+
+            it('rejects an empty set list', () => {
+                expect(() => t.translateUpdate({ table: 'users', set: [] })).toThrow('no columns to set');
+            });
         });
 
         describe('delete', () => {
