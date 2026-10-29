@@ -55,9 +55,6 @@ export class SelectQueryBuilder<T, TResult> {
     }
 
     /**
-     * Add a WHERE condition
-     */
-    /**
      * Add a WHERE condition built with the condition builders:
      * `where(u => eq(u.email, x))`. Builders are imported from 'rnxorm'.
      */

@@ -164,6 +164,55 @@ describe('condition builders: SQL per dialect', () => {
         }
     }
 
+    it('applies converters to between, in, notIn, and, or and not', async () => {
+        const run = async (build: (u: CbUser) => any) => {
+            const { db, provider } = makeDb('postgresql');
+            await db.set(CbUser).where(build).toList();
+            return provider.lastCall!;
+        };
+        let call = await run(u => between(u.code, 'a', 'b'));
+        expect(call.params).toEqual(['db:a', 'db:b']);
+        call = await run(u => inArray(u.code, ['a', 'b']));
+        expect(call.params).toEqual(['db:a', 'db:b']);
+        call = await run(u => notInArray(u.code, ['a', 'b']));
+        expect(call.params).toEqual(['db:a', 'db:b']);
+        call = await run(u => and(eq(u.name, 'x'), eq(u.code, 'y')));
+        expect(call.sql).toContain(' WHERE full_name = $1 AND code = $2');
+        expect(call.params).toEqual(['x', 'db:y']);
+        call = await run(u => or(eq(u.name, 'x'), eq(u.code, 'y')));
+        expect(call.params).toEqual(['x', 'db:y']);
+        call = await run(u => not(eq(u.code, 'x')));
+        expect(call.params).toEqual(['db:x']);
+    });
+
+    it('accepts one column read reused across conditions', async () => {
+        const { db, provider } = makeDb('postgresql');
+        await db.set(CbUser).where(u => {
+            const a = u.age;
+            return and(gt(a, 1), lt(a, 5));
+        }).toList();
+        expect(provider.lastCall!.sql).toContain(' WHERE age > $1 AND age < $2');
+        await db.set(CbUser).where(({ age }) => and(gt(age, 1), lt(age, 5))).toList();
+        expect(provider.lastCall!.sql).toContain(' WHERE age > $1 AND age < $2');
+    });
+
+    it('checks the column before the operator on the string path', () => {
+        const { db } = makeDb('postgresql');
+        expect(() => db.set(CbUser).where('nope', 'IN', 5 as any)).toThrow(/not a mapped column or property/);
+        expect(() => db.set(CbUser).where('a.b', '=', 'x')).toThrow(/not a mapped column or property/);
+    });
+
+    it('rejects a non-array for inArray and notInArray', () => {
+        expect(() => record(u => inArray(u.age, 5 as any))).toThrow(/takes an array/);
+        expect(() => record(u => notInArray(u.age, 5 as any))).toThrow(/takes an array/);
+    });
+
+    it('rejects a first argument that is neither string nor function', () => {
+        const { db } = makeDb('postgresql');
+        expect(() => db.set(CbUser).where(5 as any)).toThrow('where() takes a lambda or (column, operator, value)');
+        expect(() => db.set(CbUser).where(null as any)).toThrow('where() takes a lambda or (column, operator, value)');
+    });
+
     it('ilike renders on postgresql', async () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(CbUser).where(u => ilike(u.email, '%a')).toList();

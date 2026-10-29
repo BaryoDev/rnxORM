@@ -41,6 +41,13 @@ function param(value: unknown, builder: string): QueryParameter {
     return value as QueryParameter;
 }
 
+function list(values: unknown, builder: string): readonly unknown[] {
+    if (!Array.isArray(values)) {
+        throw new Error(`${builder}() takes an array of values as its second argument`);
+    }
+    return values;
+}
+
 function parts(items: unknown[], builder: string): Predicate[] {
     for (const item of items) {
         if (!isBuilt(item)) {
@@ -81,10 +88,14 @@ export function ilike(col: string | null | undefined, pattern: string): Predicat
     return node({ op: 'ilike', left: column(col, 'ilike'), value: param(pattern, 'ilike') });
 }
 export function inArray<V>(col: V, values: readonly NoInfer<V>[]): Predicate {
-    return node({ op: 'in', left: column(col, 'inArray'), values: values.map(v => param(v, 'inArray')) });
+    return node({ op: 'in', left: column(col, 'inArray'), values: list(values, 'inArray').map(v => param(v, 'inArray')) });
 }
 export function notInArray<V>(col: V, values: readonly NoInfer<V>[]): Predicate {
-    return node({ op: 'notIn', left: column(col, 'notInArray'), values: values.map(v => param(v, 'notInArray')) });
+    return node({
+        op: 'notIn',
+        left: column(col, 'notInArray'),
+        values: list(values, 'notInArray').map(v => param(v, 'notInArray')),
+    });
 }
 export function isNull(col: unknown): Predicate {
     return node({ op: 'isNull', left: column(col, 'isNull') });
@@ -141,9 +152,9 @@ export function recordPredicate(selector: (entity: any) => unknown, apiName: str
     }
 
     if (!isBuilt(returned)) throw new Error(message);
-    if (accesses() !== leafCount(returned)) {
+    if (accesses() > leafCount(returned)) {
         throw new Error(
-            `${apiName}() lambda must return the builders' result and read each column once per condition; ` +
+            `${apiName}() lambda must only read columns that the returned conditions use; ` +
             `branching on a column inside the lambda is not supported`
         );
     }
@@ -171,7 +182,9 @@ export function resolveCondition(
     }
 
     const left = predicate.left;
-    if (left.kind !== 'column') return predicate;
+    if (left.kind !== 'column') {
+        throw new Error(`${apiName}() conditions must compare a column`);
+    }
     if (left.name.includes('.')) {
         throw new Error(
             `${apiName}() does not support nested property access; ` +
@@ -209,5 +222,9 @@ export function buildWhere(
     if (typeof first === 'function') {
         return resolveCondition(entityType, recordPredicate(first, 'where'), 'where');
     }
+    if (typeof first !== 'string') {
+        throw new Error('where() takes a lambda or (column, operator, value)');
+    }
+    assertColumn(entityType, first, 'where');
     return resolveCondition(entityType, operatorToPredicate(first, operator as string, value, 'where'), 'where');
 }
