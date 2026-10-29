@@ -214,6 +214,7 @@ describe('assertColumnOrAlias', () => {
 // End-to-end: the validation actually guards the public query API.
 import { DbContext } from '../../src/core/DbContext';
 import { SqlCaptureProvider } from '../mocks/SqlCaptureProvider';
+import { eq } from '../../src/core/expressions/conditions';
 
 describe('query API rejects untrusted identifiers end-to-end', () => {
     function makeDb() {
@@ -246,6 +247,39 @@ describe('query API rejects untrusted identifiers end-to-end', () => {
             db.set(InjProduct).orderByDescending('name; SELECT pg_sleep(10)'),
         ];
         expect(compileOnly).toBeInstanceOf(Function);
+    });
+
+    it('the chained builders do not compile with raw strings either', () => {
+        const { db } = makeDb();
+        const set = db.set(InjProduct);
+        const compileOnly = () => [
+            // @ts-expect-error QueryBuilder.orderBy takes keyof T or a selector
+            set.where(p => eq(p.name, 'x')).orderBy('name; DROP TABLE x'),
+            // @ts-expect-error QueryBuilder.where takes keyof T or a condition
+            set.where(p => eq(p.name, 'x')).where('name; DROP TABLE x', '=', 1),
+            // @ts-expect-error SelectQueryBuilder.orderBy takes keyof T or a selector
+            set.select(p => p.name).orderBy('name; DROP TABLE x'),
+        ];
+        expect(compileOnly).toBeInstanceOf(Function);
+    });
+
+    it('orderByDescending(selector) maps the column and sorts DESC', async () => {
+        const { db, provider } = makeDb();
+        await db.set(InjProduct).orderByDescending(p => p.price).toList();
+        expect(provider.calls[0].sql).toContain('ORDER BY unit_price DESC');
+    });
+
+    it('select().orderBy(selector) maps the column', async () => {
+        const { db, provider } = makeDb();
+        await db.set(InjProduct).select(p => p.price).orderBy(p => p.price).toList();
+        expect(provider.calls[0].sql).toContain('ORDER BY unit_price ASC');
+    });
+
+    it('a nested or method-call selector is rejected', () => {
+        const { db, provider } = makeDb();
+        expect(() => db.set(InjProduct).orderBy((p: any) => p.name.length)).toThrow(/nested/);
+        expect(() => db.set(InjProduct).orderBy((p: any) => p.name.toUpperCase())).toThrow();
+        expect(provider.calls).toHaveLength(0);
     });
 
     it('an as any column still throws a column validation error', () => {
