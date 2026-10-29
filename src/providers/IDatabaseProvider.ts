@@ -136,14 +136,6 @@ export interface IDatabaseProvider {
      */
     generateAlterColumnTypeSql(tableName: string, column: ColumnMetadata): string;
 
-    generateInsertSql(tableName: string, columns: ColumnMetadata[]): string;
-
-    generateUpdateSql(tableName: string, columns: ColumnMetadata[], pkColumn: ColumnMetadata): string;
-
-    generateDeleteSql(tableName: string, pkColumn: ColumnMetadata): string;
-
-    generateSelectSql(tableName: string, whereClause?: string): string;
-
     /**
      * Generate parameterized placeholder (e.g., $1, $2 for PostgreSQL or @p1, @p2 for MSSQL)
      */

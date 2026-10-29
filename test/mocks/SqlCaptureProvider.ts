@@ -143,30 +143,6 @@ export class SqlCaptureProvider implements IDatabaseProvider {
         }
     }
 
-    generateSelectSql(tableName: string, whereClause?: string): string {
-        if (whereClause) {
-            return `SELECT * FROM ${tableName} WHERE ${whereClause}`;
-        }
-        return `SELECT * FROM ${tableName}`;
-    }
-
-    generateInsertSql(tableName: string, columns: ColumnMetadata[]): string {
-        const columnNames = columns.map(c => c.columnName).join(', ');
-        const placeholders = columns.map((_, i) => this.getParameterPlaceholder(i + 1)).join(', ');
-        return `INSERT INTO ${tableName} (${columnNames}) VALUES (${placeholders})`;
-    }
-
-    generateUpdateSql(tableName: string, columns: ColumnMetadata[], pkColumn: ColumnMetadata): string {
-        const setClause = columns
-            .map((c, i) => `${c.columnName} = ${this.getParameterPlaceholder(i + 1)}`)
-            .join(', ');
-        return `UPDATE ${tableName} SET ${setClause} WHERE ${pkColumn.columnName} = ${this.getParameterPlaceholder(columns.length + 1)}`;
-    }
-
-    generateDeleteSql(tableName: string, pkColumn: ColumnMetadata): string {
-        return `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = ${this.getParameterPlaceholder(1)}`;
-    }
-
     mapType(tsType: string): string {
         return tsType;
     }

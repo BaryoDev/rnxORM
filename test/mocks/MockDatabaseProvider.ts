@@ -5,7 +5,12 @@ import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
 import { PostgresTranslator } from '../../src/providers/translators/PostgresTranslator';
 
 /** Renders PG style SQL, which the mock's regex parser reads. */
-export class MockTranslator extends PostgresTranslator {}
+export class MockTranslator extends PostgresTranslator {
+    /** The mock's insert parser has no RETURNING, so the key comes back as insertId. */
+    protected renderInsertReturning(): string {
+        return '';
+    }
+}
 
 /**
  * Mock in-memory database provider for testing without actual databases
@@ -187,13 +192,6 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         return `$${index}`;
     }
 
-    generateSelectSql(tableName: string, whereClause?: string): string {
-        if (whereClause) {
-            return `SELECT * FROM ${tableName} WHERE ${whereClause}`;
-        }
-        return `SELECT * FROM ${tableName}`;
-    }
-
     mapType(tsType: string): string {
         return tsType.toUpperCase();
     }
@@ -275,21 +273,6 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         referencedColumn2: string = 'id'
     ): string {
         return `CREATE TABLE ${joinTableName} (${column1} INTEGER, ${column2} INTEGER, PRIMARY KEY (${column1}, ${column2}))`;
-    }
-
-    generateInsertSql(tableName: string, columns: ColumnMetadata[]): string {
-        const columnNames = columns.map(c => c.columnName).join(', ');
-        const placeholders = columns.map((_, i) => this.getParameterPlaceholder(i + 1)).join(', ');
-        return `INSERT INTO ${tableName} (${columnNames}) VALUES (${placeholders})`;
-    }
-
-    generateUpdateSql(tableName: string, columns: ColumnMetadata[], pkColumn: ColumnMetadata): string {
-        const setClause = columns.map((c, i) => `${c.columnName} = ${this.getParameterPlaceholder(i + 1)}`).join(', ');
-        return `UPDATE ${tableName} SET ${setClause} WHERE ${pkColumn.columnName} = ${this.getParameterPlaceholder(columns.length + 1)}`;
-    }
-
-    generateDeleteSql(tableName: string, pkColumn: ColumnMetadata): string {
-        return `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = ${this.getParameterPlaceholder(1)}`;
     }
 
     getColumnType(column: ColumnMetadata): string {

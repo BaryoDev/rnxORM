@@ -15,4 +15,8 @@ export class PostgresTranslator extends SqlTranslator {
     protected renderIlike(left: string, placeholder: string): string {
         return `${left} ILIKE ${placeholder}`;
     }
+
+    protected renderInsertReturning(returning: string): string {
+        return ` RETURNING ${returning}`;
+    }
 }

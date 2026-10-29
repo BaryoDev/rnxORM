@@ -1,5 +1,8 @@
 import { AggregateFn, Operand } from '../../core/query/model/Operand';
 import { Predicate } from '../../core/query/model/Predicate';
+import { InsertModel } from '../../core/query/model/InsertModel';
+import { UpdateModel } from '../../core/query/model/UpdateModel';
+import { DeleteModel } from '../../core/query/model/DeleteModel';
 import { SelectModel } from '../../core/query/model/SelectModel';
 import { SqlStatement } from '../../core/query/model/SqlStatement';
 import { QueryParameter } from '../../core/types';
@@ -148,5 +151,49 @@ export abstract class SqlTranslator {
                 return `${left} ${COMPARE_SQL[p.op]} ${this.bind(p.value, state)}`;
             }
         }
+    }
+
+    /** Text placed between the column list and VALUES (SQL Server OUTPUT). */
+    protected renderInsertOutput(_returning: string): string {
+        return '';
+    }
+
+    /** Text placed after VALUES (PostgreSQL RETURNING). */
+    protected renderInsertReturning(_returning: string): string {
+        return '';
+    }
+
+    /** Wraps an insert that writes an explicit identity value. No-op unless the dialect needs it. */
+    protected wrapIdentityInsert(_table: string, sql: string): string {
+        return sql;
+    }
+
+    translateInsert(model: InsertModel): SqlStatement {
+        const state: RenderState = { params: [] };
+        const marks = model.values.map((v) => this.bind(v, state));
+        const cols = model.columns.map((c) => this.quoteIdentifier(c)).join(', ');
+        const output = model.returning === undefined ? '' : this.renderInsertOutput(this.quoteIdentifier(model.returning));
+        const tail = model.returning === undefined ? '' : this.renderInsertReturning(this.quoteIdentifier(model.returning));
+        let text = `INSERT INTO ${this.quoteIdentifier(model.table)} (${cols})${output} VALUES (${marks.join(', ')})${tail}`;
+        if (model.identityInsert) text = this.wrapIdentityInsert(this.quoteIdentifier(model.table), text);
+        return { text, params: state.params };
+    }
+
+    translateUpdate(model: UpdateModel): SqlStatement {
+        if (model.set.length === 0) throw new Error(`UPDATE ${model.table} has no columns to set`);
+        const state: RenderState = { params: [] };
+        const set = model.set
+            .map((a) => `${this.quoteIdentifier(a.column)} = ${this.bind(a.value, state)}`)
+            .join(', ');
+        let text = `UPDATE ${this.quoteIdentifier(model.table)} SET ${set}`;
+        if (model.where) text += ` WHERE ${this.renderPredicate(model.where, state, false)}`;
+        return { text, params: state.params };
+    }
+
+    translateDelete(model: DeleteModel): SqlStatement {
+        const state: RenderState = { params: [] };
+        let text = `DELETE FROM ${this.quoteIdentifier(model.table)}`;
+        if (model.where) text += ` WHERE ${this.renderPredicate(model.where, state, false)}`;
+        return { text, params: state.params };
     }
 }

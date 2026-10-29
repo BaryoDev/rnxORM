@@ -26,6 +26,14 @@ export class MsSqlTranslator extends SqlTranslator {
         return `LOWER(${left}) LIKE LOWER(${placeholder})`;
     }
 
+    protected renderInsertOutput(returning: string): string {
+        return ` OUTPUT INSERTED.${returning}`;
+    }
+
+    protected wrapIdentityInsert(table: string, sql: string): string {
+        return `SET IDENTITY_INSERT ${table} ON; ${sql}; SET IDENTITY_INSERT ${table} OFF`;
+    }
+
     /**
      * SQL Server's AVG over an integer column returns an integer (1 and 2
      * average to 1), where PostgreSQL and MariaDB return 1.5. Widening the

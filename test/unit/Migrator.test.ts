@@ -120,10 +120,6 @@ class FakeHistoryProvider implements IDatabaseProvider {
     generateCreateTableSql(_entity: EntityMetadata): string { return ''; }
     generateAddColumnSql(_t: string, _c: ColumnMetadata): string { return ''; }
     generateAlterColumnTypeSql(_t: string, _c: ColumnMetadata): string { return ''; }
-    generateInsertSql(_t: string, _c: ColumnMetadata[]): string { return ''; }
-    generateUpdateSql(_t: string, _c: ColumnMetadata[], _pk: ColumnMetadata): string { return ''; }
-    generateDeleteSql(_t: string, _pk: ColumnMetadata): string { return ''; }
-    generateSelectSql(tableName: string): string { return `SELECT * FROM ${tableName}`; }
     getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] } {
         return { sql: '', params: [tableName] };
     }
