@@ -13,9 +13,9 @@ describe('SqliteProvider conversions', () => {
     });
 
     it('binds and reads back booleans, dates, JSON, null and undefined by declared type', async () => {
-        await db.query('CREATE TABLE t (id INTEGER PRIMARY KEY, flag BOOLEAN, at DATETIME, doc TEXT, nothing TEXT, missing TEXT)');
+        await db.query('CREATE TABLE t (id INTEGER PRIMARY KEY, flag BOOLEAN, at DATETIME, doc TEXT, nul TEXT, missing TEXT)');
         const when = new Date('2026-03-04T05:06:07.089Z');
-        await db.query('INSERT INTO t (id, flag, at, doc, nothing, missing) VALUES (?, ?, ?, ?, ?, ?)', [
+        await db.query('INSERT INTO t (id, flag, at, doc, nul, missing) VALUES (?, ?, ?, ?, ?, ?)', [
             1, true, when, JSON.stringify({ a: 1 }) as string, null, undefined,
         ]);
         await db.query('INSERT INTO t (id, flag) VALUES (?, ?)', [2, false]);
@@ -26,7 +26,7 @@ describe('SqliteProvider conversions', () => {
         expect(one.at).toBeInstanceOf(Date);
         expect((one.at as Date).getTime()).toBe(when.getTime());
         expect(JSON.parse(one.doc as string)).toEqual({ a: 1 });
-        expect(one.nothing).toBeNull();
+        expect(one.nul).toBeNull();
         expect(one.missing).toBeNull();
 
         const two = (await db.query('SELECT * FROM t WHERE id = ?', [2])).rows[0];
