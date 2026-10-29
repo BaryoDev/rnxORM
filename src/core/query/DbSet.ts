@@ -1,5 +1,5 @@
 import { DbContext } from "../DbContext";
-import { DatabaseRow, QueryParameter } from "../types";
+import { DatabaseRow, QueryParameter, ExactNumeric } from "../types";
 import { EntityState, snapshotEntity } from "../EntityEntry";
 import { resolveColumn, resolvePropertyName } from "../expressions/PropertyCapture";
 import { compileQueryFilter } from "../QueryFilter";
@@ -244,7 +244,7 @@ export class DbSet<T> {
      * @param selector Property selector function
      * @example await users.sum(u => u.salary)
      */
-    async sum(selector: (entity: T) => number): Promise<number> {
+    async sum(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'sum');
 
         const filter = this.compileFilterWhere();
@@ -257,7 +257,7 @@ export class DbSet<T> {
      * @param selector Property selector function
      * @example await users.average(u => u.age)
      */
-    async average(selector: (entity: T) => number): Promise<number> {
+    async average(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'average');
 
         const filter = this.compileFilterWhere();

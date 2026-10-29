@@ -148,7 +148,7 @@ Each provider implements `IDatabaseProvider` with a `getDialect()` method return
 - `select(selector)`: Project to a different shape
 - `groupBy(selector)`: Group results
 - `distinct()`: Remove duplicates
-- `sum(selector)` / `average(selector)` / `min(selector)` / `max(selector)`: Aggregations
+- `sum(selector)` / `average(selector)` / `min(selector)` / `max(selector)`: Aggregations. `sum` and `average` resolve to `ExactNumeric` (`number | string`): a string when the value does not fit a JS number exactly
 - `asNoTracking()`: Return untracked entities (mutable, but changes are not persisted)
 - `ignoreQueryFilters()`: Bypass global query filters
 - `fromSqlRaw(sql, params)`: Execute raw SQL mapped to entity type

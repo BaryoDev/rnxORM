@@ -94,3 +94,12 @@ export function assertNever(value: never, context: string): never {
 
 /** Constructor of an entity class, as stored in metadata and used as a map key. */
 export type EntityConstructor<T = unknown> = new (...args: never[]) => T;
+
+/**
+ * A numeric the database computed, as exactly as JavaScript can hold it: a
+ * number when the value round-trips, otherwise the database's own digits as a
+ * string. `sum()` of a DECIMAL column can exceed what a double represents, so
+ * narrow with `typeof` before doing arithmetic, or parse the string with a
+ * decimal library.
+ */
+export type ExactNumeric = number | string;

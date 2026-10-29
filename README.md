@@ -732,6 +732,12 @@ const totalAge = await users.sum(u => u.age);
 // Average
 const avgAge = await users.average(u => u.age);
 
+// sum() and average() return ExactNumeric (number | string). The value is a
+// number when a JS number holds it exactly, and the database's own digits as
+// a string when it does not, so narrow before doing arithmetic.
+const revenue = await orders.sum(o => o.amount);
+const label = typeof revenue === 'number' ? revenue.toFixed(2) : revenue;
+
 // Min/Max
 const youngest = await users.min(u => u.age);
 const oldest = await users.max(u => u.age);
@@ -743,7 +749,7 @@ const userCount = await users.count();
 const adultCount = await users.where("age", ">=", 18).count();
 ```
 
-`sum()` and `average()` are typed as `number`, but they return the database's own string when the value does not fit a JavaScript number exactly (a `DECIMAL` total with more digits than a double holds, a `BIGINT` above 2^53). That keeps the value exact on PostgreSQL and MariaDB. SQL Server is the exception: its driver hands `DECIMAL` and `NUMERIC` to rnxORM as JavaScript numbers, so a large total is already rounded there. Check `typeof` before doing arithmetic on large totals. [#54](https://github.com/BaryoDev/rnxORM/issues/54) tracks making the type say so.
+`sum()` and `average()` return `ExactNumeric` (`number | string`, exported from the package root). They give the database's own string when the value does not fit a JavaScript number exactly (a `DECIMAL` total with more digits than a double holds, a `BIGINT` above 2^53). That keeps the value exact on PostgreSQL and MariaDB. Narrow with `typeof` before doing arithmetic. SQL Server is the exception: its driver hands `DECIMAL` and `NUMERIC` to rnxORM as JavaScript numbers, so a large total is already rounded there (still open).
 
 ### Projections (Select)
 
