@@ -1,4 +1,6 @@
 import { AggregateFn } from '../../core/query/model/Operand';
+import { Operand } from '../../core/query/model/Operand';
+import { SelectModel } from '../../core/query/model/SelectModel';
 import { SqlTranslator } from './SqlTranslator';
 
 const INTEGER_TYPE = /^\s*(tinyint|smallint|int|integer|bigint)\b/i;
@@ -44,9 +46,27 @@ export class MsSqlTranslator extends SqlTranslator {
      */
     protected renderAggregateOutput(fn: AggregateFn, column: string | undefined, columnType?: string): string {
         const sql = this.renderAggregate(fn, column, columnType);
-        if ((fn === 'sum' || fn === 'avg') && columnType !== undefined && /^\s*(decimal|numeric)\b/i.test(columnType)) {
+        if ((fn === 'sum' || fn === 'avg') && columnType !== undefined && /^\s*(decimal|dec|numeric)\b/i.test(columnType)) {
             return `CAST(${sql} AS NVARCHAR(MAX))`;
         }
         return sql;
+    }
+
+    /**
+     * T-SQL binds a bare ORDER BY name to the select alias, and an aliased
+     * decimal aggregate is NVARCHAR here, so it would sort as text. Sort by
+     * the numeric aggregate instead.
+     */
+    protected renderOrderOperand(operand: Operand, model: SelectModel): string {
+        if (operand.kind === 'column') {
+            const item = (model.items ?? []).find((i) => i.alias === operand.name);
+            if (item && item.operand.kind === 'agg') {
+                const { fn, column, columnType } = item.operand;
+                if (this.renderAggregateOutput(fn, column, columnType) !== this.renderAggregate(fn, column, columnType)) {
+                    return this.renderAggregate(fn, column, columnType);
+                }
+            }
+        }
+        return super.renderOrderOperand(operand, model);
     }
 }

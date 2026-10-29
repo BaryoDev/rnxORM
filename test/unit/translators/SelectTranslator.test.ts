@@ -578,7 +578,7 @@ describe('SelectTranslator exact decimal aggregates', () => {
         expect(translators.mariadb.translateSelect(model).text).toBe(`SELECT SUM(amount) as total FROM ${T}`);
     });
 
-    it.each(['decimal(38,10)', 'DECIMAL(10,2)', 'numeric(18,4)', 'numeric'])('casts sum and avg over %s', (type) => {
+    it.each(['decimal(38,10)', 'DECIMAL(10,2)', 'numeric(18,4)', 'numeric', 'dec(18,2)'])('casts sum and avg over %s', (type) => {
         expect(translators.mssql.translateSelect(selectOf(typed('sum', type))).text).toContain(
             'CAST(SUM(amount) AS NVARCHAR(MAX))'
         );
@@ -653,5 +653,42 @@ describe('SelectTranslator mssql average over integer columns', () => {
             items: [{ operand: { kind: 'agg', fn: 'sum', column: 'qty', columnType: 'int' }, alias: 's' }],
         };
         expect(translators.mssql.translateSelect(sum).text).toBe(`SELECT SUM(qty) as s FROM ${T}`);
+    });
+});
+
+describe('SelectTranslator ordering by an aggregate alias', () => {
+    const sumOf = (columnType: string): Operand => ({ kind: 'agg', fn: 'sum', column: 'amount', columnType });
+    const byAlias = (columnType: string): SelectModel => ({
+        table: T,
+        items: [{ operand: col('grp') }, { operand: sumOf(columnType), alias: 'total' }],
+        groupBy: ['grp'],
+        orderBy: [{ operand: col('total'), direction: 'desc' }],
+    });
+
+    it('sorts by the numeric aggregate on mssql, not the NVARCHAR alias', () => {
+        expect(translators.mssql.translateSelect(byAlias('decimal(38,10)')).text).toBe(
+            `SELECT grp, CAST(SUM(amount) AS NVARCHAR(MAX)) as total FROM ${T} GROUP BY grp ORDER BY SUM(amount) DESC`
+        );
+    });
+
+    it('keeps ORDER BY total on postgres and mariadb', () => {
+        const expected = `SELECT grp, SUM(amount) as total FROM ${T} GROUP BY grp ORDER BY total DESC`;
+        expect(translators.postgresql.translateSelect(byAlias('decimal(38,10)')).text).toBe(expected);
+        expect(translators.mariadb.translateSelect(byAlias('decimal(38,10)')).text).toBe(expected);
+    });
+
+    it('keeps ORDER BY total on mssql when the alias was not cast', () => {
+        expect(translators.mssql.translateSelect(byAlias('float')).text).toBe(
+            `SELECT grp, SUM(amount) as total FROM ${T} GROUP BY grp ORDER BY total DESC`
+        );
+    });
+
+    it('leaves decimal avg in the select list as plain AVG on postgres and mariadb', () => {
+        const model: SelectModel = {
+            table: T,
+            items: [{ operand: { kind: 'agg', fn: 'avg', column: 'amount', columnType: 'decimal' }, alias: 'mean' }],
+        };
+        expect(translators.postgresql.translateSelect(model).text).toBe(`SELECT AVG(amount) as mean FROM ${T}`);
+        expect(translators.mariadb.translateSelect(model).text).toBe(`SELECT AVG(amount) as mean FROM ${T}`);
     });
 });

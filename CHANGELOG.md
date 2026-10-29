@@ -8,6 +8,17 @@
   `require` work. The ES entry is a thin wrapper over the CommonJS build, so
   there is still one copy of the code and one metadata registry.
 
+### Fixed
+
+- **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
+  translator now returns them as text in the select list, so the driver cannot
+  round them to a double. `sum()` and `average()` already parse them back, but
+  a grouped select now returns the decimal sum or average as a string on SQL
+  Server, as it already did on PostgreSQL and MariaDB. It used to be a double
+  that could lose digits. HAVING and ORDER BY still compare the number.
+- **SQL Server AVG over an integer column keeps its fraction.** The average of
+  1 and 2 is now 1.5, as on PostgreSQL and MariaDB. It used to be 1.
+
 ### Breaking
 
 - **Drivers are optional peer dependencies** (issue #10). `pg`, `mssql` and

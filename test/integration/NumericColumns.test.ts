@@ -111,6 +111,21 @@ describe('SUM over a DECIMAL(38,10) column is exact', () => {
                 expect(rows.map((r: any) => r.grp)).toEqual(['big']);
             }), 30000);
 
+        it(`${providerName} orders a grouped decimal sum by its alias as a number`, () =>
+            withProbeTable(providerName, async (db) => {
+                // As text, '9.5' sorts after '10' descending, so 'nine' would come last.
+                await db.query(
+                    `INSERT INTO exact_sum_probe (grp, amount, qty) VALUES ('nine', 9.5, 1), ('ten', 10, 1), ('hundred', 100, 1)`
+                );
+                const rows = await db
+                    .set(ExactSumProbe)
+                    .groupBy(r => r.grp)
+                    .orderByDescending('total')
+                    .select(g => ({ grp: g.key, total: g.sum(r => r.amount) }))
+                    .toList();
+                expect(rows.map((r: any) => r.grp)).toEqual(['hundred', 'ten', 'nine']);
+            }), 30000);
+
         it(`${providerName} average over an integer column`, () =>
             withProbeTable(providerName, async (db) => {
                 await db.query(`INSERT INTO exact_sum_probe (grp, amount, qty) VALUES ('a', 1, 1), ('a', 1, 2)`);

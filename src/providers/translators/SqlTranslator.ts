@@ -71,7 +71,7 @@ export abstract class SqlTranslator {
         const order = model.orderBy ?? [];
         if (order.length > 0) {
             const parts = order.map(
-                (o) => `${this.renderOperand(o.operand)} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`
+                (o) => `${this.renderOrderOperand(o.operand, model)} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`
             );
             text += ` ORDER BY ${parts.join(', ')}`;
         }
@@ -79,6 +79,11 @@ export abstract class SqlTranslator {
             text += this.renderPagination(model.skip, model.take, order.length > 0);
         }
         return { text, params: state.params };
+    }
+
+    /** ORDER BY operand. A dialect can override this when a select alias would change what a bare column name sorts by. */
+    protected renderOrderOperand(operand: Operand, _model: SelectModel): string {
+        return this.renderOperand(operand);
     }
 
     private renderItems(model: SelectModel): string {
@@ -95,7 +100,7 @@ export abstract class SqlTranslator {
             .join(', ');
     }
 
-    private renderOperand(operand: Operand): string {
+    protected renderOperand(operand: Operand): string {
         if (operand.kind === 'column') return this.quoteIdentifier(operand.name);
         return this.renderAggregate(operand.fn, operand.column, operand.columnType);
     }
