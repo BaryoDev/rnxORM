@@ -29,6 +29,15 @@ does not collide with a database already running locally. `test:integration` pas
 through for you. `--wait` matters: without it the containers are up before the databases accept
 connections, and the suite fails on connection refused rather than on anything you changed.
 
+To run the same suite without Docker, on an in-process SQLite database:
+
+```bash
+npm run test:integration:sqlite
+```
+
+SQLite is a test substrate, not a shipped provider. It catches a translator or wiring mistake fast,
+but it does not replace the real engines.
+
 Anything touching `src/providers/` or SQL generation needs this suite, not just `npm test`. A change
 that passes against the mock and breaks on a real dialect is the failure this catches, and the mock
 will not tell you.
