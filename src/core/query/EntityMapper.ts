@@ -68,7 +68,7 @@ export function mapRowToEntity<T>(
 
     // Track the entity if tracking is enabled and context is provided
     if (track) {
-        const originalValues = snapshotEntity(entity);
+        const originalValues = context!.withModel(() => snapshotEntity(entity));
         context!.changeTracker.track(entity, EntityState.Unchanged, originalValues);
         if (pk) {
             context!.changeTracker.registerIdentity(entityType, pk.pkValue, entity);

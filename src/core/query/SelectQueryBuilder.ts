@@ -62,7 +62,7 @@ export class SelectQueryBuilder<T, TResult> {
     /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
     where(column: keyof T & string, operator: WhereOperator, value: any): this;
     where(first: (keyof T & string) | ((entity: T) => Predicate), operator?: string, value?: any): this {
-        this.state.predicates.push(buildWhere(this.entityType, first, operator, value));
+        this.state.predicates.push(this.context.withModel(() => buildWhere(this.entityType, first, operator, value)));
         return this;
     }
 

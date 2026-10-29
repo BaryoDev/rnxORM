@@ -7,6 +7,15 @@ import { MetadataStorage } from "./MetadataStorage";
 export class ChangeTracker {
     #trackedEntities: Map<any, EntityEntry<any>> = new Map();
     #autoDetectChanges: boolean = true;
+    #modelOf?: () => MetadataStorage;
+
+    /**
+     * @param modelOf The owning context's model. Key and column lookups made
+     * while tracking read it instead of the shared registry.
+     */
+    constructor(modelOf?: () => MetadataStorage) {
+        this.#modelOf = modelOf;
+    }
 
     /**
      * Identity map: entity constructor -> primary key value -> tracked entity instance.
@@ -37,9 +46,13 @@ export class ChangeTracker {
             return entry;
         }
 
-        const entry = new EntityEntry<T>(entity, state, originalValues);
+        const entry = new EntityEntry<T>(entity, state, originalValues, this.#modelOf);
         this.#trackedEntities.set(entity, entry);
-        this.registerIdentityFromEntity(entity, state);
+        if (this.#modelOf) {
+            MetadataStorage.withModel(this.#modelOf(), () => this.registerIdentityFromEntity(entity, state));
+        } else {
+            this.registerIdentityFromEntity(entity, state);
+        }
         return entry;
     }
 

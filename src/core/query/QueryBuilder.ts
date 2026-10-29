@@ -48,7 +48,7 @@ export class QueryBuilder<T> {
         // The lambda is recorded, the string form is validated against metadata and a
         // closed operator set (issues #13/#24). Both resolve through one path, and
         // values are always bound as parameters.
-        this.state.predicates.push(buildWhere(this.entityType, first, operator, value));
+        this.state.predicates.push(this.context.withModel(() => buildWhere(this.entityType, first, operator, value)));
         return this;
     }
 
@@ -310,9 +310,9 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async sum(selector: (entity: T) => number): Promise<ExactNumeric> {
-        const columnName = resolveColumn(selector, this.entityType, 'sum');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'sum');
 
-        const row = await this.aggregate('sum', columnName, 'total', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('sum', columnName, 'total', columnType);
         return toExactNumber(row?.total) ?? 0;
     }
 
@@ -321,9 +321,9 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async average(selector: (entity: T) => number): Promise<ExactNumeric> {
-        const columnName = resolveColumn(selector, this.entityType, 'average');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'average');
 
-        const row = await this.aggregate('avg', columnName, 'avg', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('avg', columnName, 'avg', columnType);
         return toExactNumber(row?.avg) ?? 0;
     }
 
@@ -332,9 +332,9 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async min(selector: (entity: T) => any): Promise<any> {
-        const columnName = resolveColumn(selector, this.entityType, 'min');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'min');
 
-        const row = await this.aggregate('min', columnName, 'min', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('min', columnName, 'min', columnType);
         return row!.min;
     }
 
@@ -343,10 +343,17 @@ export class QueryBuilder<T> {
      * @param selector Property selector function
      */
     async max(selector: (entity: T) => any): Promise<any> {
-        const columnName = resolveColumn(selector, this.entityType, 'max');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'max');
 
-        const row = await this.aggregate('max', columnName, 'max', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('max', columnName, 'max', columnType);
         return row!.max;
+    }
+
+    private aggregateColumn(selector: (entity: T) => unknown, apiName: string): { columnName: string; columnType: string | undefined } {
+        return this.context.withModel(() => {
+            const columnName = resolveColumn(selector, this.entityType, apiName);
+            return { columnName, columnType: columnTypeOf(this.entityType, columnName) };
+        });
     }
 
     /**

@@ -86,7 +86,7 @@ export class GroupedQueryBuilder<T, TKey> {
         // accepted; the operator comes from the closed set (issues #13/#24).
         // HAVING params follow the WHERE params because the translator binds
         // them in render order.
-        const operand = assertHavingExpression(this.entityType, column, 'having');
+        const operand = this.context.withModel(() => assertHavingExpression(this.entityType, column, 'having'));
         this.havingPredicates.push(operatorToPredicate(operand, operator, value, 'having'));
         return this;
     }
@@ -96,7 +96,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * from the select() list; aliases must be plain identifiers.
      */
     orderBy(column: string): this {
-        this.state.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderBy'), direction: 'ASC' });
+        this.state.orderByColumns.push({ column: this.context.withModel(() => assertColumnOrAlias(this.entityType, column, 'orderBy')), direction: 'ASC' });
         return this;
     }
 
@@ -104,7 +104,7 @@ export class GroupedQueryBuilder<T, TKey> {
      * Order grouped results descending
      */
     orderByDescending(column: string): this {
-        this.state.orderByColumns.push({ column: assertColumnOrAlias(this.entityType, column, 'orderByDescending'), direction: 'DESC' });
+        this.state.orderByColumns.push({ column: this.context.withModel(() => assertColumnOrAlias(this.entityType, column, 'orderByDescending')), direction: 'DESC' });
         return this;
     }
 

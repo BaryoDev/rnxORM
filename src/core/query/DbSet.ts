@@ -258,9 +258,9 @@ export class DbSet<T> {
      * @example await users.sum(u => u.salary)
      */
     async sum(selector: (entity: T) => number): Promise<ExactNumeric> {
-        const columnName = resolveColumn(selector, this.entityType, 'sum');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'sum');
 
-        const row = await this.aggregate('sum', columnName, 'total', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('sum', columnName, 'total', columnType);
         return toExactNumber(row?.total) ?? 0;
     }
 
@@ -270,9 +270,9 @@ export class DbSet<T> {
      * @example await users.average(u => u.age)
      */
     async average(selector: (entity: T) => number): Promise<ExactNumeric> {
-        const columnName = resolveColumn(selector, this.entityType, 'average');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'average');
 
-        const row = await this.aggregate('avg', columnName, 'avg', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('avg', columnName, 'avg', columnType);
         return toExactNumber(row?.avg) ?? 0;
     }
 
@@ -282,9 +282,9 @@ export class DbSet<T> {
      * @example await users.min(u => u.age)
      */
     async min(selector: (entity: T) => any): Promise<any> {
-        const columnName = resolveColumn(selector, this.entityType, 'min');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'min');
 
-        const row = await this.aggregate('min', columnName, 'min', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('min', columnName, 'min', columnType);
         return row.min;
     }
 
@@ -294,10 +294,17 @@ export class DbSet<T> {
      * @example await users.max(u => u.createdAt)
      */
     async max(selector: (entity: T) => any): Promise<any> {
-        const columnName = resolveColumn(selector, this.entityType, 'max');
+        const { columnName, columnType } = this.aggregateColumn(selector, 'max');
 
-        const row = await this.aggregate('max', columnName, 'max', columnTypeOf(this.entityType, columnName));
+        const row = await this.aggregate('max', columnName, 'max', columnType);
         return row.max;
+    }
+
+    private aggregateColumn(selector: (entity: T) => unknown, apiName: string): { columnName: string; columnType: string | undefined } {
+        return this.context.withModel(() => {
+            const columnName = resolveColumn(selector, this.entityType, apiName);
+            return { columnName, columnType: columnTypeOf(this.entityType, columnName) };
+        });
     }
 
     /**

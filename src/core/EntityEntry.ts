@@ -123,16 +123,24 @@ export class EntityEntry<T> {
     #_originalValues: Partial<T>;
     #_currentValues: T;
     #_hasBaseline: boolean;
+    #_modelOf?: () => MetadataStorage;
 
     constructor(
         public readonly entity: T,
         state: EntityState,
-        originalValues?: Partial<T>
+        originalValues?: Partial<T>,
+        modelOf?: () => MetadataStorage
     ) {
         this.#_state = state;
         this.#_currentValues = entity;
+        this.#_modelOf = modelOf;
         this.#_hasBaseline = originalValues !== undefined;
-        this.#_originalValues = originalValues || snapshotEntity(entity);
+        this.#_originalValues = originalValues || this.#inModel(() => snapshotEntity(entity));
+    }
+
+    /** Run fn under the owning context's model, when this entry has one. */
+    #inModel<R>(fn: () => R): R {
+        return this.#_modelOf ? MetadataStorage.withModel(this.#_modelOf(), fn) : fn();
     }
 
     /**
@@ -189,7 +197,7 @@ export class EntityEntry<T> {
     getModifiedProperties(): string[] {
         const modified: string[] = [];
 
-        for (const key of comparableProperties(this.#_currentValues)) {
+        for (const key of this.#inModel(() => comparableProperties(this.#_currentValues))) {
             const current = (this.#_currentValues as any)[key];
             const original = (this.#_originalValues as any)[key];
             if (!valuesEqual(current, original)) {
@@ -212,7 +220,7 @@ export class EntityEntry<T> {
      * Accept changes (mark current values as original)
      */
     acceptChanges(): void {
-        this.#_originalValues = snapshotEntity(this.#_currentValues);
+        this.#_originalValues = this.#inModel(() => snapshotEntity(this.#_currentValues));
         this.#_hasBaseline = true;
         this.#_state = EntityState.Unchanged;
     }

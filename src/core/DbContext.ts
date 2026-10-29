@@ -45,7 +45,7 @@ export class DbContext {
 
     constructor(provider: IDatabaseProvider) {
         this.provider = provider;
-        this._changeTracker = new ChangeTracker();
+        this._changeTracker = new ChangeTracker(() => this.metadata);
     }
 
     /**
