@@ -36,6 +36,11 @@ Two providers done properly is a better use of one maintainer than five done thi
 
 Requires **Node.js 20 or later**.
 
+Install `rnxorm` and the driver for your database. The drivers (`pg`, `mssql`,
+`mariadb`) are optional peer dependencies, so you only install the one you use.
+If it is missing, creating the provider throws an error that names the package.
+`rnxorm` works with both `import` and `require`.
+
 **For PostgreSQL:**
 ```bash
 npm install rnxorm pg reflect-metadata

@@ -4,11 +4,19 @@
   "description": "A lightweight TypeScript ORM for PostgreSQL, MSSQL, and MariaDB, inspired by Entity Framework Core. See CHANGELOG.md for release notes.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "rnxorm": "dist/migrations/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-esm.js",
     "start": "node dist/index.js",
     "test": "jest",
     "test:quiet": "jest --silent --noStackTrace",
@@ -44,9 +52,6 @@
     "url": "git+https://github.com/BaryoDev/rnxORM.git"
   },
   "dependencies": {
-    "mariadb": "^3.5.4",
-    "mssql": "^11.0.1",
-    "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
@@ -59,10 +64,29 @@
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
     "jest": "^30.2.0",
+    "mariadb": "^3.5.4",
+    "mssql": "^11.0.1",
     "nodemon": "^3.1.11",
+    "pg": "^8.16.3",
     "prettier": "^3.7.3",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "mariadb": "^3.5.4",
+    "mssql": "^11.0.1",
+    "pg": "^8.16.3"
+  },
+  "peerDependenciesMeta": {
+    "mariadb": {
+      "optional": true
+    },
+    "mssql": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    }
   }
 }

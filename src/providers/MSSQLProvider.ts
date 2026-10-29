@@ -1,4 +1,5 @@
-import * as mssql from "mssql";
+import type * as mssql from "mssql";
+import { loadDriver } from "./loadDriver";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
@@ -70,7 +71,7 @@ class MSSQLTransaction implements ITransaction {
         if (!this.#transaction) {
             throw new Error('The transaction has already ended.');
         }
-        return runRequest(new mssql.Request(this.#transaction), text, params);
+        return runRequest(this.#transaction.request(), text, params);
     }
 
     async commit(): Promise<void> {
@@ -90,6 +91,7 @@ class MSSQLTransaction implements ITransaction {
 
 export class MSSQLProvider implements IDatabaseProvider {
     #pool: mssql.ConnectionPool | null = null;
+    readonly #driver: typeof mssql;
     private config: mssql.config;
 
     getDialect(): Dialect {
@@ -130,6 +132,7 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     constructor(config: DatabaseConfig) {
+        this.#driver = loadDriver<typeof mssql>("MSSQLProvider", "mssql");
         // Encrypt unless the caller explicitly turns it off, and validate the
         // certificate unless they explicitly opt out. The previous defaults
         // (encrypt false, trust any certificate) put every query and result set
@@ -167,7 +170,7 @@ export class MSSQLProvider implements IDatabaseProvider {
         // A dedicated pool, not the module-global mssql.connect() one: two
         // providers with different configs used to share a single global pool,
         // so disconnect() on either closed it for both (issue #38).
-        this.#pool = await new mssql.ConnectionPool(this.config).connect();
+        this.#pool = await new this.#driver.ConnectionPool(this.config).connect();
     }
 
     async disconnect(): Promise<void> {
@@ -186,7 +189,7 @@ export class MSSQLProvider implements IDatabaseProvider {
 
     async beginTransaction(): Promise<ITransaction> {
         if (!this.#pool) await this.connect();
-        const transaction = new mssql.Transaction(this.#pool!);
+        const transaction = new this.#driver.Transaction(this.#pool!);
         try {
             await transaction.begin();
         } catch (error) {

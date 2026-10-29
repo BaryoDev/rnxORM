@@ -1,4 +1,5 @@
-import { Pool, PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
+import { loadDriver } from "./loadDriver";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
@@ -129,7 +130,8 @@ export class PostgreSQLProvider implements IDatabaseProvider {
             // default (and PGSSLMODE) still applies when they did not.
             ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
         };
-        this.#pool = new Pool(this.#poolConfig);
+        const pg = loadDriver<typeof import("pg")>("PostgreSQLProvider", "pg");
+        this.#pool = new pg.Pool(this.#poolConfig);
     }
 
     async connect(): Promise<void> {
