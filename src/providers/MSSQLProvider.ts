@@ -132,7 +132,15 @@ export class MSSQLProvider implements IDatabaseProvider {
     }
 
     constructor(config: DatabaseConfig) {
-        this.#driver = loadDriver<typeof mssql>("MSSQLProvider", "mssql");
+        this.#driver = loadDriver<typeof mssql>("MSSQLProvider", "mssql", () => {
+            // eslint-disable-next-line no-useless-catch
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                return require("mssql");
+            } catch (error) {
+                throw error;
+            }
+        });
         // Encrypt unless the caller explicitly turns it off, and validate the
         // certificate unless they explicitly opt out. The previous defaults
         // (encrypt false, trust any certificate) put every query and result set

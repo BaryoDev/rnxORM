@@ -140,7 +140,15 @@ export class MariaDBProvider implements IDatabaseProvider {
             idleTimeout: config.idleTimeoutMillis || 30000,
             ...(config.ssl !== undefined ? { ssl: config.ssl } : {}),
         };
-        const driver = loadDriver<typeof mariadb>("MariaDBProvider", "mariadb");
+        const driver = loadDriver<typeof mariadb>("MariaDBProvider", "mariadb", () => {
+            // eslint-disable-next-line no-useless-catch
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                return require("mariadb");
+            } catch (error) {
+                throw error;
+            }
+        });
         this.#pool = driver.createPool(this.#poolConfig);
     }
 

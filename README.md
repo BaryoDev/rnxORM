@@ -41,6 +41,9 @@ Install `rnxorm` and the driver for your database. The drivers (`pg`, `mssql`,
 If it is missing, creating the provider throws an error that names the package.
 `rnxorm` works with both `import` and `require`.
 
+If you bundle your app and a driver is not installed, mark it external, for
+example `--external:mssql` in esbuild or `externals` in webpack.
+
 **For PostgreSQL:**
 ```bash
 npm install rnxorm pg reflect-metadata
