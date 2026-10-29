@@ -307,10 +307,11 @@ export class GroupedSelectBuilder<T, TKey, TResult> {
                 );
             }
             const checkedAlias = assertAlias(alias, 'groupBy().select');
-            if (entry.fn === 'count') {
+            const column = entry.path === undefined ? undefined : columnFor(entry.path);
+            if (entry.fn === 'count' || column === undefined) {
                 return { operand: { kind: 'agg', fn: 'count' }, alias: checkedAlias };
             }
-            const column = columnFor(entry.path!);
+            // column is defined here: only count may omit the selector.
             return {
                 operand: { kind: 'agg', fn: entry.fn, column: column.columnName, columnType: column.type },
                 alias: checkedAlias,
