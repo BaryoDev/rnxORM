@@ -411,7 +411,21 @@ price!: number;
 
 `IN` / `NOT IN` take an **array** and expand to one placeholder per element; an empty array compiles to the constant `1 = 0` (`IN`) or `1 = 1` (`NOT IN`) instead of invalid SQL. `IS` / `IS NOT` take **`null`** and emit `IS NULL` / `IS NOT NULL`, binding nothing. Passing a non-array to `IN`, or a non-null value to `IS`, throws.
 
-`BETWEEN` is **not** supported; express it as two conditions: `.where('age', '>=', 18).where('age', '<=', 65)`.
+### Condition builders
+
+`where()` also takes a lambda that returns a condition built from imported operators:
+
+```typescript
+import { eq, gt, between, inArray, and, or, not } from 'rnxorm';
+
+db.set(User).where(u => eq(u.email, 'a@b.c'));
+db.set(User).where(u => and(gt(u.age, 18), or(eq(u.role, 'admin'), not(inArray(u.status, ['banned'])))));
+db.set(User).where(u => between(u.age, 18, 65));
+```
+
+Available: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `like`, `notLike`, `ilike`, `inArray`, `notInArray`, `isNull`, `isNotNull`, `between`, `and`, `or`, `not`. The value type follows the column, so `eq(u.age, 'eighteen')` and an unknown property fail to compile. Column renames and value converters apply as in the string form. A lambda that returns a plain expression (`u => u.age > 18`) throws and points back to the builders. Nested paths (`u.address.city`) still throw.
+
+The three-argument form `.where('age', '>', 18)` still works and builds the same SQL, but it is deprecated and will be removed in 4.0.
 
 `where()`, `orderBy()`, and `orderByDescending()` on `DbSet`, `QueryBuilder`, and `SelectQueryBuilder` carry `keyof T` overloads, so property-name literals autocomplete and typo-check in editors. (Grouped `orderBy()` stays string-only: it also accepts projection aliases, which are not properties of `T`.) The plain-string forms remain supported for dynamic columns. Now safe to use with untrusted input like `orderBy(req.query.sort)`, which throws instead of reaching SQL (see [SECURITY.md](SECURITY.md)).
 

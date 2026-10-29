@@ -24,7 +24,7 @@ export type AggregateCaptureResult =
     | { kind: 'aggregates'; aggregates: Record<string, AggregateSelectorEntry> }
     | { kind: 'opaque'; reason: OpaqueReason };
 
-function pathOf(value: any): string | undefined {
+export function pathOf(value: any): string | undefined {
     if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
         return undefined;
     }
@@ -41,14 +41,14 @@ function isPlainObject(value: any): boolean {
     );
 }
 
-interface Recorder {
+export interface Recorder {
     root: any;
     coerced: () => boolean;
     /** Total root property accesses, counting repeats (see capture). */
     accesses: () => number;
 }
 
-function createRecorder(): Recorder {
+export function createRecorder(): Recorder {
     let coerced = false;
     let accesses = 0;
 

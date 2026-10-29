@@ -2,9 +2,10 @@ import { DbContext } from "../DbContext";
 import { QueryState } from "../QueryState";
 import { DatabaseRow } from "../types";
 import { capture } from "../expressions/PropertyCapture";
+import { buildWhere } from "../expressions/conditions";
 import { queryFilterPredicates } from "../QueryFilter";
 import { toCount } from "../Numerics";
-import { assertAlias, assertColumn, assertLimit, findColumn, resolvePredicate } from "../Identifiers";
+import { assertAlias, assertColumn, assertLimit } from "../Identifiers";
 import { Predicate } from "./model/Predicate";
 import { SelectItem } from "./model/SelectModel";
 import { mapRowToEntity } from "./EntityMapper";
@@ -54,15 +55,16 @@ export class SelectQueryBuilder<T, TResult> {
     }
 
     /**
-     * Add a WHERE condition
+     * Add a WHERE condition built with the condition builders:
+     * `where(u => eq(u.email, x))`. Builders are imported from 'rnxorm'.
      */
+    where(condition: (entity: T) => Predicate): this;
+    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
     where(column: keyof T & string, operator: string, value: any): this;
+    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
     where(column: string, operator: string, value: any): this;
-    where(column: string, operator: string, value: any): this {
-        const sqlColumn = assertColumn(this.entityType, column, 'where');
-        this.state.predicates.push(resolvePredicate(
-            { columnName: sqlColumn, ...findColumn(this.entityType, column) }, operator, value, 'where'
-        ));
+    where(first: string | ((entity: T) => Predicate), operator?: string, value?: any): this {
+        this.state.predicates.push(buildWhere(this.entityType, first, operator, value));
         return this;
     }
 

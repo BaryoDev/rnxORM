@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Condition builders** (issue #30). `where(u => eq(u.email, x))` with `eq`, `ne`,
+  `gt`, `gte`, `lt`, `lte`, `like`, `notLike`, `ilike`, `inArray`, `notInArray`,
+  `isNull`, `isNotNull`, `between`, `and`, `or` and `not`, imported from
+  `rnxorm`. Value types follow the column at compile time. `between` is now
+  supported. The three-argument `where(column, op, value)` is deprecated and
+  will be removed in 4.0; it builds the same SQL.
 - **ES module support.** `rnxorm` now has an `exports` map, so both `import` and
   `require` work. The ES entry is a thin wrapper over the CommonJS build, so
   there is still one copy of the code and one metadata registry.
