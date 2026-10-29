@@ -21,10 +21,12 @@ function newItem(id: number, name: string): TxHandleItem {
 }
 
 async function insertViaPool(provider: IDatabaseProvider, id: number, name: string): Promise<void> {
-    await provider.query(
-        `INSERT INTO tx_handle_items (id, name) VALUES (${provider.getParameterPlaceholder(1)}, ${provider.getParameterPlaceholder(2)})`,
-        [id, name]
-    );
+    let sql = `INSERT INTO tx_handle_items (id, name) VALUES (${provider.getParameterPlaceholder(1)}, ${provider.getParameterPlaceholder(2)})`;
+    // An integer key is an IDENTITY column on SQL Server.
+    if (provider.getDialect() === 'mssql') {
+        sql = `SET IDENTITY_INSERT tx_handle_items ON; ${sql}; SET IDENTITY_INSERT tx_handle_items OFF`;
+    }
+    await provider.query(sql, [id, name]);
 }
 
 /**
@@ -61,6 +63,12 @@ describe('Transaction handle (#52)', () => {
                     // Ignore
                 }
                 await first.disconnect();
+            });
+
+            afterEach(async () => {
+                // A failed test must not leave its transaction open for the next one.
+                await first.rollbackTransaction().catch(() => undefined);
+                await second.rollbackTransaction().catch(() => undefined);
             });
 
             beforeEach(async () => {
