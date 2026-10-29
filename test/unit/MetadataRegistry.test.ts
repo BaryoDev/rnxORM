@@ -174,7 +174,7 @@ describe('a re-evaluated entity class replaces its predecessor (#53)', () => {
 
         const created = querySpy.mock.calls
             .map(([sql]) => sql as string)
-            .filter(sql => sql.startsWith('CREATE TABLE wm_users '));
+            .filter(sql => sql.startsWith('CREATE TABLE IF NOT EXISTS wm_users '));
         expect(created).toHaveLength(1);
     });
 

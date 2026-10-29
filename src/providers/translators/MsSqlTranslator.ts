@@ -120,11 +120,6 @@ export class MsSqlTranslator extends SqlTranslator {
         return [`ALTER TABLE ${table} ALTER COLUMN ${column} ${type}${op.nullable === false ? ' NOT NULL' : ''}`];
     }
 
-    /**
-     * sp_rename takes bare names inside string literals, so these positions
-     * cannot be quoted and are validated instead. A payload here used to close
-     * the literal and run (issue #44).
-     */
     protected renderEnsureTable(table: string, columns: string): string {
         return `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${table}')\n                CREATE TABLE ${table} (${columns});`;
     }
@@ -153,6 +148,11 @@ export class MsSqlTranslator extends SqlTranslator {
         return `ALTER TABLE ${table} ALTER COLUMN ${column} ${type}`;
     }
 
+    /**
+     * sp_rename takes bare names inside string literals, so these positions
+     * cannot be quoted and are validated instead. A payload here used to close
+     * the literal and run (issue #44).
+     */
     protected renderRenameColumn(op: RenameColumnOp): string {
         const table = assertQualifiedPlainIdentifier(op.table, op.op);
         const from = assertPlainIdentifier(op.from, op.op);

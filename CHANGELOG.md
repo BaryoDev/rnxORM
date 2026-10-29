@@ -48,6 +48,11 @@
   them. The SQL is unchanged. A custom provider drops those methods and returns
   a translator from `getTranslator()`. `mapType`, `getSchemaColumnsQuery`,
   `normalizeType` and `isTypeMismatch` stay on the provider.
+- **`SqlTranslator` has two more abstract members.** A custom subclass must
+  implement `mapType` and `renderEnsureAlterColumnType`, and `translateDdl`
+  now handles seven more `DdlOperation` kinds (`ensureTable`,
+  `ensureJoinTable`, `ensureForeignKey`, `ensureIndex`,
+  `ensureUniqueConstraint`, `ensureAddColumn`, `ensureAlterColumnType`).
 - **Drivers are optional peer dependencies** (issue #10). `pg`, `mssql` and
   `mariadb` are no longer installed with `rnxorm`. The app installs the one it
   uses (`pg` 8, `mssql` 10 or 11, `mariadb` 3). A provider loads its driver
