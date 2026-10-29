@@ -47,6 +47,8 @@ export class SqlCaptureProvider implements IDatabaseProvider {
         this.queryConnections = [];
         this.openTransactions = 0;
         this.failWhen = undefined;
+        this.beginGate = undefined;
+        this.rollbackError = undefined;
     }
 
     getDialect(): Dialect {
@@ -90,7 +92,14 @@ export class SqlCaptureProvider implements IDatabaseProvider {
 
     private transactionCount = 0;
 
+    /** When set, beginTransaction() waits on it, so a test can overlap calls. */
+    public beginGate?: Promise<void>;
+
+    /** When set, a handle's rollback() records the call, then rejects with it. */
+    public rollbackError?: Error;
+
     async beginTransaction(): Promise<ITransaction> {
+        if (this.beginGate) await this.beginGate;
         this.transactionCalls.push('begin');
         this.openTransactions++;
         const id = `tx${++this.transactionCount}`;
@@ -100,6 +109,7 @@ export class SqlCaptureProvider implements IDatabaseProvider {
             open = false;
             this.transactionCalls.push(call);
             this.openTransactions--;
+            if (call === 'rollback' && this.rollbackError) throw this.rollbackError;
         };
         return {
             id,

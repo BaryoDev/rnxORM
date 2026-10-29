@@ -187,7 +187,14 @@ export class MSSQLProvider implements IDatabaseProvider {
     async beginTransaction(): Promise<ITransaction> {
         if (!this.#pool) await this.connect();
         const transaction = new mssql.Transaction(this.#pool!);
-        await transaction.begin();
+        try {
+            await transaction.begin();
+        } catch (error) {
+            // A rejected begin() still holds the pooled connection; only
+            // commit and rollback release it.
+            await transaction.rollback().catch(() => undefined);
+            throw error;
+        }
         return new MSSQLTransaction(transaction);
     }
 

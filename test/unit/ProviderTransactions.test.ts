@@ -222,4 +222,53 @@ describe('the context owns its transaction handle (#52)', () => {
 
         await db.rollbackTransaction();
     });
+
+    describe('overlapping calls on one context', () => {
+        function gate() {
+            let open!: () => void;
+            const promise = new Promise<void>(resolve => { open = resolve; });
+            return { promise, open };
+        }
+
+        it('rejects a second beginTransaction while the first is still pending', async () => {
+            const { db, provider } = makeDb();
+            const g = gate();
+            provider.beginGate = g.promise;
+
+            const first = db.beginTransaction();
+            const second = db.beginTransaction();
+
+            await expect(second).rejects.toThrow('A transaction is already open');
+            g.open();
+            await first;
+            expect(provider.transactionCalls).toEqual(['begin']);
+            await db.rollbackTransaction();
+        });
+
+        it('rejects saveChanges while a beginTransaction is still pending', async () => {
+            const { db, provider } = makeDb();
+            const g = gate();
+            provider.beginGate = g.promise;
+
+            const pending = db.beginTransaction();
+            db.set(TxItem).add(newItem(1));
+
+            await expect(db.saveChanges()).rejects.toThrow('A transaction is already open');
+            g.open();
+            await pending;
+            expect(provider.transactionCalls).toEqual(['begin']);
+            await db.rollbackTransaction();
+        });
+    });
+
+    it('surfaces the write error when the rollback also fails', async () => {
+        const { db, provider } = makeDb();
+
+        db.set(TxItem).add(newItem(1));
+        provider.failWhen = sql => (sql.startsWith('INSERT') ? new Error('insert blew up') : undefined);
+        provider.rollbackError = new Error('rollback blew up');
+
+        await expect(db.saveChanges()).rejects.toThrow('insert blew up');
+        expect(provider.transactionCalls).toEqual(['begin', 'rollback']);
+    });
 });

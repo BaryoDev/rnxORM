@@ -320,9 +320,10 @@ export class DbContext {
         } catch (error) {
             // Only roll back a transaction this call opened. The error
             // propagates either way, so a caller who owns the transaction can
-            // roll back their whole unit of work.
+            // roll back their whole unit of work. A failed rollback must not
+            // replace the write error.
             if (ownsTransaction) {
-                await this.rollbackTransaction();
+                await this.rollbackTransaction().catch(() => undefined);
             }
             throw error;
         }
