@@ -105,3 +105,31 @@ describe('where and aggregates resolve columns against the context model', () =>
         });
     });
 });
+
+@Entity('wa_typed')
+class WaTyped {
+    @PrimaryKey() id!: number;
+    @Column({ type: 'varchar(10)' } as any) salary!: number;
+}
+class RetypedContext extends DbContext {
+    protected onModelCreating(mb: ModelBuilder): void {
+        mb.entity(WaTyped).property(u => u.salary).hasColumnName('pay').hasColumnType('int');
+    }
+}
+describe('aggregate column type comes from the context model', () => {
+    function setup() {
+        const p = new SqlCaptureProvider('mssql');
+        p.defaultResult = { rows: [{ avg: 1 }], rowCount: 1 };
+        return { p, ctx: new RetypedContext(p) };
+    }
+    it('average casts an int column on DbSet', async () => {
+        const { p, ctx } = setup();
+        await ctx.set(WaTyped).average(u => u.salary);
+        expect(p.lastCall!.sql).toContain('AVG(CAST(pay AS DECIMAL(38,6)))');
+    });
+    it('average casts an int column on QueryBuilder', async () => {
+        const { p, ctx } = setup();
+        await ctx.set(WaTyped).where(u => gt(u.salary, 1)).average(u => u.salary);
+        expect(p.lastCall!.sql).toContain('AVG(CAST(pay AS DECIMAL(38,6)))');
+    });
+});
