@@ -6,6 +6,14 @@ import { toCount, toExactNumber } from "./Numerics";
 import { ModelBuilder } from "./ModelBuilder";
 import { ChangeTracker } from "./ChangeTracker";
 import { EntityEntry, EntityState } from "./EntityEntry";
+import { Predicate } from "./query/model/Predicate";
+import { UpdateAssignment } from "./query/model/UpdateModel";
+
+const eqColumn = (name: string, value: QueryParameter): Predicate => ({
+    op: 'eq',
+    left: { kind: 'column', name },
+    value,
+});
 
 /**
  * Represents a session with the database and can be used to query and save instances of your entities.
@@ -519,26 +527,18 @@ export class DbContext {
             return value;
         });
 
-        const placeholders = values.map((_: any, i: number) => this.provider.getParameterPlaceholder(i + 1));
-
         const pkColumn = metadata.columns.find((c) => c.isPrimaryKey && c.isAutoIncrement);
         const needsGeneratedId = pkColumn && (entity[pkColumn.propertyName] === undefined || entity[pkColumn.propertyName] === null);
-        const dialect = this.provider.getDialect();
 
-        let sql: string;
-        if (needsGeneratedId && dialect === 'postgresql') {
-            sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING ${pkColumn.columnName}`;
-        } else if (needsGeneratedId && dialect === 'mssql') {
-            sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) OUTPUT INSERTED.${pkColumn.columnName} VALUES (${placeholders.join(', ')})`;
-        } else {
-            sql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
-            // SQL Server rejects explicit values for IDENTITY columns unless IDENTITY_INSERT is ON
-            if (pkColumn && !needsGeneratedId && dialect === 'mssql') {
-                sql = `SET IDENTITY_INSERT ${tableName} ON; ${sql}; SET IDENTITY_INSERT ${tableName} OFF`;
-            }
-        }
+        const stmt = this.provider.getTranslator().translateInsert({
+            table: tableName,
+            columns: columnNames,
+            values: values.map(asQueryParameter),
+            returning: needsGeneratedId ? pkColumn.columnName : undefined,
+            identityInsert: !!pkColumn && !needsGeneratedId,
+        });
 
-        const result = await this.executor().query(sql, values);
+        const result = await this.executor().query(stmt.text, stmt.params);
 
         // A generated key comes back in the database's own representation, so
         // it goes through the column's convertFromDb before landing on the
@@ -596,24 +596,20 @@ export class DbContext {
             return false; // Nothing to update
         }
 
-        const setClause: string[] = [];
-        const values: QueryParameter[] = [];
-        let paramIndex = 1;
+        const set: UpdateAssignment[] = [];
 
         const concurrencyTokens = metadata.columns.filter((c) => c.isConcurrencyToken);
 
         for (const propName of modifiedProperties) {
             const column = metadata.columns.find((c) => c.propertyName === propName);
             if (column && !column.isPrimaryKey && !column.isConcurrencyToken) {
-                setClause.push(`${column.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
-
                 let value = entity[propName];
 
                 if (column.hasConversion && column.convertToDb && value !== undefined && value !== null) {
                     value = column.convertToDb(value);
                 }
 
-                values.push(asQueryParameter(value));
+                set.push({ column: column.columnName, value: asQueryParameter(value) });
             }
         }
 
@@ -640,12 +636,11 @@ export class DbContext {
                 );
             }
             const newValue = currentValue + 1;
-            setClause.push(`${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`);
-            values.push(newValue);
+            set.push({ column: token.columnName, value: newValue });
             stagedTokenValues.push({ propertyName: token.propertyName, value: newValue });
         }
 
-        if (setClause.length === 0) {
+        if (set.length === 0) {
             return false; // No non-PK columns to update
         }
 
@@ -656,9 +651,7 @@ export class DbContext {
             pkValue = pkColumn.convertToDb(pkValue);
         }
 
-        values.push(asQueryParameter(pkValue));
-
-        let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
+        const where: Predicate[] = [eqColumn(pkColumn.columnName, asQueryParameter(pkValue))];
 
         // Add concurrency token checks to WHERE clause. A token the entity
         // does not carry is skipped, matching the SET clause above.
@@ -669,13 +662,16 @@ export class DbContext {
             if (originalValue === undefined || originalValue === null) {
                 continue;
             }
-            whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
-            values.push(asQueryParameter(originalValue));
+            where.push(eqColumn(token.columnName, asQueryParameter(originalValue)));
         }
 
-        const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${whereClause}`;
+        const stmt = this.provider.getTranslator().translateUpdate({
+            table: tableName,
+            set,
+            where: { op: 'and', parts: where },
+        });
 
-        const result = await this.executor().query(sql, values);
+        const result = await this.executor().query(stmt.text, stmt.params);
 
         // Check if update affected any rows (concurrency check)
         if (result.rowCount === 0) {
@@ -713,9 +709,7 @@ export class DbContext {
             pkValue = pkColumn.convertToDb(pkValue);
         }
 
-        let paramIndex = 1;
-        const values: QueryParameter[] = [asQueryParameter(pkValue)];
-        let whereClause = `${pkColumn.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
+        const where: Predicate[] = [eqColumn(pkColumn.columnName, asQueryParameter(pkValue))];
 
         // A delete competes for the row the same way an update does, so it
         // carries the same token check. Without it, deleting a row another
@@ -728,13 +722,15 @@ export class DbContext {
             if (originalValue === undefined || originalValue === null) {
                 continue;
             }
-            whereClause += ` AND ${token.columnName} = ${this.provider.getParameterPlaceholder(paramIndex++)}`;
-            values.push(asQueryParameter(originalValue));
+            where.push(eqColumn(token.columnName, asQueryParameter(originalValue)));
         }
 
-        const sql = `DELETE FROM ${tableName} WHERE ${whereClause}`;
+        const stmt = this.provider.getTranslator().translateDelete({
+            table: tableName,
+            where: { op: 'and', parts: where },
+        });
 
-        const result = await this.executor().query(sql, values);
+        const result = await this.executor().query(stmt.text, stmt.params);
 
         // EF Core throws when a DELETE affects no rows, token or not: the row
         // was already deleted or changed out from under this context.
@@ -984,16 +980,13 @@ export class DbContext {
 
                                 return value;
                             });
-                            const placeholders = values.map((_: any, i: number) =>
-                                this.provider.getParameterPlaceholder(i + 1)
-                            );
-
-                            let insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders.join(', ')})`;
-                            // SQL Server rejects explicit values for IDENTITY columns unless IDENTITY_INSERT is ON
-                            if (pkColumn.isAutoIncrement && this.provider.getDialect() === 'mssql') {
-                                insertSql = `SET IDENTITY_INSERT ${tableName} ON; ${insertSql}; SET IDENTITY_INSERT ${tableName} OFF`;
-                            }
-                            await this.query(insertSql, values);
+                            const insert = this.provider.getTranslator().translateInsert({
+                                table: tableName,
+                                columns: columnNames,
+                                values: values.map(asQueryParameter),
+                                identityInsert: !!pkColumn.isAutoIncrement,
+                            });
+                            await this.query(insert.text, insert.params);
                         }
                     }
                 }

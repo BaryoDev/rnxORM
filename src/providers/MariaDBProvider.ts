@@ -224,26 +224,6 @@ export class MariaDBProvider implements IDatabaseProvider {
         return `ALTER TABLE ${tableName} MODIFY COLUMN ${column.columnName} ${this.mapType(column.type)}`;
     }
 
-    generateInsertSql(tableName: string, columns: ColumnMetadata[]): string {
-        const colNames = columns.map(c => c.columnName).join(", ");
-        const values = columns.map(() => "?").join(", ");
-        return `INSERT INTO ${tableName} (${colNames}) VALUES (${values})`;
-    }
-
-    generateUpdateSql(tableName: string, columns: ColumnMetadata[], pkColumn: ColumnMetadata): string {
-        const setClause = columns.map(c => `${c.columnName} = ?`).join(", ");
-        return `UPDATE ${tableName} SET ${setClause} WHERE ${pkColumn.columnName} = ?`;
-    }
-
-    generateDeleteSql(tableName: string, pkColumn: ColumnMetadata): string {
-        return `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = ?`;
-    }
-
-    generateSelectSql(tableName: string, whereClause?: string): string {
-        const where = whereClause ? ` ${whereClause}` : "";
-        return `SELECT * FROM ${tableName}${where}`;
-    }
-
     getParameterPlaceholder(index: number): string {
         return "?";
     }

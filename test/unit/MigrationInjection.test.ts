@@ -31,10 +31,6 @@ class RecordingProvider implements IDatabaseProvider {
     generateCreateTableSql(_e: EntityMetadata): string { return ''; }
     generateAddColumnSql(_t: string, _c: ColumnMetadata): string { return ''; }
     generateAlterColumnTypeSql(_t: string, _c: ColumnMetadata): string { return ''; }
-    generateInsertSql(_t: string, _c: ColumnMetadata[]): string { return ''; }
-    generateUpdateSql(_t: string, _c: ColumnMetadata[], _p: ColumnMetadata): string { return ''; }
-    generateDeleteSql(_t: string, _p: ColumnMetadata): string { return ''; }
-    generateSelectSql(t: string): string { return `SELECT * FROM ${t}`; }
     getParameterPlaceholder(i: number): string { return `$${i}`; }
     getSchemaColumnsQuery(_t: string): { sql: string; params: any[] } { return { sql: '', params: [] }; }
     normalizeType(t: string): string { return t; }

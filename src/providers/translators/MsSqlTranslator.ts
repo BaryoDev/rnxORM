@@ -20,4 +20,12 @@ export class MsSqlTranslator extends SqlTranslator {
     protected renderIlike(left: string, placeholder: string): string {
         return `LOWER(${left}) LIKE LOWER(${placeholder})`;
     }
+
+    protected renderInsertOutput(returning: string): string {
+        return ` OUTPUT INSERTED.${returning}`;
+    }
+
+    protected wrapIdentityInsert(table: string, sql: string): string {
+        return `SET IDENTITY_INSERT ${table} ON; ${sql}; SET IDENTITY_INSERT ${table} OFF`;
+    }
 }

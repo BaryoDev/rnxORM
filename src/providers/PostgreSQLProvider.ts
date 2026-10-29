@@ -208,26 +208,6 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         return `ALTER TABLE ${tableName} ALTER COLUMN ${column.columnName} TYPE ${this.mapType(column.type)} USING ${column.columnName}::${this.mapType(column.type)}`;
     }
 
-    generateInsertSql(tableName: string, columns: ColumnMetadata[]): string {
-        const colNames = columns.map(c => c.columnName).join(", ");
-        const values = columns.map((_, i) => `$${i + 1}`).join(", ");
-        return `INSERT INTO ${tableName} (${colNames}) VALUES (${values})`;
-    }
-
-    generateUpdateSql(tableName: string, columns: ColumnMetadata[], pkColumn: ColumnMetadata): string {
-        const setClause = columns.map((c, i) => `${c.columnName} = $${i + 1}`).join(", ");
-        return `UPDATE ${tableName} SET ${setClause} WHERE ${pkColumn.columnName} = $${columns.length + 1}`;
-    }
-
-    generateDeleteSql(tableName: string, pkColumn: ColumnMetadata): string {
-        return `DELETE FROM ${tableName} WHERE ${pkColumn.columnName} = $1`;
-    }
-
-    generateSelectSql(tableName: string, whereClause?: string): string {
-        const where = whereClause ? ` ${whereClause}` : "";
-        return `SELECT * FROM ${tableName}${where}`;
-    }
-
     getParameterPlaceholder(index: number): string {
         return `$${index}`;
     }

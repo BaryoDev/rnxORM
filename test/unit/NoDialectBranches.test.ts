@@ -7,7 +7,7 @@ import * as path from 'path';
  * fails. Lower the number here when an arm is removed.
  */
 const ALLOWED: Record<string, number> = {
-    'core/DbContext.ts': 4,
+    'core/DbContext.ts': 0,
     'core/query/GroupedQueryBuilder.ts': 0,
     'core/query/QueryBuilder.ts': 0,
     'core/query/SelectQueryBuilder.ts': 0,
