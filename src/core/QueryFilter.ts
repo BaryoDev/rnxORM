@@ -1,6 +1,7 @@
 import { IDatabaseProvider } from "../providers/IDatabaseProvider";
 import { EntityMetadata } from "./MetadataStorage";
-import { assertOperator, buildComparison } from "./Identifiers";
+import { assertOperator, buildComparison, resolvePredicate } from "./Identifiers";
+import { Predicate } from "./query/model/Predicate";
 
 /**
  * A global query filter compiled to parameterized SQL fragments.
@@ -65,6 +66,30 @@ export function compileQueryFilter(
     }
 
     return compiled;
+}
+
+/**
+ * An entity's structured query filter conditions as predicates, ready to be
+ * ANDed into a SelectModel. Property names map to column names and value
+ * conversions apply, the same as compileQueryFilter() but with no placeholder
+ * syntax, so any dialect's translator can render them.
+ */
+export function queryFilterPredicates(metadata: EntityMetadata | undefined): Predicate[] {
+    if (!metadata?.queryFilterConditions) {
+        return [];
+    }
+
+    return metadata.queryFilterConditions.map(condition => {
+        const column = metadata.columns.find(c => c.propertyName === condition.property);
+        if (!column) {
+            throw new Error(
+                `Query filter references unknown property '${condition.property}' on entity ${metadata.target.name}`
+            );
+        }
+        const operator = assertOperator(condition.operator, 'hasQueryFilter');
+        const value = typeof condition.value === 'function' ? condition.value() : condition.value;
+        return resolvePredicate(column, operator, value, 'hasQueryFilter');
+    });
 }
 
 /**

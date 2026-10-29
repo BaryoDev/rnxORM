@@ -6,6 +6,8 @@ import { Migrator } from '../../src/migrations/Migrator';
 import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
+import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
+import { translatorFor } from '../mocks/translatorFor';
 
 const HISTORY_TABLE = '__MigrationHistory';
 
@@ -39,6 +41,7 @@ class FakeHistoryProvider implements IDatabaseProvider {
     constructor(private dialect: string = 'postgresql') {}
 
     getDialect(): Dialect { return this.dialect as Dialect; }
+    getTranslator(): SqlTranslator { return translatorFor(this.dialect); }
     async connect(): Promise<void> {}
     async disconnect(): Promise<void> {}
 

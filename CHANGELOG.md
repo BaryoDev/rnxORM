@@ -32,6 +32,13 @@
   executor its statements run on, and `Migrator` passes each migration its own
   handle. `connect()` no longer pins a connection for later queries; it only
   checks that one can be opened.
+- **Providers render queries through a translator** (issue #4).
+  `IDatabaseProvider` has a new required `getTranslator()` that returns the
+  `SqlTranslator` for its dialect. A custom provider must add it; one that
+  speaks an existing dialect can return the matching built-in translator.
+  Two rendering changes come with it: a case-insensitive `LIKE` on SQL Server
+  and MariaDB now renders `LOWER(col) LIKE LOWER(p)`, and `<>` now renders as
+  `!=` on every dialect.
 
 - **`sum()` and `average()` return `ExactNumeric`** (issue #54). They could already
   return a string for a value a JS number cannot hold exactly; the type now says

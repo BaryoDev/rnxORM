@@ -313,7 +313,7 @@ describe('skip()/take() reject non-integer payloads end-to-end (C1)', () => {
         await db.set(InjProduct).skip(5).take(10).toList();
         // (The double space before LIMIT is the pre-existing shape of a
         // paginated query with no WHERE/ORDER BY clause.)
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products  LIMIT 10 OFFSET 5');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products LIMIT 10 OFFSET 5');
     });
 });
 

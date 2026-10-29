@@ -420,8 +420,7 @@ describe('legacy lambda form + row limits (#45)', () => {
 
         const users = await db.set(QfcLegacyUser).ignoreQueryFilters().take(1).toList();
 
-        // (Double space: the pre-existing shape of a query with no WHERE clause.)
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_legacy_users  LIMIT 1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_legacy_users LIMIT 1');
         expect(users).toHaveLength(1);
     });
 
