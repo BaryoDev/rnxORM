@@ -75,7 +75,9 @@ async function withProbeTable(providerName: ReturnType<typeof getTestProviders>[
 // The mock provider has no SQL engine, so these run against real databases only.
 describe('SUM over a DECIMAL(38,10) column is exact', () => {
     for (const providerName of getTestProviders().filter(p => p !== 'mock')) {
-        it(`${providerName} returns the exact digits`, () =>
+        // SQLite stores DECIMAL as a double, so 17-digit sums are not exact there.
+        const exactDecimals = providerName === 'sqlite' ? it.skip : it;
+        exactDecimals(`${providerName} returns the exact digits`, () =>
             withProbeTable(providerName, async (db) => {
                 // Literals go straight to the database so no JS number parsing is involved.
                 await db.query(
