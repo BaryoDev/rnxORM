@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
-import { IDatabaseProvider, QueryResult } from '../../src/providers/IDatabaseProvider';
+import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
 
@@ -23,10 +23,7 @@ class RecordingProvider implements IDatabaseProvider {
         this.queries.push({ sql: text, params });
         return { rows: [], rowCount: 0 };
     }
-    async beginTransaction(): Promise<void> {}
-    async commitTransaction(): Promise<void> {}
-    async rollbackTransaction(): Promise<void> {}
-    isInTransaction(): boolean { return false; }
+    async beginTransaction(): Promise<ITransaction> { throw new Error('not used'); }
     mapType(t: string): string { return t; }
     generateCreateTableSql(_e: EntityMetadata): string { return ''; }
     generateAddColumnSql(_t: string, _c: ColumnMetadata): string { return ''; }

@@ -1,4 +1,4 @@
-import { IDatabaseProvider, QueryResult, DatabaseConfig } from '../../src/providers/IDatabaseProvider';
+import { IDatabaseProvider, ITransaction, QueryResult, DatabaseConfig } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
 
@@ -10,8 +10,14 @@ export class MockDatabaseProvider implements IDatabaseProvider {
     private tables: Map<string, Map<any, any>> = new Map();
     private sequences: Map<string, number> = new Map();
     private connected: boolean = false;
-    private inTransaction: boolean = false;
-    private transactionData: Map<string, Map<any, any>> | null = null;
+    private transactionCount = 0;
+
+    /**
+     * Which connection ran each query: 'pool' for provider.query(), 'tx1',
+     * 'tx2', ... for a transaction handle. Lets tests assert that a plain
+     * query during an open transaction did not land on its connection.
+     */
+    public queryLog: { sql: string; connection: string }[] = [];
 
     constructor(config?: DatabaseConfig) {
         // Config not needed for mock
@@ -41,9 +47,14 @@ export class MockDatabaseProvider implements IDatabaseProvider {
     }
 
     async query(text: string, params?: any[]): Promise<QueryResult> {
+        return this.run('pool', text, params);
+    }
+
+    private run(connection: string, text: string, params?: any[]): QueryResult {
         if (!this.connected) {
             throw new Error('Not connected to database');
         }
+        this.queryLog.push({ sql: text, connection });
 
         // Parse SQL and execute in-memory operations
         const sql = text.trim().toUpperCase();
@@ -88,30 +99,79 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         return { rows: [], rowCount: 0 };
     }
 
-    async beginTransaction(): Promise<void> {
-        this.inTransaction = true;
-        // Create a copy of current data for rollback
-        this.transactionData = new Map();
-        for (const [tableName, tableData] of this.tables.entries()) {
-            this.transactionData.set(tableName, new Map(tableData));
+    /**
+     * Each handle works on its own copy of the data, taken when it begins.
+     * Commit applies only the rows the handle changed, so two open handles
+     * do not overwrite each other, and rollback just drops the copy.
+     */
+    async beginTransaction(): Promise<ITransaction> {
+        const id = `tx${++this.transactionCount}`;
+        const copy = this.copyTables(this.tables);
+        const base = this.copyTables(this.tables);
+        let open = true;
+
+        return {
+            id,
+            get isOpen() {
+                return open;
+            },
+            query: async (text: string, params?: any[]) => {
+                if (!open) throw new Error('The transaction has already ended.');
+                // The statement runs synchronously, so swapping the table set
+                // for its duration cannot interleave with another query.
+                const live = this.tables;
+                this.tables = copy;
+                try {
+                    return this.run(id, text, params);
+                } finally {
+                    this.tables = live;
+                }
+            },
+            commit: async () => {
+                if (!open) return;
+                open = false;
+                this.applyChanges(base, copy);
+            },
+            rollback: async () => {
+                open = false;
+            },
+        } as ITransaction & { id: string };
+    }
+
+    private copyTables(source: Map<string, Map<any, any>>): Map<string, Map<any, any>> {
+        const copy = new Map<string, Map<any, any>>();
+        for (const [name, rows] of source.entries()) {
+            const rowCopy = new Map<any, any>();
+            for (const [key, row] of rows.entries()) {
+                rowCopy.set(key, { ...row });
+            }
+            copy.set(name, rowCopy);
         }
+        return copy;
     }
 
-    async commitTransaction(): Promise<void> {
-        this.inTransaction = false;
-        this.transactionData = null;
-    }
-
-    async rollbackTransaction(): Promise<void> {
-        if (this.transactionData) {
-            this.tables = this.transactionData;
+    /** Write the difference between a handle's start and end state to the live data. */
+    private applyChanges(
+        base: Map<string, Map<any, any>>,
+        changed: Map<string, Map<any, any>>
+    ): void {
+        for (const [name, rows] of changed.entries()) {
+            const live = this.tables.get(name) ?? new Map<any, any>();
+            this.tables.set(name, live);
+            const before = base.get(name) ?? new Map<any, any>();
+            for (const [key, row] of rows.entries()) {
+                const old = before.get(key);
+                if (!old || JSON.stringify(old) !== JSON.stringify(row)) {
+                    live.set(key, { ...row });
+                }
+            }
+            for (const key of before.keys()) {
+                if (!rows.has(key)) live.delete(key);
+            }
         }
-        this.inTransaction = false;
-        this.transactionData = null;
-    }
-
-    isInTransaction(): boolean {
-        return this.inTransaction;
+        for (const name of base.keys()) {
+            if (!changed.has(name)) this.tables.delete(name);
+        }
     }
 
     getParameterPlaceholder(index: number): string {

@@ -80,11 +80,8 @@ describe('asNoTracking()', () => {
 });
 
 describe('saveChanges() transaction wrapping', () => {
-    it('wraps changes in begin/commit', async () => {
+    it('wraps changes in begin/commit on one handle', async () => {
         const { db, provider } = makeDb();
-        const beginSpy = jest.spyOn(provider, 'beginTransaction');
-        const commitSpy = jest.spyOn(provider, 'commitTransaction');
-        const rollbackSpy = jest.spyOn(provider, 'rollbackTransaction');
 
         const item = new TtItem();
         item.id = 1;
@@ -92,23 +89,17 @@ describe('saveChanges() transaction wrapping', () => {
         db.set(TtItem).add(item);
         await db.saveChanges();
 
-        expect(beginSpy).toHaveBeenCalledTimes(1);
-        expect(commitSpy).toHaveBeenCalledTimes(1);
-        expect(rollbackSpy).not.toHaveBeenCalled();
+        expect(provider.transactionCalls).toEqual(['begin', 'commit']);
         expect(provider.calls.some(c => c.sql.startsWith('INSERT INTO tt_items'))).toBe(true);
+        // The write ran on the handle, not the pool.
+        const insertAt = provider.calls.findIndex(c => c.sql.startsWith('INSERT INTO tt_items'));
+        expect(provider.queryConnections[insertAt]).toBe('tx1');
+        expect(provider.openTransactions).toBe(0);
     });
 
     it('rolls back and rethrows when a statement fails', async () => {
         const { db, provider } = makeDb();
-        const commitSpy = jest.spyOn(provider, 'commitTransaction');
-        const rollbackSpy = jest.spyOn(provider, 'rollbackTransaction');
-        const original = provider.query.bind(provider);
-        jest.spyOn(provider, 'query').mockImplementation(async (sql: string, params?: any[]) => {
-            if (sql.startsWith('INSERT')) {
-                throw new Error('boom');
-            }
-            return original(sql, params);
-        });
+        provider.failWhen = sql => (sql.startsWith('INSERT') ? new Error('boom') : undefined);
 
         const item = new TtItem();
         item.id = 1;
@@ -116,8 +107,8 @@ describe('saveChanges() transaction wrapping', () => {
         db.set(TtItem).add(item);
 
         await expect(db.saveChanges()).rejects.toThrow('boom');
-        expect(rollbackSpy).toHaveBeenCalledTimes(1);
-        expect(commitSpy).not.toHaveBeenCalled();
+        expect(provider.transactionCalls).toEqual(['begin', 'rollback']);
+        expect(provider.openTransactions).toBe(0);
     });
 });
 

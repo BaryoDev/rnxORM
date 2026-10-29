@@ -3,7 +3,7 @@ import { DbContext } from '../../src/core/DbContext';
 import { Migration } from '../../src/migrations/Migration';
 import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { Migrator } from '../../src/migrations/Migrator';
-import { IDatabaseProvider, QueryResult } from '../../src/providers/IDatabaseProvider';
+import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
 
@@ -30,6 +30,11 @@ class FakeHistoryProvider implements IDatabaseProvider {
     public historyRows: Array<{ migration_id: string; migration_name: string; applied_at: Date | string }> = [];
     /** When set, query() throws if the SQL contains this fragment */
     public failOnSqlContaining?: string;
+    /** When set, a transaction's commit() throws and applies nothing. */
+    public failOnCommit = false;
+    /** Which connection ran each query: 'pool' or 'tx1', 'tx2', ... */
+    public connections: Array<{ sql: string; connection: string }> = [];
+    private transactionCount = 0;
 
     constructor(private dialect: string = 'postgresql') {}
 
@@ -38,20 +43,31 @@ class FakeHistoryProvider implements IDatabaseProvider {
     async disconnect(): Promise<void> {}
 
     async query(text: string, params?: any[]): Promise<QueryResult> {
+        return this.execute('pool', text, params, this.historyRows, rows => { this.historyRows = rows; });
+    }
+
+    private async execute(
+        connection: string,
+        text: string,
+        params: any[] | undefined,
+        history: FakeHistoryProvider['historyRows'],
+        setHistory: (rows: FakeHistoryProvider['historyRows']) => void
+    ): Promise<QueryResult> {
         const sql = text.trim();
         this.events.push(sql);
         this.queries.push({ sql, params });
+        this.connections.push({ sql, connection });
 
         if (this.failOnSqlContaining && sql.includes(this.failOnSqlContaining)) {
             throw new Error(`Simulated failure on: ${this.failOnSqlContaining}`);
         }
 
         if (sql.startsWith(`SELECT migration_id, migration_name, applied_at FROM ${HISTORY_TABLE}`)) {
-            return { rows: [...this.historyRows], rowCount: this.historyRows.length };
+            return { rows: [...history], rowCount: history.length };
         }
 
         if (sql.startsWith(`INSERT INTO ${HISTORY_TABLE}`) && params) {
-            this.historyRows.push({
+            history.push({
                 migration_id: params[0],
                 migration_name: params[1],
                 applied_at: new Date().toISOString()
@@ -60,18 +76,40 @@ class FakeHistoryProvider implements IDatabaseProvider {
         }
 
         if (sql.startsWith(`DELETE FROM ${HISTORY_TABLE}`) && params) {
-            this.historyRows = this.historyRows.filter(r => r.migration_id !== params[0]);
+            setHistory(history.filter(r => r.migration_id !== params[0]));
             return { rows: [], rowCount: 1 };
         }
 
         return { rows: [], rowCount: 0 };
     }
 
-    async beginTransaction(): Promise<void> { this.events.push('BEGIN'); }
-    async commitTransaction(): Promise<void> { this.events.push('COMMIT'); }
-    async rollbackTransaction(): Promise<void> { this.events.push('ROLLBACK'); }
-
-    isInTransaction(): boolean { return this.events.lastIndexOf('BEGIN') > Math.max(this.events.lastIndexOf('COMMIT'), this.events.lastIndexOf('ROLLBACK')); }
+    /**
+     * A handle works on a copy of the history table and publishes it on
+     * commit, so a rolled back migration leaves no history row behind.
+     */
+    async beginTransaction(): Promise<ITransaction> {
+        this.events.push('BEGIN');
+        const id = `tx${++this.transactionCount}`;
+        let rows = [...this.historyRows];
+        let open = true;
+        return {
+            get isOpen() { return open; },
+            query: (text: string, params?: any[]) =>
+                this.execute(id, text, params, rows, next => { rows = next; }),
+            commit: async () => {
+                if (!open) return;
+                open = false;
+                if (this.failOnCommit) throw new Error('Simulated failure on commit');
+                this.events.push('COMMIT');
+                this.historyRows = rows;
+            },
+            rollback: async () => {
+                if (!open) return;
+                open = false;
+                this.events.push('ROLLBACK');
+            },
+        };
+    }
 
     getParameterPlaceholder(index: number): string { return `$${index}`; }
 
@@ -320,6 +358,31 @@ describe('Migrator', () => {
 
             // Failed migration must not be recorded in history.
             expect(provider.historyRows.map(r => r.migration_id)).toEqual(['20240101']);
+        });
+
+        it('runs a migration and its history row on its own transaction connection', async () => {
+            const { migrator, provider } = createMigrator();
+            migrator.addMigration(new TestMigration('20240101', 'first'));
+
+            await migrator.migrate();
+
+            const on = (prefix: string) =>
+                provider.connections.find(c => c.sql.startsWith(prefix))!.connection;
+            expect(on('-- up 20240101')).toBe('tx1');
+            expect(on(`INSERT INTO ${HISTORY_TABLE}`)).toBe('tx1');
+            // The history read stays on the pool.
+            expect(on(`SELECT migration_id`)).toBe('pool');
+        });
+
+        it('leaves no history row when the commit fails after the row was written', async () => {
+            const { migrator, provider } = createMigrator();
+            provider.failOnCommit = true;
+            migrator.addMigration(new TestMigration('20240101', 'first'));
+
+            await expect(migrator.migrate()).rejects.toThrow('Simulated failure on commit');
+
+            expect(provider.queries.some(q => q.sql.startsWith(`INSERT INTO ${HISTORY_TABLE}`))).toBe(true);
+            expect(provider.historyRows).toEqual([]);
         });
     });
 

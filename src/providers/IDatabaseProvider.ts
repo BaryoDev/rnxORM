@@ -66,6 +66,20 @@ export interface QueryResult<TRow = DatabaseRow> {
 }
 
 /**
+ * An open transaction, bound to one connection.
+ *
+ * Statements run through `query()` are inside the transaction until
+ * `commit()` or `rollback()` ends it and releases the connection.
+ */
+export interface ITransaction {
+    query(text: string, params?: QueryParameter[]): Promise<QueryResult>;
+    commit(): Promise<void>;
+    rollback(): Promise<void>;
+    /** False once the transaction has been committed or rolled back. */
+    readonly isOpen: boolean;
+}
+
+/**
  * Interface for database providers
  * Abstracts database-specific SQL generation and operations
  */
@@ -87,25 +101,19 @@ export interface IDatabaseProvider {
     disconnect(): Promise<void>;
 
     /**
-     * Execute a SQL query
+     * Execute a SQL query on the pool, outside any transaction.
      */
     query(text: string, params?: QueryParameter[]): Promise<QueryResult>;
 
-    beginTransaction(): Promise<void>;
-
-    commitTransaction(): Promise<void>;
-
-    rollbackTransaction(): Promise<void>;
-
     /**
-     * Whether a transaction is currently open on this provider.
+     * Open a transaction on its own connection.
      *
-     * Lets a caller-opened transaction take precedence over the one
-     * `saveChanges()` would otherwise wrap around its writes. Without it,
-     * `saveChanges()` committed the caller's transaction early and the
-     * caller's later rollback rolled back nothing (issue #38).
+     * The provider keeps no transaction state: `query()` above always uses the
+     * pool, and the returned handle is the only way to run statements inside
+     * this transaction. Whoever holds the handle commits or rolls it back,
+     * which also releases the connection (issue #52).
      */
-    isInTransaction(): boolean;
+    beginTransaction(): Promise<ITransaction>;
 
     /**
      * Map TypeScript type to database-specific type

@@ -1,6 +1,6 @@
 import { DbSet } from "./DbSet";
 import { DatabaseRow, EntityLike, QueryParameter, asQueryParameter, assertNever } from "./types";
-import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
+import { IDatabaseProvider, ITransaction, QueryResult } from "../providers/IDatabaseProvider";
 import { RelationType, MetadataStorage, EntityMetadata, ColumnMetadata } from "./MetadataStorage";
 import { toCount, toExactNumber } from "./Numerics";
 import { ModelBuilder } from "./ModelBuilder";
@@ -13,6 +13,14 @@ import { EntityEntry, EntityState } from "./EntityEntry";
 export class DbContext {
     protected provider: IDatabaseProvider;
     private _changeTracker: ChangeTracker;
+
+    /**
+     * The transaction this context's statements run in, or null for the pool.
+     * Lives on the context, not the provider, so two contexts on one provider
+     * are independent units of work (issue #52).
+     */
+    #transaction: ITransaction | null = null;
+    #beginning = false;
 
     /**
      * This context's model: a copy of the decorator registry with this
@@ -142,7 +150,23 @@ export class DbContext {
     }
 
     async query(text: string, params?: QueryParameter[]): Promise<QueryResult> {
-        return await this.provider.query(text, params);
+        return await this.executor().query(text, params);
+    }
+
+    /** The open transaction if there is one, otherwise the pool. */
+    private executor(): { query(text: string, params?: QueryParameter[]): Promise<QueryResult> } {
+        return this.currentTransaction() ?? this.provider;
+    }
+
+    /**
+     * The context's open transaction. A handle the caller ended directly
+     * through commit() or rollback() is dropped here rather than reused.
+     */
+    private currentTransaction(): ITransaction | null {
+        if (this.#transaction && !this.#transaction.isOpen) {
+            this.#transaction = null;
+        }
+        return this.#transaction;
     }
 
     /**
@@ -158,21 +182,46 @@ export class DbContext {
      * );
      */
     async executeSqlRaw(sql: string, parameters?: QueryParameter[]): Promise<number> {
-        const result = await this.provider.query(sql, parameters);
+        const result = await this.executor().query(sql, parameters);
         return result.rowCount;
     }
 
-    // Transaction management
-    async beginTransaction() {
-        await this.provider.beginTransaction();
+    /**
+     * Opens a transaction and makes it this context's current one, so later
+     * queries and saveChanges() run inside it. The returned handle can also be
+     * committed or rolled back directly; the context drops it once it ends.
+     * Nesting on one context throws: use a second context for a second unit
+     * of work.
+     */
+    async beginTransaction(): Promise<ITransaction> {
+        if (this.currentTransaction() || this.#beginning) {
+            throw new Error(
+                'A transaction is already open on this context. Nested transactions are ' +
+                'not supported; commit or roll back the current one first, or use a ' +
+                'separate DbContext.'
+            );
+        }
+        // Claim the slot before the first await, so two concurrent callers
+        // cannot both pass the guard above.
+        this.#beginning = true;
+        try {
+            this.#transaction = await this.provider.beginTransaction();
+            return this.#transaction;
+        } finally {
+            this.#beginning = false;
+        }
     }
 
-    async commitTransaction() {
-        await this.provider.commitTransaction();
+    async commitTransaction(): Promise<void> {
+        const transaction = this.currentTransaction();
+        this.#transaction = null;
+        await transaction?.commit();
     }
 
-    async rollbackTransaction() {
-        await this.provider.rollbackTransaction();
+    async rollbackTransaction(): Promise<void> {
+        const transaction = this.currentTransaction();
+        this.#transaction = null;
+        await transaction?.rollback();
     }
 
     /**
@@ -202,7 +251,7 @@ export class DbContext {
         // enlists in it rather than wrapping its own. Committing here would end
         // the caller's transaction early and make their later rollback a no-op
         // (issue #38).
-        const ownsTransaction = !this.provider.isInTransaction();
+        const ownsTransaction = this.currentTransaction() === null;
 
         try {
             if (ownsTransaction) {
@@ -271,9 +320,10 @@ export class DbContext {
         } catch (error) {
             // Only roll back a transaction this call opened. The error
             // propagates either way, so a caller who owns the transaction can
-            // roll back their whole unit of work.
+            // roll back their whole unit of work. A failed rollback must not
+            // replace the write error.
             if (ownsTransaction) {
-                await this.rollbackTransaction();
+                await this.rollbackTransaction().catch(() => undefined);
             }
             throw error;
         }
@@ -488,7 +538,7 @@ export class DbContext {
             }
         }
 
-        const result = await this.provider.query(sql, values);
+        const result = await this.executor().query(sql, values);
 
         // A generated key comes back in the database's own representation, so
         // it goes through the column's convertFromDb before landing on the
@@ -625,7 +675,7 @@ export class DbContext {
 
         const sql = `UPDATE ${tableName} SET ${setClause.join(', ')} WHERE ${whereClause}`;
 
-        const result = await this.provider.query(sql, values);
+        const result = await this.executor().query(sql, values);
 
         // Check if update affected any rows (concurrency check)
         if (result.rowCount === 0) {
@@ -684,7 +734,7 @@ export class DbContext {
 
         const sql = `DELETE FROM ${tableName} WHERE ${whereClause}`;
 
-        const result = await this.provider.query(sql, values);
+        const result = await this.executor().query(sql, values);
 
         // EF Core throws when a DELETE affects no rows, token or not: the row
         // was already deleted or changed out from under this context.
