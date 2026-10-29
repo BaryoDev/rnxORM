@@ -1,5 +1,7 @@
 import type { Pool, PoolClient } from "pg";
 import { loadDriver } from "./loadDriver";
+import { SqlTranslator } from "./translators/SqlTranslator";
+import { PostgresTranslator } from "./translators/PostgresTranslator";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
@@ -86,6 +88,12 @@ class PostgreSQLTransaction implements ITransaction {
 
 export class PostgreSQLProvider implements IDatabaseProvider {
     #pool: Pool;
+
+    private readonly translator = new PostgresTranslator();
+
+    getTranslator(): SqlTranslator {
+        return this.translator;
+    }
 
     getDialect(): Dialect {
         return 'postgresql';

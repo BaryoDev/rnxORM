@@ -1,4 +1,5 @@
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
+import { SqlTranslator } from "./translators/SqlTranslator";
 import {
     DatabaseRow,
     Dialect,
@@ -90,6 +91,11 @@ export interface IDatabaseProvider {
      * Used for provider-specific SQL generation (e.g., pagination, DDL).
      */
     getDialect(): Dialect;
+
+    /**
+     * The translator that renders query models to SQL for this dialect.
+     */
+    getTranslator(): SqlTranslator;
 
     /**
      * Connect to the database

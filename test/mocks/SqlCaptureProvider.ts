@@ -1,6 +1,8 @@
 import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
+import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
+import { translatorFor } from './translatorFor';
 
 /** Alias of the shipped Dialect union, kept so existing tests keep their import. */
 export type CaptureDialect = Dialect;
@@ -53,6 +55,10 @@ export class SqlCaptureProvider implements IDatabaseProvider {
 
     getDialect(): Dialect {
         return this.dialect;
+    }
+
+    getTranslator(): SqlTranslator {
+        return translatorFor(this.dialect);
     }
 
     async connect(): Promise<void> {

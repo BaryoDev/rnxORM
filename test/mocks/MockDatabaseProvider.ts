@@ -1,6 +1,11 @@
 import { IDatabaseProvider, ITransaction, QueryResult, DatabaseConfig } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
+import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
+import { PostgresTranslator } from '../../src/providers/translators/PostgresTranslator';
+
+/** Renders PG style SQL, which the mock's regex parser reads. */
+export class MockTranslator extends PostgresTranslator {}
 
 /**
  * Mock in-memory database provider for testing without actual databases
@@ -34,6 +39,10 @@ export class MockDatabaseProvider implements IDatabaseProvider {
      */
     getDialect(): Dialect {
         return 'mock' as Dialect;
+    }
+
+    getTranslator(): SqlTranslator {
+        return new MockTranslator();
     }
 
     async connect(): Promise<void> {

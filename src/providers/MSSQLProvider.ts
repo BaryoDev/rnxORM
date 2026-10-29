@@ -1,5 +1,7 @@
 import type * as mssql from "mssql";
 import { loadDriver } from "./loadDriver";
+import { SqlTranslator } from "./translators/SqlTranslator";
+import { MsSqlTranslator } from "./translators/MsSqlTranslator";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
@@ -93,6 +95,12 @@ export class MSSQLProvider implements IDatabaseProvider {
     #pool: mssql.ConnectionPool | null = null;
     readonly #driver: typeof mssql;
     private config: mssql.config;
+
+    private readonly translator = new MsSqlTranslator();
+
+    getTranslator(): SqlTranslator {
+        return this.translator;
+    }
 
     getDialect(): Dialect {
         return 'mssql';

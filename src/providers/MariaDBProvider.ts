@@ -1,5 +1,7 @@
 import type * as mariadb from "mariadb";
 import { loadDriver } from "./loadDriver";
+import { SqlTranslator } from "./translators/SqlTranslator";
+import { MariaDbTranslator } from "./translators/MariaDbTranslator";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
 import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
@@ -99,6 +101,12 @@ class MariaDBTransaction implements ITransaction {
 
 export class MariaDBProvider implements IDatabaseProvider {
     #pool: mariadb.Pool;
+
+    private readonly translator = new MariaDbTranslator();
+
+    getTranslator(): SqlTranslator {
+        return this.translator;
+    }
 
     getDialect(): Dialect {
         return 'mariadb';

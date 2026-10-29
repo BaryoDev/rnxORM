@@ -1,5 +1,7 @@
 import { MetadataStorage } from "./MetadataStorage";
 import { IDatabaseProvider } from "../providers/IDatabaseProvider";
+import { Operand } from "./query/model/Operand";
+import { Predicate } from "./query/model/Predicate";
 
 /**
  * Runtime validation for SQL identifiers and operators that arrive as strings
@@ -249,4 +251,76 @@ export function assertAlias(name: string, apiName: string): string {
     throw new Error(
         `${apiName}(): alias '${name}' is not a plain identifier`
     );
+}
+
+/**
+ * Map an operator string to a predicate over a resolved column. The operator
+ * is validated here; values are bound as given. resolvePredicate() is the
+ * entry point that also applies the column's value converter.
+ */
+export function operatorToPredicate(
+    column: string,
+    operator: string,
+    value: any,
+    apiName: string = 'where'
+): Predicate {
+    const sqlOperator = assertOperator(operator, apiName);
+    const left: Operand = { kind: 'column', name: column };
+
+    switch (sqlOperator) {
+        case '=': return { op: 'eq', left, value };
+        case '!=':
+        case '<>': return { op: 'ne', left, value };
+        case '>': return { op: 'gt', left, value };
+        case '>=': return { op: 'gte', left, value };
+        case '<': return { op: 'lt', left, value };
+        case '<=': return { op: 'lte', left, value };
+        case 'LIKE': return { op: 'like', left, value };
+        case 'ILIKE': return { op: 'ilike', left, value };
+        case 'NOT LIKE': return { op: 'notLike', left, value };
+        case 'IN':
+        case 'NOT IN':
+            if (!Array.isArray(value)) {
+                throw new Error(
+                    `${apiName}(): operator '${sqlOperator}' requires an array value, received ${typeof value}`
+                );
+            }
+            return { op: sqlOperator === 'IN' ? 'in' : 'notIn', left, values: value };
+        case 'IS':
+        case 'IS NOT':
+            if (value !== null) {
+                throw new Error(
+                    `${apiName}(): operator '${sqlOperator}' only compares against null; ` +
+                    `use '=' or '!=' to compare against a value`
+                );
+            }
+            return { op: sqlOperator === 'IS' ? 'isNull' : 'isNotNull', left };
+        default:
+            throw new Error(`${apiName}(): operator '${sqlOperator}' is not supported`);
+    }
+}
+
+/**
+ * Build one predicate from a column, an operator and a value.
+ *
+ * The column's name is used for SQL and its value converter is applied to the
+ * bound value (per element for IN/NOT IN). null and undefined are left alone.
+ */
+export function resolvePredicate(
+    column: { columnName: string; hasConversion?: boolean; convertToDb?: (v: any) => any },
+    operator: string,
+    value: any,
+    apiName: string = 'where'
+): Predicate {
+    const predicate = operatorToPredicate(column.columnName, operator, value, apiName);
+    switch (predicate.op) {
+        case 'in':
+        case 'notIn':
+            return { ...predicate, values: predicate.values.map(v => convertValueToDb(column, v)) };
+        case 'eq': case 'ne': case 'gt': case 'gte': case 'lt': case 'lte':
+        case 'like': case 'ilike': case 'notLike':
+            return { ...predicate, value: convertValueToDb(column, predicate.value) };
+        default:
+            return predicate;
+    }
 }

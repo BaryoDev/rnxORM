@@ -2,7 +2,10 @@ import { DbContext } from "../DbContext";
 import { DatabaseRow, QueryParameter, ExactNumeric } from "../types";
 import { EntityState, snapshotEntity } from "../EntityEntry";
 import { resolveColumn, resolvePropertyName } from "../expressions/PropertyCapture";
-import { compileQueryFilter } from "../QueryFilter";
+import { queryFilterPredicates } from "../QueryFilter";
+import { Predicate } from "./model/Predicate";
+import { AggregateFn } from "./model/Operand";
+import { SelectModel } from "./model/SelectModel";
 import { toCount, toExactNumber } from "../Numerics";
 import { convertValueToDb } from "../Identifiers";
 import { mapRowToEntity, resolvePkValue } from "./EntityMapper";
@@ -86,18 +89,13 @@ export class DbSet<T> {
     }
 
     async toList(): Promise<T[]> {
-        const provider = this.context.getProvider();
         const metadata = this.context.metadata.getEntity(this.entityType);
 
         // Structured query filters are translated to SQL so filtered rows
         // never leave the database; use ignoreQueryFilters() to bypass.
-        const filter = compileQueryFilter(metadata, provider, 1);
-        let sql = provider.generateSelectSql(this.tableName);
-        if (filter.clauses.length > 0) {
-            sql += ` WHERE ${filter.clauses.join(' AND ')}`;
-        }
-
-        const res = await this.context.query(sql, filter.clauses.length > 0 ? filter.params : undefined);
+        const where = this.filterWhere();
+        const stmt = this.translate({ table: this.tableName, where });
+        const res = await this.context.query(stmt.text, where ? stmt.params : undefined);
         const entities = res.rows.map((row: DatabaseRow) => this.mapRowToEntity(row, true));
 
         // Predicate-form query filters are evaluated in memory
@@ -190,22 +188,17 @@ export class DbSet<T> {
         const pkColumn = metadata.columns.find(c => c.isPrimaryKey);
         if (!pkColumn) throw new Error("Primary key not defined");
 
-        const provider = this.context.getProvider();
-        const placeholder = provider.getParameterPlaceholder(1);
-        let sql = `SELECT * FROM ${this.tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
         // A converted key is stored in its converted form, so the caller's
         // domain value has to go through the converter before it is bound, the
         // way updateEntity()/deleteEntity() already do it (issue #35).
-        const params: QueryParameter[] = [convertValueToDb(pkColumn, id)];
-
-        // Structured query filters are appended to the SQL WHERE clause
-        const filter = compileQueryFilter(metadata, provider, 2);
-        if (filter.clauses.length > 0) {
-            sql += ` AND ${filter.clauses.join(' AND ')}`;
-            params.push(...filter.params);
-        }
-
-        const res = await this.context.query(sql, params);
+        const pk: Predicate = {
+            op: 'eq',
+            left: { kind: 'column', name: pkColumn.columnName },
+            value: convertValueToDb(pkColumn, id),
+        };
+        // Structured query filters are ANDed after the key
+        const stmt = this.translate({ table: this.tableName, where: this.andAll([pk, ...queryFilterPredicates(metadata)]) });
+        const res = await this.context.query(stmt.text, stmt.params);
 
         if (res.rows.length === 0) return null;
         const entity = this.mapRowToEntity(res.rows[0], true); // Track the entity
@@ -221,22 +214,38 @@ export class DbSet<T> {
      * Build the WHERE clause for this entity's structured query filters,
      * or an empty clause when none are configured.
      */
-    private compileFilterWhere(): { where: string; params?: QueryParameter[] } {
+    private filterWhere(): Predicate | undefined {
         const metadata = this.context.metadata.getEntity(this.entityType);
-        const filter = compileQueryFilter(metadata, this.context.getProvider(), 1);
-        if (filter.clauses.length === 0) {
-            return { where: '' };
-        }
-        return { where: ` WHERE ${filter.clauses.join(' AND ')}`, params: filter.params };
+        return this.andAll(queryFilterPredicates(metadata));
+    }
+
+    private andAll(parts: Predicate[]): Predicate | undefined {
+        if (parts.length === 0) return undefined;
+        if (parts.length === 1) return parts[0];
+        return { op: 'and', parts };
+    }
+
+    private translate(model: SelectModel) {
+        return this.context.getProvider().getTranslator().translateSelect(model);
+    }
+
+    private async aggregate(fn: AggregateFn, column: string | undefined, alias: string): Promise<any> {
+        const where = this.filterWhere();
+        const stmt = this.translate({
+            table: this.tableName,
+            items: [{ operand: { kind: 'agg', fn, column }, alias }],
+            where,
+        });
+        const res = await this.context.query(stmt.text, where ? stmt.params : undefined);
+        return res.rows[0];
     }
 
     /**
      * Count all entities
      */
     async count(): Promise<number> {
-        const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT COUNT(*) as count FROM ${this.tableName}${filter.where}`, filter.params);
-        return toCount(res.rows[0]?.count);
+        const row = await this.aggregate('count', undefined, 'count');
+        return toCount(row?.count);
     }
 
     /**
@@ -247,9 +256,8 @@ export class DbSet<T> {
     async sum(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'sum');
 
-        const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT SUM(${columnName}) as total FROM ${this.tableName}${filter.where}`, filter.params);
-        return toExactNumber(res.rows[0]?.total) ?? 0;
+        const row = await this.aggregate('sum', columnName, 'total');
+        return toExactNumber(row?.total) ?? 0;
     }
 
     /**
@@ -260,9 +268,8 @@ export class DbSet<T> {
     async average(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'average');
 
-        const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT AVG(${columnName}) as avg FROM ${this.tableName}${filter.where}`, filter.params);
-        return toExactNumber(res.rows[0]?.avg) ?? 0;
+        const row = await this.aggregate('avg', columnName, 'avg');
+        return toExactNumber(row?.avg) ?? 0;
     }
 
     /**
@@ -273,9 +280,8 @@ export class DbSet<T> {
     async min(selector: (entity: T) => any): Promise<any> {
         const columnName = resolveColumn(selector, this.entityType, 'min');
 
-        const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT MIN(${columnName}) as min FROM ${this.tableName}${filter.where}`, filter.params);
-        return res.rows[0].min;
+        const row = await this.aggregate('min', columnName, 'min');
+        return row.min;
     }
 
     /**
@@ -286,9 +292,8 @@ export class DbSet<T> {
     async max(selector: (entity: T) => any): Promise<any> {
         const columnName = resolveColumn(selector, this.entityType, 'max');
 
-        const filter = this.compileFilterWhere();
-        const res = await this.context.query(`SELECT MAX(${columnName}) as max FROM ${this.tableName}${filter.where}`, filter.params);
-        return res.rows[0].max;
+        const row = await this.aggregate('max', columnName, 'max');
+        return row.max;
     }
 
     /**

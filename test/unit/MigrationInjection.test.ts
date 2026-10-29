@@ -3,6 +3,8 @@ import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
 import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
+import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
+import { translatorFor } from '../mocks/translatorFor';
 
 /**
  * MigrationBuilder concatenated every argument into DDL, including string
@@ -17,6 +19,7 @@ class RecordingProvider implements IDatabaseProvider {
     constructor(private dialect: Dialect) {}
 
     getDialect(): Dialect { return this.dialect; }
+    getTranslator(): SqlTranslator { return translatorFor(this.dialect); }
     async connect(): Promise<void> {}
     async disconnect(): Promise<void> {}
     async query(text: string, params?: any[]): Promise<QueryResult> {
