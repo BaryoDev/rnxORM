@@ -11,9 +11,6 @@ const ALLOWED: Record<string, number> = {
     'core/query/GroupedQueryBuilder.ts': 0,
     'core/query/QueryBuilder.ts': 0,
     'core/query/SelectQueryBuilder.ts': 0,
-    'migrations/DdlIdentifiers.ts': 3,
-    'migrations/MigrationBuilder.ts': 15,
-    'migrations/Migrator.ts': 3,
 };
 
 const SRC = path.resolve(__dirname, '../../src');

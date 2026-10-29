@@ -1,13 +1,6 @@
 import { IDatabaseProvider, QueryResult } from "../providers/IDatabaseProvider";
 import { QueryParameter } from "../core/types";
-import {
-    assertCascadeAction,
-    assertColumnType,
-    assertPlainIdentifier,
-    assertQualifiedPlainIdentifier,
-    quoteIdentifier,
-    quoteLiteral,
-} from "./DdlIdentifiers";
+import { DdlColumn, DdlOperation } from "../core/query/model/DdlOperation";
 
 /** Anything that runs a statement: the provider's pool or a transaction handle. */
 export interface SqlExecutor {
@@ -17,23 +10,23 @@ export interface SqlExecutor {
 /**
  * Column definition for creating tables
  */
-export interface ColumnDefinition {
-    name: string;
-    type: string;
-    nullable?: boolean;
-    defaultValue?: any;
-    isPrimaryKey?: boolean;
-    isAutoIncrement?: boolean;
-}
+export type ColumnDefinition = DdlColumn;
+
+type QueuedStep =
+    | { kind: 'ddl'; op: DdlOperation }
+    | { kind: 'raw'; sql: string; params?: any[] };
 
 /**
- * Fluent API for defining migration operations
+ * Fluent API for defining migration operations.
+ *
+ * Each method queues a `DdlOperation`. The provider's translator turns it into
+ * SQL, and validates every identifier, type and literal, when `execute()` runs.
  */
 export class MigrationBuilder {
-    private operations: Array<() => Promise<void>> = [];
+    private steps: QueuedStep[] = [];
 
     /**
-     * @param provider Supplies the dialect and identifier rules.
+     * @param provider Supplies the translator for its dialect.
      * @param executor Where the statements run. Defaults to the provider's
      * pool; the Migrator passes the migration's transaction handle.
      */
@@ -41,6 +34,11 @@ export class MigrationBuilder {
         private provider: IDatabaseProvider,
         private executor: SqlExecutor = provider
     ) {}
+
+    private queue(op: DdlOperation): this {
+        this.steps.push({ kind: 'ddl', op });
+        return this;
+    }
 
     /**
      * Create a new table
@@ -54,44 +52,7 @@ export class MigrationBuilder {
      * ]);
      */
     createTable(tableName: string, columns: ColumnDefinition[]): this {
-        this.operations.push(async () => {
-            const table = quoteIdentifier(tableName, this.provider, 'createTable');
-
-            const columnDefs = columns.map(col => {
-                const name = quoteIdentifier(col.name, this.provider, 'createTable');
-                let def = `${name} ${assertColumnType(col.type, 'createTable')}`;
-
-                if (col.isPrimaryKey) {
-                    def += ' PRIMARY KEY';
-                }
-
-                if (col.isAutoIncrement) {
-                    // Provider-specific auto-increment syntax is handled in the type mapping
-                    const dialect = this.provider.getDialect();
-                    if (dialect === 'postgresql') {
-                        def = `${name} SERIAL PRIMARY KEY`;
-                    } else if (dialect === 'mssql') {
-                        def = `${name} INT IDENTITY(1,1) PRIMARY KEY`;
-                    } else if (dialect === 'mariadb') {
-                        def = `${name} INT AUTO_INCREMENT PRIMARY KEY`;
-                    }
-                }
-
-                if (col.nullable === false && !col.isPrimaryKey) {
-                    def += ' NOT NULL';
-                }
-
-                if (col.defaultValue !== undefined) {
-                    def += ` DEFAULT ${quoteLiteral(col.defaultValue, 'createTable', this.provider.getDialect())}`;
-                }
-
-                return def;
-            }).join(', ');
-
-            const sql = `CREATE TABLE ${table} (${columnDefs})`;
-            await this.executor.query(sql);
-        });
-        return this;
+        return this.queue({ op: 'createTable', table: tableName, columns });
     }
 
     /**
@@ -99,11 +60,7 @@ export class MigrationBuilder {
      * @param tableName Name of the table to drop
      */
     dropTable(tableName: string): this {
-        this.operations.push(async () => {
-            const table = quoteIdentifier(tableName, this.provider, 'dropTable');
-            await this.executor.query(`DROP TABLE IF EXISTS ${table}`);
-        });
-        return this;
+        return this.queue({ op: 'dropTable', table: tableName });
     }
 
     /**
@@ -119,24 +76,14 @@ export class MigrationBuilder {
         columnType: string,
         options?: { nullable?: boolean; defaultValue?: any }
     ): this {
-        this.operations.push(async () => {
-            const table = quoteIdentifier(tableName, this.provider, 'addColumn');
-            const column = quoteIdentifier(columnName, this.provider, 'addColumn');
-            const type = assertColumnType(columnType, 'addColumn');
-
-            let sql = `ALTER TABLE ${table} ADD COLUMN ${column} ${type}`;
-
-            if (options?.nullable === false) {
-                sql += ' NOT NULL';
-            }
-
-            if (options?.defaultValue !== undefined) {
-                sql += ` DEFAULT ${quoteLiteral(options.defaultValue, 'addColumn', this.provider.getDialect())}`;
-            }
-
-            await this.executor.query(sql);
+        return this.queue({
+            op: 'addColumn',
+            table: tableName,
+            column: columnName,
+            type: columnType,
+            nullable: options?.nullable,
+            defaultValue: options?.defaultValue,
         });
-        return this;
     }
 
     /**
@@ -145,12 +92,7 @@ export class MigrationBuilder {
      * @param columnName Column name
      */
     dropColumn(tableName: string, columnName: string): this {
-        this.operations.push(async () => {
-            const table = quoteIdentifier(tableName, this.provider, 'dropColumn');
-            const column = quoteIdentifier(columnName, this.provider, 'dropColumn');
-            await this.executor.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
-        });
-        return this;
+        return this.queue({ op: 'dropColumn', table: tableName, column: columnName });
     }
 
     /**
@@ -166,49 +108,14 @@ export class MigrationBuilder {
         newType: string,
         options?: { nullable?: boolean; defaultValue?: any }
     ): this {
-        this.operations.push(async () => {
-            const dialect = this.provider.getDialect();
-            const table = quoteIdentifier(tableName, this.provider, 'alterColumn');
-            const column = quoteIdentifier(columnName, this.provider, 'alterColumn');
-            const type = assertColumnType(newType, 'alterColumn');
-
-            // Different databases have different syntax for ALTER COLUMN
-            if (dialect === 'postgresql') {
-                await this.executor.query(
-                    `ALTER TABLE ${table} ALTER COLUMN ${column} TYPE ${type}`
-                );
-
-                if (options?.nullable === false) {
-                    await this.executor.query(
-                        `ALTER TABLE ${table} ALTER COLUMN ${column} SET NOT NULL`
-                    );
-                } else if (options?.nullable === true) {
-                    await this.executor.query(
-                        `ALTER TABLE ${table} ALTER COLUMN ${column} DROP NOT NULL`
-                    );
-                }
-
-                if (options?.defaultValue !== undefined) {
-                    const defaultVal = quoteLiteral(options.defaultValue, 'alterColumn', dialect);
-                    await this.executor.query(
-                        `ALTER TABLE ${table} ALTER COLUMN ${column} SET DEFAULT ${defaultVal}`
-                    );
-                }
-            } else if (dialect === 'mssql') {
-                let sql = `ALTER TABLE ${table} ALTER COLUMN ${column} ${type}`;
-                if (options?.nullable === false) {
-                    sql += ' NOT NULL';
-                }
-                await this.executor.query(sql);
-            } else if (dialect === 'mariadb') {
-                let sql = `ALTER TABLE ${table} MODIFY COLUMN ${column} ${type}`;
-                if (options?.nullable === false) {
-                    sql += ' NOT NULL';
-                }
-                await this.executor.query(sql);
-            }
+        return this.queue({
+            op: 'alterColumn',
+            table: tableName,
+            column: columnName,
+            type: newType,
+            nullable: options?.nullable,
+            defaultValue: options?.defaultValue,
         });
-        return this;
     }
 
     /**
@@ -218,33 +125,7 @@ export class MigrationBuilder {
      * @param newName New column name
      */
     renameColumn(tableName: string, oldName: string, newName: string): this {
-        this.operations.push(async () => {
-            const dialect = this.provider.getDialect();
-            const table = quoteIdentifier(tableName, this.provider, 'renameColumn');
-            const from = quoteIdentifier(oldName, this.provider, 'renameColumn');
-            const to = quoteIdentifier(newName, this.provider, 'renameColumn');
-
-            if (dialect === 'postgresql') {
-                await this.executor.query(
-                    `ALTER TABLE ${table} RENAME COLUMN ${from} TO ${to}`
-                );
-            } else if (dialect === 'mssql') {
-                // sp_rename takes bare names inside string literals, so these
-                // positions cannot be quoted and are validated instead. A
-                // payload here used to close the literal and run (issue #44).
-                const plainTable = assertQualifiedPlainIdentifier(tableName, 'renameColumn');
-                const plainOld = assertPlainIdentifier(oldName, 'renameColumn');
-                const plainNew = assertPlainIdentifier(newName, 'renameColumn');
-                await this.executor.query(
-                    `EXEC sp_rename '${plainTable}.${plainOld}', '${plainNew}', 'COLUMN'`
-                );
-            } else if (dialect === 'mariadb') {
-                await this.executor.query(
-                    `ALTER TABLE ${table} RENAME COLUMN ${from} TO ${to}`
-                );
-            }
-        });
-        return this;
+        return this.queue({ op: 'renameColumn', table: tableName, from: oldName, to: newName });
     }
 
     /**
@@ -253,22 +134,7 @@ export class MigrationBuilder {
      * @param newName New table name
      */
     renameTable(oldName: string, newName: string): this {
-        this.operations.push(async () => {
-            const dialect = this.provider.getDialect();
-            const from = quoteIdentifier(oldName, this.provider, 'renameTable');
-            const to = quoteIdentifier(newName, this.provider, 'renameTable');
-
-            if (dialect === 'postgresql') {
-                await this.executor.query(`ALTER TABLE ${from} RENAME TO ${to}`);
-            } else if (dialect === 'mssql') {
-                const plainOld = assertQualifiedPlainIdentifier(oldName, 'renameTable');
-                const plainNew = assertPlainIdentifier(newName, 'renameTable');
-                await this.executor.query(`EXEC sp_rename '${plainOld}', '${plainNew}'`);
-            } else if (dialect === 'mariadb') {
-                await this.executor.query(`RENAME TABLE ${from} TO ${to}`);
-            }
-        });
-        return this;
+        return this.queue({ op: 'renameTable', from: oldName, to: newName });
     }
 
     /**
@@ -284,18 +150,7 @@ export class MigrationBuilder {
         columns: string[],
         unique: boolean = false
     ): this {
-        this.operations.push(async () => {
-            const uniqueKeyword = unique ? 'UNIQUE ' : '';
-            const table = quoteIdentifier(tableName, this.provider, 'createIndex');
-            const index = quoteIdentifier(indexName, this.provider, 'createIndex');
-            const columnList = columns
-                .map(c => quoteIdentifier(c, this.provider, 'createIndex'))
-                .join(', ');
-            await this.executor.query(
-                `CREATE ${uniqueKeyword}INDEX ${index} ON ${table} (${columnList})`
-            );
-        });
-        return this;
+        return this.queue({ op: 'createIndex', table: tableName, index: indexName, columns, unique });
     }
 
     /**
@@ -304,20 +159,7 @@ export class MigrationBuilder {
      * @param indexName Index name
      */
     dropIndex(tableName: string, indexName: string): this {
-        this.operations.push(async () => {
-            const dialect = this.provider.getDialect();
-            const table = quoteIdentifier(tableName, this.provider, 'dropIndex');
-            const index = quoteIdentifier(indexName, this.provider, 'dropIndex');
-
-            if (dialect === 'postgresql') {
-                await this.executor.query(`DROP INDEX IF EXISTS ${index}`);
-            } else if (dialect === 'mssql') {
-                await this.executor.query(`DROP INDEX ${index} ON ${table}`);
-            } else if (dialect === 'mariadb') {
-                await this.executor.query(`DROP INDEX ${index} ON ${table}`);
-            }
-        });
-        return this;
+        return this.queue({ op: 'dropIndex', table: tableName, index: indexName });
     }
 
     /**
@@ -337,21 +179,15 @@ export class MigrationBuilder {
         referencedColumn: string,
         onDelete: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION' = 'NO ACTION'
     ): this {
-        this.operations.push(async () => {
-            const table = quoteIdentifier(tableName, this.provider, 'addForeignKey');
-            const constraint = quoteIdentifier(constraintName, this.provider, 'addForeignKey');
-            const fkColumn = quoteIdentifier(column, this.provider, 'addForeignKey');
-            const refTable = quoteIdentifier(referencedTable, this.provider, 'addForeignKey');
-            const refColumn = quoteIdentifier(referencedColumn, this.provider, 'addForeignKey');
-            const action = assertCascadeAction(onDelete);
-
-            await this.executor.query(
-                `ALTER TABLE ${table} ADD CONSTRAINT ${constraint} ` +
-                `FOREIGN KEY (${fkColumn}) REFERENCES ${refTable}(${refColumn}) ` +
-                `ON DELETE ${action}`
-            );
+        return this.queue({
+            op: 'addForeignKey',
+            table: tableName,
+            constraint: constraintName,
+            column,
+            referencedTable,
+            referencedColumn,
+            onDelete,
         });
-        return this;
     }
 
     /**
@@ -360,14 +196,7 @@ export class MigrationBuilder {
      * @param constraintName Constraint name
      */
     dropForeignKey(tableName: string, constraintName: string): this {
-        this.operations.push(async () => {
-            const table = quoteIdentifier(tableName, this.provider, 'dropForeignKey');
-            const constraint = quoteIdentifier(constraintName, this.provider, 'dropForeignKey');
-            await this.executor.query(
-                `ALTER TABLE ${table} DROP CONSTRAINT ${constraint}`
-            );
-        });
-        return this;
+        return this.queue({ op: 'dropForeignKey', table: tableName, constraint: constraintName });
     }
 
     /**
@@ -376,9 +205,7 @@ export class MigrationBuilder {
      * @param params Parameters for the SQL statement
      */
     sql(sql: string, params?: any[]): this {
-        this.operations.push(async () => {
-            await this.executor.query(sql, params);
-        });
+        this.steps.push({ kind: 'raw', sql, params });
         return this;
     }
 
@@ -387,9 +214,16 @@ export class MigrationBuilder {
      * @internal
      */
     async execute(): Promise<void> {
-        for (const operation of this.operations) {
-            await operation();
+        const translator = this.provider.getTranslator();
+        for (const step of this.steps) {
+            if (step.kind === 'raw') {
+                await this.executor.query(step.sql, step.params);
+                continue;
+            }
+            for (const statement of translator.translateDdl(step.op)) {
+                await this.executor.query(statement.text);
+            }
         }
-        this.operations = [];
+        this.steps = [];
     }
 }

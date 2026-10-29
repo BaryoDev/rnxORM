@@ -205,13 +205,6 @@ describe('Migrator', () => {
             expect(createSql).toContain(`CREATE TABLE IF NOT EXISTS ${HISTORY_TABLE}`);
             expect(createSql).toContain('applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
         });
-
-        it('throws for an unsupported dialect', async () => {
-            const { migrator } = createMigrator('sqlite');
-            await expect(migrator.getPendingMigrations()).rejects.toThrow(
-                'Unsupported database dialect: sqlite'
-            );
-        });
     });
 
     describe('getPendingMigrations', () => {
