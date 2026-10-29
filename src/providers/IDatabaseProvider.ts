@@ -1,11 +1,9 @@
-import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { SqlTranslator } from "./translators/SqlTranslator";
 import {
     DatabaseRow,
     Dialect,
     ExactNumeric,
     QueryParameter,
-    ReferentialAction,
 } from "../core/types";
 
 /**
@@ -88,7 +86,7 @@ export interface ITransaction {
 export interface IDatabaseProvider {
     /**
      * Get the SQL dialect identifier for this provider.
-     * Used for provider-specific SQL generation (e.g., pagination, DDL).
+     * For display and diagnostics. Code outside src/providers does not branch on it.
      */
     getDialect(): Dialect;
 
@@ -127,15 +125,6 @@ export interface IDatabaseProvider {
      */
     mapType(tsType: string): string;
 
-    generateCreateTableSql(entity: EntityMetadata): string;
-
-    generateAddColumnSql(tableName: string, column: ColumnMetadata): string;
-
-    /**
-     * Generate ALTER TABLE ALTER COLUMN SQL (for type changes)
-     */
-    generateAlterColumnTypeSql(tableName: string, column: ColumnMetadata): string;
-
     /**
      * Generate parameterized placeholder (e.g., $1, $2 for PostgreSQL or @p1, @p2 for MSSQL)
      */
@@ -157,40 +146,4 @@ export interface IDatabaseProvider {
      * Check if a type mismatch exists between entity and database
      */
     isTypeMismatch(entityType: string, dbType: string): boolean;
-
-    generateAddForeignKeySql(
-        tableName: string,
-        columnName: string,
-        referencedTable: string,
-        referencedColumn: string,
-        onDelete?: ReferentialAction,
-        onUpdate?: ReferentialAction
-    ): string;
-
-    generateCreateIndexSql(
-        tableName: string,
-        indexName: string,
-        columns: string[],
-        unique: boolean
-    ): string;
-
-    generateCreateUniqueConstraintSql(
-        tableName: string,
-        constraintName: string,
-        columns: string[]
-    ): string;
-
-    /**
-     * Generate CREATE TABLE SQL for join table (Many-to-Many)
-     */
-    generateCreateJoinTableSql(
-        joinTableName: string,
-        column1: string,
-        column2: string,
-        referencedTable1: string,
-        referencedTable2: string,
-        onDelete?: ReferentialAction,
-        referencedColumn1?: string,
-        referencedColumn2?: string
-    ): string;
 }

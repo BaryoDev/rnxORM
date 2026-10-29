@@ -1,18 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-/**
- * Dialect branching belongs in src/providers. Outside it, the arms below are
- * the ones that exist today. A count may only go down; a new file with an arm
- * fails. Lower the number here when an arm is removed.
- */
-const ALLOWED: Record<string, number> = {
-    'core/DbContext.ts': 0,
-    'core/query/GroupedQueryBuilder.ts': 0,
-    'core/query/QueryBuilder.ts': 0,
-    'core/query/SelectQueryBuilder.ts': 0,
-};
-
+/** Dialect branching belongs in src/providers. Outside it there are none. */
 const SRC = path.resolve(__dirname, '../../src');
 const ARM = /(dialect|getDialect\(\))\s*[!=]==\s*['"]|case\s+['"](mssql|postgresql|mariadb)['"]/;
 
@@ -30,25 +19,18 @@ function listFiles(dir: string): string[] {
     return out;
 }
 
-function countArms(): Record<string, number> {
-    const counts: Record<string, number> = {};
+function findArms(): string[] {
+    const found: string[] = [];
     for (const file of listFiles(SRC)) {
         const n = fs.readFileSync(file, 'utf8').split('\n').filter((l) => ARM.test(l)).length;
-        if (n > 0) counts[path.relative(SRC, file).split(path.sep).join('/')] = n;
+        if (n > 0) found.push(`${path.relative(SRC, file).split(path.sep).join('/')}: ${n}`);
     }
-    return counts;
+    return found;
 }
 
 describe('dialect branches outside src/providers', () => {
-    const found = countArms();
-
-    it('no new file has a dialect branch', () => {
-        const extra = Object.keys(found).filter((f) => !(f in ALLOWED));
-        expect(extra).toEqual([]);
-    });
-
-    it.each(Object.entries(ALLOWED))('%s has at most %i arms', (file, max) => {
-        expect(found[file] ?? 0).toBeLessThanOrEqual(max);
+    it('there are none', () => {
+        expect(findArms()).toEqual([]);
     });
 });
 

@@ -1,13 +1,36 @@
 import { AggregateFn } from '../../core/query/model/Operand';
 import { Operand } from '../../core/query/model/Operand';
 import { SelectModel } from '../../core/query/model/SelectModel';
-import { AlterColumnOp, RenameColumnOp, RenameTableOp } from '../../core/query/model/DdlOperation';
+import { AlterColumnOp, EnsureJoinTableOp, RenameColumnOp, RenameTableOp } from '../../core/query/model/DdlOperation';
 import { assertPlainIdentifier, assertQualifiedPlainIdentifier } from '../../migrations/DdlIdentifiers';
 import { SqlTranslator } from './SqlTranslator';
+import { TypeMap, createTypeMapper } from './typeMapping';
 
 const INTEGER_TYPE = /^\s*(tinyint|smallint|int|integer|bigint)\b/i;
 
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'NVARCHAR(MAX)',
+    integer: 'INT',
+    boolean: 'BIT',
+    timestamp: 'DATETIME2',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL(18,2)',
+    float: 'REAL',
+    double: 'FLOAT',
+    bigint: 'BIGINT',
+    // SQL Server 2016+ supports JSON functions over NVARCHAR
+    json: 'NVARCHAR(MAX)',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar', 'nvarchar', 'decimal'] as const;
+
 export class MsSqlTranslator extends SqlTranslator {
+    readonly mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES,
+        (upper, lower) => (lower.startsWith('varchar') ? 'N' + upper : upper));
+
     protected placeholder(n: number): string {
         return `@p${n - 1}`;
     }
@@ -102,6 +125,34 @@ export class MsSqlTranslator extends SqlTranslator {
      * cannot be quoted and are validated instead. A payload here used to close
      * the literal and run (issue #44).
      */
+    protected renderEnsureTable(table: string, columns: string): string {
+        return `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${table}')\n                CREATE TABLE ${table} (${columns});`;
+    }
+
+    protected renderEnsureJoinTable(op: EnsureJoinTableOp): string {
+        const { table: t, column1: c1, column2: c2 } = op;
+        const cascade = op.onDelete ? ` ON DELETE ${op.onDelete}` : ' ON DELETE CASCADE';
+        const ref1 = op.referencedColumn1 ?? 'id';
+        const ref2 = op.referencedColumn2 ?? 'id';
+        return `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${t}')
+                CREATE TABLE ${t} (
+                    ${c1} INT NOT NULL,
+                    ${c2} INT NOT NULL,
+                    PRIMARY KEY (${c1}, ${c2}),
+                    FOREIGN KEY (${c1}) REFERENCES ${op.referencedTable1}(${ref1})${cascade},
+                    FOREIGN KEY (${c2}) REFERENCES ${op.referencedTable2}(${ref2})${cascade}
+                )`;
+    }
+
+    protected renderEnsureAddColumn(table: string, column: string, type: string): string {
+        return `ALTER TABLE ${table} ADD ${column} ${type}`;
+    }
+
+    /** SQL Server has no USING clause, so existing data is not converted. */
+    protected renderEnsureAlterColumnType(table: string, column: string, type: string): string {
+        return `ALTER TABLE ${table} ALTER COLUMN ${column} ${type}`;
+    }
+
     protected renderRenameColumn(op: RenameColumnOp): string {
         const table = assertQualifiedPlainIdentifier(op.table, op.op);
         const from = assertPlainIdentifier(op.from, op.op);

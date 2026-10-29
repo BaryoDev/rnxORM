@@ -1,10 +1,31 @@
 import { AlterColumnOp, RenameColumnOp, RenameTableOp } from '../../core/query/model/DdlOperation';
 import { SqlTranslator } from './SqlTranslator';
+import { TypeMap, createTypeMapper } from './typeMapping';
 
 /** MariaDB has no bare OFFSET, so skip without take uses the largest LIMIT. */
 const MAX_LIMIT = '18446744073709551615';
 
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'TEXT',
+    integer: 'INT',
+    boolean: 'TINYINT(1)',
+    timestamp: 'DATETIME',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL(18,2)',
+    float: 'FLOAT',
+    double: 'DOUBLE',
+    bigint: 'BIGINT',
+    json: 'JSON',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar', 'decimal'] as const;
+
 export class MariaDbTranslator extends SqlTranslator {
+    readonly mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);
+
     protected placeholder(): string {
         return '?';
     }
@@ -31,6 +52,10 @@ export class MariaDbTranslator extends SqlTranslator {
 
     protected renderAlterColumn(op: AlterColumnOp, table: string, column: string, type: string): string[] {
         return [`ALTER TABLE ${table} MODIFY COLUMN ${column} ${type}${op.nullable === false ? ' NOT NULL' : ''}`];
+    }
+
+    protected renderEnsureAlterColumnType(table: string, column: string, type: string): string {
+        return `ALTER TABLE ${table} MODIFY COLUMN ${column} ${type}`;
     }
 
     protected renderRenameColumn(_op: RenameColumnOp, table: string, from: string, to: string): string {

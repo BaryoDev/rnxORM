@@ -1,7 +1,6 @@
 import "reflect-metadata";
 import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
-import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
 import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
 import { translatorFor } from '../mocks/translatorFor';
@@ -28,18 +27,11 @@ class RecordingProvider implements IDatabaseProvider {
     }
     async beginTransaction(): Promise<ITransaction> { throw new Error('not used'); }
     mapType(t: string): string { return t; }
-    generateCreateTableSql(_e: EntityMetadata): string { return ''; }
-    generateAddColumnSql(_t: string, _c: ColumnMetadata): string { return ''; }
-    generateAlterColumnTypeSql(_t: string, _c: ColumnMetadata): string { return ''; }
     getParameterPlaceholder(i: number): string { return `$${i}`; }
     getSchemaColumnsQuery(_t: string): { sql: string; params: any[] } { return { sql: '', params: [] }; }
     normalizeType(t: string): string { return t; }
     getAutoIncrementType(): string { return 'SERIAL'; }
     isTypeMismatch(_e: string, _d: string): boolean { return false; }
-    generateAddForeignKeySql(): string { return ''; }
-    generateCreateIndexSql(): string { return ''; }
-    generateCreateUniqueConstraintSql(): string { return ''; }
-    generateCreateJoinTableSql(): string { return ''; }
 }
 
 function builderFor(dialect: Dialect = 'postgresql') {

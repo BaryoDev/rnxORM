@@ -1,5 +1,4 @@
 import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
-import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
 import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
 import { translatorFor } from './translatorFor';
@@ -164,34 +163,5 @@ export class SqlCaptureProvider implements IDatabaseProvider {
             sql: `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ${this.getParameterPlaceholder(1)}`,
             params: [tableName],
         };
-    }
-
-    // DDL generation is not exercised by these SQL-generation unit tests.
-    generateCreateTableSql(_entity: EntityMetadata): string {
-        throw new Error('SqlCaptureProvider: generateCreateTableSql not implemented');
-    }
-
-    generateAddColumnSql(_tableName: string, _column: ColumnMetadata): string {
-        throw new Error('SqlCaptureProvider: generateAddColumnSql not implemented');
-    }
-
-    generateAlterColumnTypeSql(_tableName: string, _column: ColumnMetadata): string {
-        throw new Error('SqlCaptureProvider: generateAlterColumnTypeSql not implemented');
-    }
-
-    generateAddForeignKeySql(): string {
-        throw new Error('SqlCaptureProvider: generateAddForeignKeySql not implemented');
-    }
-
-    generateCreateIndexSql(): string {
-        throw new Error('SqlCaptureProvider: generateCreateIndexSql not implemented');
-    }
-
-    generateCreateUniqueConstraintSql(): string {
-        throw new Error('SqlCaptureProvider: generateCreateUniqueConstraintSql not implemented');
-    }
-
-    generateCreateJoinTableSql(): string {
-        throw new Error('SqlCaptureProvider: generateCreateJoinTableSql not implemented');
     }
 }
