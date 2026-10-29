@@ -7,6 +7,7 @@ export * from "./core/DbSet";
 export * from "./core/MetadataStorage";
 export * from "./core/ModelBuilder";
 export * from "./core/QueryFilter";
+export { eq, ne, gt, gte, lt, lte, like, notLike, ilike, inArray, notInArray, isNull, isNotNull, between, and, or, not } from "./core/expressions/conditions";
 export * from "./core/EntityEntry";
 export * from "./core/ChangeTracker";
 export * from "./providers";

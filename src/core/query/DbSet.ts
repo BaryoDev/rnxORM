@@ -105,12 +105,18 @@ export class DbSet<T> {
         return entities;
     }
 
-    // Simple Fluent API for WHERE
-    // usage: dbSet.where("age", ">", 18).toList()
+    // usage: dbSet.where(u => gt(u.age, 18)).toList()
+    /**
+     * Add a WHERE condition built with the condition builders:
+     * `where(u => eq(u.email, x))`. Builders are imported from 'rnxorm'.
+     */
+    where(condition: (entity: T) => Predicate): QueryBuilder<T>;
+    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
     where(column: keyof T & string, operator: string, value: any): QueryBuilder<T>;
+    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
     where(column: string, operator: string, value: any): QueryBuilder<T>;
-    where(column: string, operator: string, value: any): QueryBuilder<T> {
-        return new QueryBuilder(this.entityType, this.context, this.tableName).where(column, operator, value);
+    where(first: string | ((entity: T) => Predicate), operator?: string, value?: any): QueryBuilder<T> {
+        return new QueryBuilder(this.entityType, this.context, this.tableName).where(first as string, operator as string, value);
     }
 
     /**

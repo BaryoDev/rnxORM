@@ -3,9 +3,10 @@ import { QueryState } from "../QueryState";
 import { DatabaseRow, QueryParameter, asQueryParameter, assertNever, ExactNumeric } from "../types";
 import { RelationType, EntityMetadata } from "../MetadataStorage";
 import { resolveColumn, resolvePropertyName } from "../expressions/PropertyCapture";
+import { buildWhere } from "../expressions/conditions";
 import { queryFilterPredicates } from "../QueryFilter";
 import { toCount, toExactNumber } from "../Numerics";
-import { assertColumn, assertLimit, convertValueToDb, findColumn, resolvePredicate, columnTypeOf } from "../Identifiers";
+import { assertColumn, assertLimit, convertValueToDb, columnTypeOf } from "../Identifiers";
 import { Predicate } from "./model/Predicate";
 import { AggregateFn } from "./model/Operand";
 import { SelectModel } from "./model/SelectModel";
@@ -36,16 +37,20 @@ export class QueryBuilder<T> {
         this.noTracking = noTracking;
     }
 
+    /**
+     * Add a WHERE condition built with the condition builders:
+     * `where(u => eq(u.email, x))`. Builders are imported from 'rnxorm'.
+     */
+    where(condition: (entity: T) => Predicate): this;
+    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
     where(column: keyof T & string, operator: string, value: any): this;
+    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
     where(column: string, operator: string, value: any): this;
-    where(column: string, operator: string, value: any): this {
-        // Column and operator are validated against metadata and a closed
-        // operator set before touching SQL (issues #13/#24); the value is
-        // always bound as a parameter. The translator numbers the placeholders.
-        const sqlColumn = assertColumn(this.entityType, column, 'where');
-        this.state.predicates.push(resolvePredicate(
-            { columnName: sqlColumn, ...findColumn(this.entityType, column) }, operator, value, 'where'
-        ));
+    where(first: string | ((entity: T) => Predicate), operator?: string, value?: any): this {
+        // The lambda is recorded, the string form is validated against metadata and a
+        // closed operator set (issues #13/#24). Both resolve through one path, and
+        // values are always bound as parameters.
+        this.state.predicates.push(buildWhere(this.entityType, first, operator, value));
         return this;
     }
 
