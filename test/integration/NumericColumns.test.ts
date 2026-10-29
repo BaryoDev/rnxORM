@@ -41,3 +41,81 @@ describe('a bare number column keeps its cents', () => {
         }, 30000);
     }
 });
+
+@Entity('exact_sum_probe')
+class ExactSumProbe {
+    @PrimaryKey()
+    id!: number;
+
+    @Column()
+    grp!: string;
+
+    @Column({ type: 'decimal(38,10)' })
+    amount!: number;
+
+    @Column({ type: 'integer' })
+    qty!: number;
+}
+
+async function withProbeTable(providerName: ReturnType<typeof getTestProviders>[number], body: (db: DbContext) => Promise<void>): Promise<void> {
+    const db = new DbContext(createTestProvider(providerName));
+    await db.connect();
+    try {
+        await db.query('DROP TABLE IF EXISTS exact_sum_probe').catch(() => undefined);
+        await db.ensureCreated();
+        await body(db);
+    } finally {
+        await db.query('DROP TABLE IF EXISTS exact_sum_probe').catch(() => undefined);
+        await db.disconnect();
+    }
+}
+
+// Tedious parses DECIMAL results into a double. SUM over a DECIMAL(38,10)
+// has to come back as the database's own digits (issue #54).
+describe('SUM over a DECIMAL(38,10) column is exact', () => {
+    for (const providerName of getTestProviders()) {
+        it(`${providerName} returns the exact digits`, () =>
+            withProbeTable(providerName, async (db) => {
+                // Literals go straight to the database so no JS number parsing is involved.
+                await db.query(
+                    `INSERT INTO exact_sum_probe (grp, amount, qty) VALUES ('a', 12345678901234567.0000000001, 1), ('a', 0.1234567890, 2), ('b', 1, 4)`
+                );
+
+                const total = await db.set(ExactSumProbe).sum(r => r.amount);
+                console.log(`${providerName}: sum(amount) = ${JSON.stringify(total)}`);
+                expect(total).toBe('12345678901234568.1234567891');
+
+                const grouped = await db
+                    .set(ExactSumProbe)
+                    .groupBy(r => r.grp)
+                    .select(g => ({ grp: g.key, total: g.sum(r => r.amount) }))
+                    .toList();
+                const a = grouped.find((r: any) => r.grp === 'a') as any;
+                console.log(`${providerName}: grouped sum a = ${JSON.stringify(a.total)}`);
+                expect(String(a.total)).toBe('12345678901234567.1234567891');
+            }), 30000);
+
+        it(`${providerName} compares a grouped sum in HAVING as a number, not text`, () =>
+            withProbeTable(providerName, async (db) => {
+                // As text, '9.5' > '10' would be true and 'big' would be missing.
+                await db.query(
+                    `INSERT INTO exact_sum_probe (grp, amount, qty) VALUES ('small', 9.5, 1), ('big', 100, 1)`
+                );
+                const rows = await db
+                    .set(ExactSumProbe)
+                    .groupBy(r => r.grp)
+                    .having('sum(amount)', '>', 10)
+                    .select(g => ({ grp: g.key, total: g.sum(r => r.amount) }))
+                    .toList();
+                expect(rows.map((r: any) => r.grp)).toEqual(['big']);
+            }), 30000);
+
+        it(`${providerName} average over an integer column`, () =>
+            withProbeTable(providerName, async (db) => {
+                await db.query(`INSERT INTO exact_sum_probe (grp, amount, qty) VALUES ('a', 1, 1), ('a', 1, 2)`);
+                const avg = await db.set(ExactSumProbe).average(r => r.qty);
+                console.log(`${providerName}: avg(qty of 1,2) = ${JSON.stringify(avg)}`);
+                expect(Number(avg)).toBe(1.5);
+            }), 30000);
+    }
+});

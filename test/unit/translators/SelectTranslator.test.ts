@@ -329,8 +329,8 @@ const shared: Case[] = [
         model: {
             table: T,
             items: [
-                { operand: { kind: 'agg', fn: 'sum', column: 'age', columnType: 'decimal' }, alias: 'total' },
-                { operand: { kind: 'agg', fn: 'avg', column: 'age', columnType: 'decimal' }, alias: 'mean' },
+                { operand: { kind: 'agg', fn: 'sum', column: 'age', columnType: 'float' }, alias: 'total' },
+                { operand: { kind: 'agg', fn: 'avg', column: 'age', columnType: 'float' }, alias: 'mean' },
                 { operand: { kind: 'agg', fn: 'min', column: 'age', columnType: 'int' }, alias: 'lo' },
                 { operand: { kind: 'agg', fn: 'max', column: 'age', columnType: 'int' }, alias: 'hi' },
             ],
@@ -557,5 +557,101 @@ describe('SelectTranslator dialect differences', () => {
         const model: SelectModel = { table: T, where: { op: 'eq', left: col('a'), value: 1 } };
         const t = translators.postgresql;
         expect(t.translateSelect(model)).toEqual(t.translateSelect(model));
+    });
+});
+
+describe('SelectTranslator exact decimal aggregates', () => {
+    const typed = (fn: 'sum' | 'avg' | 'min' | 'max', columnType?: string): Operand => ({
+        kind: 'agg',
+        fn,
+        column: 'amount',
+        columnType,
+    });
+    const selectOf = (operand: Operand): SelectModel => ({ table: T, items: [{ operand, alias: 'total' }] });
+
+    it('casts sum over a decimal column to text on mssql only', () => {
+        const model = selectOf(typed('sum', 'decimal'));
+        expect(translators.mssql.translateSelect(model).text).toBe(
+            `SELECT CAST(SUM(amount) AS NVARCHAR(MAX)) as total FROM ${T}`
+        );
+        expect(translators.postgresql.translateSelect(model).text).toBe(`SELECT SUM(amount) as total FROM ${T}`);
+        expect(translators.mariadb.translateSelect(model).text).toBe(`SELECT SUM(amount) as total FROM ${T}`);
+    });
+
+    it.each(['decimal(38,10)', 'DECIMAL(10,2)', 'numeric(18,4)', 'numeric'])('casts sum and avg over %s', (type) => {
+        expect(translators.mssql.translateSelect(selectOf(typed('sum', type))).text).toContain(
+            'CAST(SUM(amount) AS NVARCHAR(MAX))'
+        );
+        expect(translators.mssql.translateSelect(selectOf(typed('avg', type))).text).toContain(
+            'CAST(AVG(amount) AS NVARCHAR(MAX))'
+        );
+    });
+
+    it.each(['float', 'real', 'double precision', 'int', 'integer', 'bigint', 'varchar(20)', undefined])(
+        'leaves %s columns alone',
+        (type) => {
+            expect(translators.mssql.translateSelect(selectOf(typed('sum', type))).text).toBe(
+                `SELECT SUM(amount) as total FROM ${T}`
+            );
+        }
+    );
+
+    it('does not cast min, max or count', () => {
+        for (const fn of ['min', 'max'] as const) {
+            expect(translators.mssql.translateSelect(selectOf(typed(fn, 'decimal'))).text).not.toContain('CAST');
+        }
+        expect(translators.mssql.translateSelect(selectOf({ kind: 'agg', fn: 'count' })).text).not.toContain('CAST');
+    });
+
+    it('never casts inside HAVING or ORDER BY, only in the select list', () => {
+        const model: SelectModel = {
+            table: T,
+            items: [
+                { operand: col('name') },
+                { operand: typed('sum', 'decimal(38,10)'), alias: 'total' },
+            ],
+            groupBy: ['name'],
+            having: { op: 'gt', left: typed('sum', 'decimal(38,10)'), value: 5 },
+            orderBy: [{ operand: typed('sum', 'decimal(38,10)'), direction: 'desc' }],
+        };
+        expect(translators.mssql.translateSelect(model).text).toBe(
+            `SELECT name, CAST(SUM(amount) AS NVARCHAR(MAX)) as total FROM ${T} GROUP BY name HAVING SUM(amount) > @p0 ORDER BY SUM(amount) DESC`
+        );
+    });
+});
+
+describe('SelectTranslator mssql average over integer columns', () => {
+    const avgOf = (columnType?: string): Operand => ({ kind: 'agg', fn: 'avg', column: 'qty', columnType });
+
+    it.each(['int', 'integer', 'bigint', 'smallint', 'tinyint', 'INT'])('widens avg over %s on mssql only', (type) => {
+        const model: SelectModel = { table: T, items: [{ operand: avgOf(type), alias: 'mean' }] };
+        expect(translators.mssql.translateSelect(model).text).toBe(
+            `SELECT AVG(CAST(qty AS DECIMAL(38,6))) as mean FROM ${T}`
+        );
+        expect(translators.postgresql.translateSelect(model).text).toBe(`SELECT AVG(qty) as mean FROM ${T}`);
+        expect(translators.mariadb.translateSelect(model).text).toBe(`SELECT AVG(qty) as mean FROM ${T}`);
+    });
+
+    it('widens in HAVING too, so the comparison matches the other dialects', () => {
+        const model: SelectModel = {
+            table: T,
+            groupBy: ['grp'],
+            having: { op: 'gt', left: avgOf('int'), value: 1 },
+        };
+        expect(translators.mssql.translateSelect(model).text).toBe(
+            `SELECT * FROM ${T} GROUP BY grp HAVING AVG(CAST(qty AS DECIMAL(38,6))) > @p0`
+        );
+    });
+
+    it('leaves avg over float and untyped columns alone, and sum over integers', () => {
+        for (const type of ['float', 'real', undefined]) {
+            const model: SelectModel = { table: T, items: [{ operand: avgOf(type), alias: 'mean' }] };
+            expect(translators.mssql.translateSelect(model).text).toBe(`SELECT AVG(qty) as mean FROM ${T}`);
+        }
+        const sum: SelectModel = {
+            table: T,
+            items: [{ operand: { kind: 'agg', fn: 'sum', column: 'qty', columnType: 'int' }, alias: 's' }],
+        };
+        expect(translators.mssql.translateSelect(sum).text).toBe(`SELECT SUM(qty) as s FROM ${T}`);
     });
 });
