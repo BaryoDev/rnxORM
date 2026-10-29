@@ -18,6 +18,9 @@ export const ALLOWED_OPERATORS = [
 
 export type ComparisonOperator = (typeof ALLOWED_OPERATORS)[number];
 
+/** Operators accepted by the deprecated `where(column, operator, value)` form. */
+export type WhereOperator = ComparisonOperator | Lowercase<ComparisonOperator>;
+
 /** Operators whose value is a set, expanded to one placeholder per element. */
 const SET_OPERATORS = ['IN', 'NOT IN'];
 /** Operators that compare against NULL and consume no placeholder at all. */

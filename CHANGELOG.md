@@ -27,6 +27,19 @@
 
 ### Breaking
 
+- **Plain-string column overloads are removed** (issue #26). `where(column, op,
+  value)`, `orderBy()` and `orderByDescending()` on `DbSet`, `QueryBuilder` and
+  `SelectQueryBuilder` no longer take a `string` column, so a raw string column
+  does not compile. `where` takes `keyof T` (deprecated, removed in 4.0) or the
+  condition builders; the operator is limited to the known comparison
+  operators. `orderBy` takes `keyof T` or a selector (`orderBy(u => u.name)`).
+  Dynamic columns need an `as any` cast, which still throws on an unmapped
+  column. For a `DbSet<any>` or an entity with an index signature, `keyof T &
+  string` is `string`, so raw strings still compile and the runtime check is the
+  guard. The operator type is exact: `'Like'`, `' = '` and a value typed as
+  plain `string` were accepted at runtime on 2.x and no longer compile. Use the
+  lowercase or exact-case literal, or cast `as WhereOperator`. `having()`,
+  grouped `orderBy()` aliases and `hasQueryFilter()` are unchanged.
 - **Drivers are optional peer dependencies** (issue #10). `pg`, `mssql` and
   `mariadb` are no longer installed with `rnxorm`. The app installs the one it
   uses (`pg` 8, `mssql` 10 or 11, `mariadb` 3). A provider loads its driver

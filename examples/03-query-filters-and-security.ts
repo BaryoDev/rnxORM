@@ -103,7 +103,7 @@ async function main() {
     // runtime check below applies regardless of how the string arrived.
     const userInput = "amount; DROP TABLE ex3_orders; --";
     try {
-        await orders.orderBy(userInput).toList();
+        await orders.orderBy(userInput as any).toList();
         console.log("UNEXPECTED: injection payload was accepted!");
     } catch (err: any) {
         console.log(`Caught as expected: ${err.message}`);

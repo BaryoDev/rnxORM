@@ -7,7 +7,7 @@ import { Predicate } from "./model/Predicate";
 import { AggregateFn } from "./model/Operand";
 import { SelectModel } from "./model/SelectModel";
 import { toCount, toExactNumber } from "../Numerics";
-import { columnTypeOf, convertValueToDb } from "../Identifiers";
+import { columnTypeOf, convertValueToDb, WhereOperator } from "../Identifiers";
 import { mapRowToEntity } from "./EntityMapper";
 import { QueryBuilder } from "./QueryBuilder";
 import { SelectQueryBuilder } from "./SelectQueryBuilder";
@@ -112,11 +112,9 @@ export class DbSet<T> {
      */
     where(condition: (entity: T) => Predicate): QueryBuilder<T>;
     /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
-    where(column: keyof T & string, operator: string, value: any): QueryBuilder<T>;
-    /** @deprecated Use `where(u => eq(u.age, 18))` with the condition builders. Removed in 4.0. */
-    where(column: string, operator: string, value: any): QueryBuilder<T>;
-    where(first: string | ((entity: T) => Predicate), operator?: string, value?: any): QueryBuilder<T> {
-        return new QueryBuilder(this.entityType, this.context, this.tableName).where(first as string, operator as string, value);
+    where(column: keyof T & string, operator: WhereOperator, value: any): QueryBuilder<T>;
+    where(first: (keyof T & string) | ((entity: T) => Predicate), operator?: string, value?: any): QueryBuilder<T> {
+        return new QueryBuilder(this.entityType, this.context, this.tableName).where(first as keyof T & string, operator as WhereOperator, value);
     }
 
     /**
@@ -154,18 +152,18 @@ export class DbSet<T> {
      * Order results by column ascending
      */
     orderBy(column: keyof T & string): QueryBuilder<T>;
-    orderBy(column: string): QueryBuilder<T>;
-    orderBy(column: string): QueryBuilder<T> {
-        return new QueryBuilder(this.entityType, this.context, this.tableName).orderBy(column);
+    orderBy(selector: (entity: T) => unknown): QueryBuilder<T>;
+    orderBy(column: (keyof T & string) | ((entity: T) => unknown)): QueryBuilder<T> {
+        return new QueryBuilder(this.entityType, this.context, this.tableName).orderBy(column as keyof T & string);
     }
 
     /**
      * Order results by column descending
      */
     orderByDescending(column: keyof T & string): QueryBuilder<T>;
-    orderByDescending(column: string): QueryBuilder<T>;
-    orderByDescending(column: string): QueryBuilder<T> {
-        return new QueryBuilder(this.entityType, this.context, this.tableName).orderByDescending(column);
+    orderByDescending(selector: (entity: T) => unknown): QueryBuilder<T>;
+    orderByDescending(column: (keyof T & string) | ((entity: T) => unknown)): QueryBuilder<T> {
+        return new QueryBuilder(this.entityType, this.context, this.tableName).orderByDescending(column as keyof T & string);
     }
 
     /**
