@@ -17,7 +17,7 @@ const ALLOWED: Record<string, number> = {
 };
 
 const SRC = path.resolve(__dirname, '../../src');
-const ARM = /(dialect|getDialect\(\)) === '|case '(mssql|postgresql|mariadb)'/;
+const ARM = /(dialect|getDialect\(\))\s*[!=]==\s*['"]|case\s+['"](mssql|postgresql|mariadb)['"]/;
 
 function listFiles(dir: string): string[] {
     const out: string[] = [];
@@ -52,5 +52,21 @@ describe('dialect branches outside src/providers', () => {
 
     it.each(Object.entries(ALLOWED))('%s has at most %i arms', (file, max) => {
         expect(found[file] ?? 0).toBeLessThanOrEqual(max);
+    });
+});
+
+describe('arm pattern', () => {
+    it.each([
+        `dialect === "mssql"`,
+        `dialect  ===  'x'`,
+        `getDialect() !== 'postgresql'`,
+        `case "mariadb":`,
+        `case  'mssql':`,
+    ])('matches %s', (line) => {
+        expect(ARM.test(line)).toBe(true);
+    });
+
+    it('ignores an unrelated line', () => {
+        expect(ARM.test(`const mode = 'mssql';`)).toBe(false);
     });
 });

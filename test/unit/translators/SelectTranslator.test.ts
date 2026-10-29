@@ -338,6 +338,18 @@ const shared: Case[] = [
         text: `SELECT COUNT(*) as n, age FROM ${T} GROUP BY age ORDER BY n DESC, age ASC`,
         params: [],
     },
+    {
+        name: 'empty and renders as always true',
+        model: { table: T, where: { op: 'and', parts: [] } },
+        text: `SELECT * FROM ${T} WHERE 1 = 1`,
+        params: [],
+    },
+    {
+        name: 'empty or renders as always false',
+        model: { table: T, where: { op: 'or', parts: [] } },
+        text: `SELECT * FROM ${T} WHERE 1 = 0`,
+        params: [],
+    },
 ];
 
 describe('SelectTranslator shared rendering', () => {
