@@ -4,7 +4,6 @@ import { Migration } from '../../src/migrations/Migration';
 import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { Migrator } from '../../src/migrations/Migrator';
 import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
-import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { Dialect } from '../../src/core/types';
 import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
 import { translatorFor } from '../mocks/translatorFor';
@@ -117,19 +116,12 @@ class FakeHistoryProvider implements IDatabaseProvider {
     getParameterPlaceholder(index: number): string { return `$${index}`; }
 
     mapType(tsType: string): string { return tsType; }
-    generateCreateTableSql(_entity: EntityMetadata): string { return ''; }
-    generateAddColumnSql(_t: string, _c: ColumnMetadata): string { return ''; }
-    generateAlterColumnTypeSql(_t: string, _c: ColumnMetadata): string { return ''; }
     getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] } {
         return { sql: '', params: [tableName] };
     }
     normalizeType(dbType: string): string { return dbType.toLowerCase(); }
     getAutoIncrementType(): string { return 'INTEGER'; }
     isTypeMismatch(a: string, b: string): boolean { return a !== b; }
-    generateAddForeignKeySql(): string { return ''; }
-    generateCreateIndexSql(): string { return ''; }
-    generateCreateUniqueConstraintSql(): string { return ''; }
-    generateCreateJoinTableSql(): string { return ''; }
 }
 
 /**

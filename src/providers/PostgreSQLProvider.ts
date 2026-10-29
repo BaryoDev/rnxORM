@@ -3,31 +3,12 @@ import { loadDriver } from "./loadDriver";
 import { SqlTranslator } from "./translators/SqlTranslator";
 import { PostgresTranslator } from "./translators/PostgresTranslator";
 import { DatabaseConfig, IDatabaseProvider, ITransaction, QueryResult } from "./IDatabaseProvider";
-import { ColumnMetadata, EntityMetadata } from "../core/MetadataStorage";
 import { Dialect, QueryParameter } from "../core/types";
-import { TypeMap, createTypeMapper, createTypeNormalizer } from "./typeMapping";
+import { createTypeNormalizer } from "./translators/typeMapping";
 
 /**
  * PostgreSQL database provider implementation
  */
-/** Dialect spelling for each known column type. */
-const TYPE_MAP = {
-    text: 'TEXT',
-    integer: 'INTEGER',
-    boolean: 'BOOLEAN',
-    timestamp: 'TIMESTAMP',
-    date: 'DATE',
-    time: 'TIME',
-    decimal: 'DECIMAL(18,2)',
-    float: 'REAL',
-    double: 'DOUBLE PRECISION',
-    bigint: 'BIGINT',
-    json: 'JSONB',
-} satisfies TypeMap;
-
-/** Types that carry their own parameters and pass through unchanged. */
-const PASSTHROUGH_TYPES = ['varchar'] as const;
-
 /** Database type names that normalize to a different canonical name. */
 const NORMALIZE_MAP: Readonly<Record<string, string>> = {
     'character varying': 'varchar',
@@ -176,37 +157,7 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         return new PostgreSQLTransaction(client);
     }
 
-    mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);
-
-    generateCreateTableSql(entity: EntityMetadata): string {
-        const columns = entity.columns.map((col) => {
-            let colDef = `${col.columnName} ${this.mapType(col.type)}`;
-
-            if (col.isPrimaryKey) {
-                // If it's an integer PK, make it SERIAL for auto-increment
-                if (col.type === "integer") {
-                    colDef = `${col.columnName} SERIAL PRIMARY KEY`;
-                } else {
-                    colDef += " PRIMARY KEY";
-                }
-            } else if (!col.isNullable) {
-                colDef += " NOT NULL";
-            }
-
-            return colDef;
-        });
-
-        return `CREATE TABLE IF NOT EXISTS ${entity.tableName} (${columns.join(", ")});`;
-    }
-
-    generateAddColumnSql(tableName: string, column: ColumnMetadata): string {
-        const colDef = this.mapType(column.type);
-        return `ALTER TABLE ${tableName} ADD COLUMN ${column.columnName} ${colDef}`;
-    }
-
-    generateAlterColumnTypeSql(tableName: string, column: ColumnMetadata): string {
-        return `ALTER TABLE ${tableName} ALTER COLUMN ${column.columnName} TYPE ${this.mapType(column.type)} USING ${column.columnName}::${this.mapType(column.type)}`;
-    }
+    mapType = (tsType: string): string => this.translator.mapType(tsType);
 
     getParameterPlaceholder(index: number): string {
         return `$${index}`;
@@ -241,67 +192,5 @@ export class PostgreSQLProvider implements IDatabaseProvider {
         if (normalizedEntity === 'timestamp' && !normalizedDb.includes('timestamp')) return true;
 
         return false;
-    }
-
-    generateAddForeignKeySql(
-        tableName: string,
-        columnName: string,
-        referencedTable: string,
-        referencedColumn: string,
-        onDelete?: string,
-        onUpdate?: string
-    ): string {
-        const constraintName = `fk_${tableName}_${columnName}`;
-        let sql = `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${columnName}) REFERENCES ${referencedTable}(${referencedColumn})`;
-
-        if (onDelete) {
-            sql += ` ON DELETE ${onDelete}`;
-        }
-        if (onUpdate) {
-            sql += ` ON UPDATE ${onUpdate}`;
-        }
-
-        return sql;
-    }
-
-    generateCreateIndexSql(
-        tableName: string,
-        indexName: string,
-        columns: string[],
-        unique: boolean
-    ): string {
-        const uniqueKeyword = unique ? 'UNIQUE ' : '';
-        const columnList = columns.join(', ');
-        return `CREATE ${uniqueKeyword}INDEX ${indexName} ON ${tableName} (${columnList})`;
-    }
-
-    generateCreateUniqueConstraintSql(
-        tableName: string,
-        constraintName: string,
-        columns: string[]
-    ): string {
-        const columnList = columns.join(', ');
-        return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} UNIQUE (${columnList})`;
-    }
-
-    generateCreateJoinTableSql(
-        joinTableName: string,
-        column1: string,
-        column2: string,
-        referencedTable1: string,
-        referencedTable2: string,
-        onDelete?: string,
-        referencedColumn1: string = 'id',
-        referencedColumn2: string = 'id'
-    ): string {
-        const cascadeClause = onDelete ? ` ON DELETE ${onDelete}` : ' ON DELETE CASCADE';
-
-        return `CREATE TABLE IF NOT EXISTS ${joinTableName} (
-            ${column1} INTEGER NOT NULL,
-            ${column2} INTEGER NOT NULL,
-            PRIMARY KEY (${column1}, ${column2}),
-            FOREIGN KEY (${column1}) REFERENCES ${referencedTable1}(${referencedColumn1})${cascadeClause},
-            FOREIGN KEY (${column2}) REFERENCES ${referencedTable2}(${referencedColumn2})${cascadeClause}
-        )`;
     }
 }

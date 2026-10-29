@@ -1,5 +1,6 @@
 import { AlterColumnOp, RenameColumnOp, RenameTableOp } from '../../core/query/model/DdlOperation';
 import { SqlTranslator } from './SqlTranslator';
+import { TypeMap, createTypeMapper } from './typeMapping';
 
 /**
  * PostgreSQL reserved words that cannot be used as a bare identifier: the
@@ -26,7 +27,29 @@ const POSTGRES_RESERVED_WORDS = new Set([
 /** A bare PostgreSQL identifier: lower case, and not starting with a digit. */
 const POSTGRES_BARE_IDENTIFIER = /^[a-z_][a-z0-9_$]*$/;
 
+/** Dialect spelling for each known column type. */
+const TYPE_MAP = {
+    text: 'TEXT',
+    integer: 'INTEGER',
+    boolean: 'BOOLEAN',
+    timestamp: 'TIMESTAMP',
+    date: 'DATE',
+    time: 'TIME',
+    decimal: 'DECIMAL(18,2)',
+    float: 'REAL',
+    double: 'DOUBLE PRECISION',
+    bigint: 'BIGINT',
+    json: 'JSONB',
+} satisfies TypeMap;
+
+/** Types that carry their own parameters and pass through unchanged. */
+const PASSTHROUGH_TYPES = ['varchar'] as const;
+
 export class PostgresTranslator extends SqlTranslator {
+    readonly mapType = createTypeMapper(TYPE_MAP, PASSTHROUGH_TYPES);
+
+    protected readonly joinKeyType = 'INTEGER';
+
     protected placeholder(n: number): string {
         return `$${n}`;
     }
@@ -69,6 +92,10 @@ export class PostgresTranslator extends SqlTranslator {
             statements.push(`${prefix} SET DEFAULT ${this.renderDdlLiteral(op.defaultValue, op.op)}`);
         }
         return statements;
+    }
+
+    protected renderEnsureAlterColumnType(table: string, column: string, type: string): string {
+        return `ALTER TABLE ${table} ALTER COLUMN ${column} TYPE ${type} USING ${column}::${type}`;
     }
 
     protected renderRenameColumn(_op: RenameColumnOp, table: string, from: string, to: string): string {

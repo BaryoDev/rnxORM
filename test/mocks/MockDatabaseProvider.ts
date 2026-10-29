@@ -196,21 +196,6 @@ export class MockDatabaseProvider implements IDatabaseProvider {
         return tsType.toUpperCase();
     }
 
-    generateCreateTableSql(entity: EntityMetadata): string {
-        const columns = entity.columns.map(c =>
-            `${c.columnName} ${this.getColumnType(c)}`
-        ).join(', ');
-        return `CREATE TABLE ${entity.tableName} (${columns})`;
-    }
-
-    generateAddColumnSql(tableName: string, column: ColumnMetadata): string {
-        return `ALTER TABLE ${tableName} ADD COLUMN ${column.columnName} ${this.getColumnType(column)}`;
-    }
-
-    generateAlterColumnTypeSql(tableName: string, column: ColumnMetadata): string {
-        return `ALTER TABLE ${tableName} ALTER COLUMN ${column.columnName} TYPE ${this.getColumnType(column)}`;
-    }
-
     getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] } {
         return {
             sql: `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1`,
@@ -228,51 +213,6 @@ export class MockDatabaseProvider implements IDatabaseProvider {
 
     isTypeMismatch(entityType: string, dbType: string): boolean {
         return this.normalizeType(entityType) !== this.normalizeType(dbType);
-    }
-
-    generateAddForeignKeySql(
-        tableName: string,
-        columnName: string,
-        referencedTable: string,
-        referencedColumn: string,
-        onDelete?: string,
-        onUpdate?: string
-    ): string {
-        let sql = `ALTER TABLE ${tableName} ADD FOREIGN KEY (${columnName}) REFERENCES ${referencedTable}(${referencedColumn})`;
-        if (onDelete) sql += ` ON DELETE ${onDelete}`;
-        if (onUpdate) sql += ` ON UPDATE ${onUpdate}`;
-        return sql;
-    }
-
-    generateCreateIndexSql(
-        tableName: string,
-        indexName: string,
-        columns: string[],
-        unique: boolean
-    ): string {
-        const uniqueClause = unique ? 'UNIQUE ' : '';
-        return `CREATE ${uniqueClause}INDEX ${indexName} ON ${tableName} (${columns.join(', ')})`;
-    }
-
-    generateCreateUniqueConstraintSql(
-        tableName: string,
-        constraintName: string,
-        columns: string[]
-    ): string {
-        return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} UNIQUE (${columns.join(', ')})`;
-    }
-
-    generateCreateJoinTableSql(
-        joinTableName: string,
-        column1: string,
-        column2: string,
-        referencedTable1: string,
-        referencedTable2: string,
-        onDelete?: string,
-        referencedColumn1: string = 'id',
-        referencedColumn2: string = 'id'
-    ): string {
-        return `CREATE TABLE ${joinTableName} (${column1} INTEGER, ${column2} INTEGER, PRIMARY KEY (${column1}, ${column2}))`;
     }
 
     getColumnType(column: ColumnMetadata): string {

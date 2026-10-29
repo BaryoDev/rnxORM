@@ -1,7 +1,6 @@
 import "reflect-metadata";
 import { MigrationBuilder } from '../../src/migrations/MigrationBuilder';
 import { IDatabaseProvider, ITransaction, QueryResult } from '../../src/providers/IDatabaseProvider';
-import { ColumnMetadata, EntityMetadata } from '../../src/core/MetadataStorage';
 import { DIALECTS, Dialect } from '../../src/core/types';
 import { SqlTranslator } from '../../src/providers/translators/SqlTranslator';
 import { translatorFor } from '../mocks/translatorFor';
@@ -30,9 +29,6 @@ class RecordingProvider implements IDatabaseProvider {
     async beginTransaction(): Promise<ITransaction> { throw new Error('not used'); }
 
     mapType(tsType: string): string { return tsType; }
-    generateCreateTableSql(_entity: EntityMetadata): string { return ''; }
-    generateAddColumnSql(_t: string, _c: ColumnMetadata): string { return ''; }
-    generateAlterColumnTypeSql(_t: string, _c: ColumnMetadata): string { return ''; }
     getParameterPlaceholder(index: number): string { return `$${index}`; }
     getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] } {
         return { sql: '', params: [tableName] };
@@ -40,10 +36,6 @@ class RecordingProvider implements IDatabaseProvider {
     normalizeType(dbType: string): string { return dbType.toLowerCase(); }
     getAutoIncrementType(): string { return 'INTEGER'; }
     isTypeMismatch(a: string, b: string): boolean { return a !== b; }
-    generateAddForeignKeySql(): string { return ''; }
-    generateCreateIndexSql(): string { return ''; }
-    generateCreateUniqueConstraintSql(): string { return ''; }
-    generateCreateJoinTableSql(): string { return ''; }
 }
 
 /**

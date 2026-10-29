@@ -12,7 +12,7 @@
 export const DIALECTS = ['postgresql', 'mssql', 'mariadb'] as const;
 
 /**
- * The dialect identifier a provider reports from `getDialect()`.
+ * The dialect identifier a provider reports for itself.
  *
  * Previously `string`, which meant a misspelled comparison silently took the
  * fallback branch instead of failing to compile.

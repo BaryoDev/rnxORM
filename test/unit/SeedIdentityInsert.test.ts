@@ -13,17 +13,11 @@ class SeedRole {
     name!: string;
 }
 
-/** Capture provider whose DDL is a no-op, so ensureCreated reaches the seed phase. */
+/** Capture provider that answers the existence check with zero rows, so ensureCreated seeds. */
 class SeedCapture extends SqlCaptureProvider {
     constructor(dialect: CaptureDialect) {
         super(dialect);
         this.defaultResult = { rows: [{ count: 0 }], rowCount: 1 };
-    }
-    generateCreateTableSql(): string {
-        return 'CREATE TABLE seed_noop';
-    }
-    generateAddColumnSql(): string {
-        return 'ALTER TABLE seed_noop ADD COLUMN x';
     }
 }
 

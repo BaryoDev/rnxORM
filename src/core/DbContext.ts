@@ -7,6 +7,7 @@ import { ModelBuilder } from "./ModelBuilder";
 import { ChangeTracker } from "./ChangeTracker";
 import { EntityEntry, EntityState } from "./EntityEntry";
 import { Predicate } from "./query/model/Predicate";
+import { DdlOperation } from "./query/model/DdlOperation";
 import { UpdateAssignment } from "./query/model/UpdateModel";
 
 const eqColumn = (name: string, value: QueryParameter): Predicate => ({
@@ -798,8 +799,16 @@ export class DbContext {
                 continue;
             }
 
-            const createTableSql = this.provider.generateCreateTableSql(entity);
-            await this.query(createTableSql);
+            await this.runDdl({
+                op: 'ensureTable',
+                table: entity.tableName,
+                columns: entity.columns.map((col) => ({
+                    name: col.columnName,
+                    type: col.type,
+                    isPrimaryKey: col.isPrimaryKey,
+                    nullable: col.isNullable,
+                })),
+            });
         }
 
         // Phase 2: Create join tables for Many-to-Many relationships
@@ -818,18 +827,17 @@ export class DbContext {
                             const entityPk = entity.columns.find(c => c.isPrimaryKey);
                             const relatedPk = relatedMetadata.columns.find(c => c.isPrimaryKey);
 
-                            const joinTableSql = this.provider.generateCreateJoinTableSql(
-                                relation.joinTable,
-                                relation.joinColumn,
-                                relation.inverseJoinColumn,
-                                entity.tableName,
-                                relatedMetadata.tableName,
-                                relation.onDelete,
-                                entityPk?.columnName,
-                                relatedPk?.columnName
-                            );
-
-                            await this.query(joinTableSql);
+                            await this.runDdl({
+                                op: 'ensureJoinTable',
+                                table: relation.joinTable,
+                                column1: relation.joinColumn,
+                                column2: relation.inverseJoinColumn,
+                                referencedTable1: entity.tableName,
+                                referencedTable2: relatedMetadata.tableName,
+                                referencedColumn1: entityPk?.columnName,
+                                referencedColumn2: relatedPk?.columnName,
+                                onDelete: relation.onDelete,
+                            });
                             createdJoinTables.add(relation.joinTable);
                         }
                     }
@@ -848,16 +856,15 @@ export class DbContext {
                         const pkColumn = relatedMetadata.columns.find(c => c.isPrimaryKey);
                         if (pkColumn) {
                             try {
-                                const fkSql = this.provider.generateAddForeignKeySql(
-                                    entity.tableName,
-                                    relation.foreignKeyColumn,
-                                    relatedMetadata.tableName,
-                                    pkColumn.columnName,
-                                    relation.onDelete,
-                                    relation.onUpdate
-                                );
-
-                                await this.query(fkSql);
+                                await this.runDdl({
+                                    op: 'ensureForeignKey',
+                                    table: entity.tableName,
+                                    column: relation.foreignKeyColumn,
+                                    referencedTable: relatedMetadata.tableName,
+                                    referencedColumn: pkColumn.columnName,
+                                    onDelete: relation.onDelete,
+                                    onUpdate: relation.onUpdate,
+                                });
                             } catch (error: any) {
                                 // Foreign key constraint might already exist
                                 if (!error.message.includes('already exists')) {
@@ -875,14 +882,13 @@ export class DbContext {
             for (const index of entity.indexes) {
                 const indexName = index.name || `idx_${entity.tableName}_${index.columns.join('_')}`;
                 try {
-                    const indexSql = this.provider.generateCreateIndexSql(
-                        entity.tableName,
-                        indexName,
-                        index.columns,
-                        index.unique
-                    );
-
-                    await this.query(indexSql);
+                    await this.runDdl({
+                        op: 'ensureIndex',
+                        table: entity.tableName,
+                        index: indexName,
+                        columns: index.columns,
+                        unique: index.unique,
+                    });
                 } catch (error: any) {
                     // Index might already exist
                     if (!error.message.includes('already exists')) {
@@ -897,13 +903,12 @@ export class DbContext {
             for (const constraint of entity.uniqueConstraints) {
                 const constraintName = constraint.name || `uq_${entity.tableName}_${constraint.columns.join('_')}`;
                 try {
-                    const constraintSql = this.provider.generateCreateUniqueConstraintSql(
-                        entity.tableName,
-                        constraintName,
-                        constraint.columns
-                    );
-
-                    await this.query(constraintSql);
+                    await this.runDdl({
+                        op: 'ensureUniqueConstraint',
+                        table: entity.tableName,
+                        constraint: constraintName,
+                        columns: constraint.columns,
+                    });
                 } catch (error: any) {
                     // Constraint might already exist
                     if (!error.message.includes('already exists')) {
@@ -931,13 +936,21 @@ export class DbContext {
                 const existingType = existingColumns.get(colName);
 
                 if (!existingType) {
-                    const alterTableSql = this.provider.generateAddColumnSql(entity.tableName, col);
-                    await this.query(alterTableSql);
+                    await this.runDdl({
+                        op: 'ensureAddColumn',
+                        table: entity.tableName,
+                        column: col.columnName,
+                        type: col.type,
+                    });
                 } else {
                     if (this.provider.isTypeMismatch(col.type, existingType)) {
                         try {
-                            const alterColumnSql = this.provider.generateAlterColumnTypeSql(entity.tableName, col);
-                            await this.query(alterColumnSql);
+                            await this.runDdl({
+                                op: 'ensureAlterColumnType',
+                                table: entity.tableName,
+                                column: col.columnName,
+                                type: col.type,
+                            });
                         } catch {
                             // Type migration failed. Data may be incompatible
                         }
@@ -993,6 +1006,12 @@ export class DbContext {
             }
         }
 
+    }
+
+    private async runDdl(op: DdlOperation): Promise<void> {
+        for (const statement of this.provider.getTranslator().translateDdl(op)) {
+            await this.query(statement.text);
+        }
     }
 
     set<T>(entityType: new () => T): DbSet<T> {
