@@ -1,6 +1,6 @@
 import { DbContext } from "../DbContext";
 import { DatabaseRow, QueryParameter, ExactNumeric } from "../types";
-import { EntityState, snapshotEntity } from "../EntityEntry";
+import { EntityState } from "../EntityEntry";
 import { resolveColumn, resolvePropertyName } from "../expressions/PropertyCapture";
 import { queryFilterPredicates } from "../QueryFilter";
 import { Predicate } from "./model/Predicate";
@@ -8,7 +8,7 @@ import { AggregateFn } from "./model/Operand";
 import { SelectModel } from "./model/SelectModel";
 import { toCount, toExactNumber } from "../Numerics";
 import { columnTypeOf, convertValueToDb } from "../Identifiers";
-import { mapRowToEntity, resolvePkValue } from "./EntityMapper";
+import { mapRowToEntity } from "./EntityMapper";
 import { QueryBuilder } from "./QueryBuilder";
 import { SelectQueryBuilder } from "./SelectQueryBuilder";
 import { RawSqlQueryBuilder } from "./RawSqlQueryBuilder";
@@ -96,7 +96,7 @@ export class DbSet<T> {
         const where = this.filterWhere();
         const stmt = this.translate({ table: this.tableName, where });
         const res = await this.context.query(stmt.text, where ? stmt.params : undefined);
-        const entities = res.rows.map((row: DatabaseRow) => this.mapRowToEntity(row, true));
+        const entities = res.rows.map((row: DatabaseRow) => mapRowToEntity(this.entityType, row, false, this.context));
 
         // Predicate-form query filters are evaluated in memory
         if (metadata?.queryFilter) {
@@ -201,7 +201,7 @@ export class DbSet<T> {
         const res = await this.context.query(stmt.text, stmt.params);
 
         if (res.rows.length === 0) return null;
-        const entity = this.mapRowToEntity(res.rows[0], true); // Track the entity
+        const entity = mapRowToEntity(this.entityType, res.rows[0], false, this.context); // Track the entity
 
         // Predicate-form query filters are evaluated in memory
         if (metadata.queryFilter && !metadata.queryFilter(entity)) {
@@ -335,58 +335,5 @@ export class DbSet<T> {
      */
     fromSqlRaw(sql: string, parameters?: QueryParameter[]): RawSqlQueryBuilder<T> {
         return new RawSqlQueryBuilder(this.entityType, this.context, sql, parameters);
-    }
-
-    private mapRowToEntity(row: any, track: boolean = false): T {
-        const metadata = this.context.metadata.getEntity(this.entityType);
-
-        // Identity map lookup: if this row's (converted) primary key is already
-        // tracked, return the SAME instance rather than mapping a new one -
-        // the tracked instance's current values win over fresh database values
-        // (EF Core semantics), so local unsaved modifications survive a re-query.
-        const pk = track ? resolvePkValue(metadata, row) : null;
-        if (pk) {
-            const existing = this.context.changeTracker.findByKey(this.entityType, pk.pkValue);
-            if (existing !== undefined) {
-                return existing as T;
-            }
-        }
-
-        const entity = new this.entityType();
-        metadata?.columns.forEach(col => {
-            let value = row[col.columnName];
-
-            if (col.hasConversion && col.convertFromDb) {
-                value = col.convertFromDb(value);
-            }
-
-            // Only set non-shadow properties on the entity
-            if (!col.isShadowProperty) {
-                (entity as any)[col.propertyName] = value;
-            }
-        });
-
-        if (track) {
-            const originalValues = snapshotEntity(entity);
-            this.context.changeTracker.track(entity, EntityState.Unchanged, originalValues);
-            if (pk) {
-                this.context.changeTracker.registerIdentity(this.entityType, pk.pkValue, entity);
-            }
-        }
-
-        return entity;
-    }
-
-    /**
-     * Shared helper to map database rows to entities
-     * @internal
-     */
-    static mapRowToEntity<T>(
-        entityType: new () => T,
-        row: any,
-        noTracking: boolean = false,
-        context?: DbContext
-    ): T {
-        return mapRowToEntity(entityType, row, noTracking, context);
     }
 }

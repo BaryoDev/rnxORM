@@ -48,6 +48,15 @@ export abstract class SqlTranslator {
         return `${fn.toUpperCase()}(${column === undefined ? '*' : this.quoteIdentifier(column)})`;
     }
 
+    /**
+     * An aggregate rendered where its value is returned (the select list).
+     * Dialects override this to change what comes back; HAVING and ORDER BY
+     * keep the plain form from renderAggregate.
+     */
+    protected renderAggregateOutput(fn: AggregateFn, column: string | undefined, columnType?: string): string {
+        return this.renderAggregate(fn, column, columnType);
+    }
+
     protected renderBoolean(value: boolean): string {
         return value ? '1 = 1' : '1 = 0';
     }
@@ -65,7 +74,7 @@ export abstract class SqlTranslator {
         const order = model.orderBy ?? [];
         if (order.length > 0) {
             const parts = order.map(
-                (o) => `${this.renderOperand(o.operand)} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`
+                (o) => `${this.renderOrderOperand(o.operand, model)} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`
             );
             text += ` ORDER BY ${parts.join(', ')}`;
         }
@@ -75,19 +84,26 @@ export abstract class SqlTranslator {
         return { text, params: state.params };
     }
 
+    /** ORDER BY operand. A dialect can override this when a select alias would change what a bare column name sorts by. */
+    protected renderOrderOperand(operand: Operand, _model: SelectModel): string {
+        return this.renderOperand(operand);
+    }
+
     private renderItems(model: SelectModel): string {
         const items = model.items ?? [];
         if (items.length === 0) return '*';
         return items
             .map((item) => {
-                const sql = this.renderOperand(item.operand);
+                const sql = item.operand.kind === 'agg'
+                    ? this.renderAggregateOutput(item.operand.fn, item.operand.column, item.operand.columnType)
+                    : this.renderOperand(item.operand);
                 if (item.alias === undefined) return sql;
                 return `${sql}${item.operand.kind === 'agg' ? ' as ' : ' AS '}${item.alias}`;
             })
             .join(', ');
     }
 
-    private renderOperand(operand: Operand): string {
+    protected renderOperand(operand: Operand): string {
         if (operand.kind === 'column') return this.quoteIdentifier(operand.name);
         return this.renderAggregate(operand.fn, operand.column, operand.columnType);
     }
