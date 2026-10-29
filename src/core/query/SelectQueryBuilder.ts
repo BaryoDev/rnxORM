@@ -1,10 +1,12 @@
 import { DbContext } from "../DbContext";
 import { QueryState } from "../QueryState";
-import { DatabaseRow, QueryParameter } from "../types";
+import { DatabaseRow } from "../types";
 import { capture } from "../expressions/PropertyCapture";
-import { compileQueryFilter } from "../QueryFilter";
+import { queryFilterPredicates } from "../QueryFilter";
 import { toCount } from "../Numerics";
-import { assertAlias, assertColumn, assertLimit, buildComparison, findColumn } from "../Identifiers";
+import { assertAlias, assertColumn, assertLimit, findColumn, resolvePredicate } from "../Identifiers";
+import { Predicate } from "./model/Predicate";
+import { SelectItem } from "./model/SelectModel";
 import { mapRowToEntity } from "./EntityMapper";
 
 /**
@@ -43,16 +45,12 @@ export class SelectQueryBuilder<T, TResult> {
         return this;
     }
 
-    /**
-     * Compile this entity's structured query filters (unless disabled) with
-     * placeholder numbering continuing after the user-supplied parameters.
-     */
-    private compileFilters(): { clauses: string[]; params: QueryParameter[] } {
+    /** This entity's structured query filters (unless disabled) as predicates. */
+    private filterPredicates(): Predicate[] {
         if (this.state.ignoreFilters) {
-            return { clauses: [], params: [] };
+            return [];
         }
-        const metadata = this.context.metadata.getEntity(this.entityType);
-        return compileQueryFilter(metadata, this.context.getProvider(), this.state.params.length + 1);
+        return queryFilterPredicates(this.context.metadata.getEntity(this.entityType));
     }
 
     /**
@@ -62,12 +60,9 @@ export class SelectQueryBuilder<T, TResult> {
     where(column: string, operator: string, value: any): this;
     where(column: string, operator: string, value: any): this {
         const sqlColumn = assertColumn(this.entityType, column, 'where');
-        const comparison = buildComparison(
-            sqlColumn, operator, value, this.context.getProvider(), this.state.params.length + 1, 'where',
-            findColumn(this.entityType, column)
-        );
-        this.state.conditions.push(comparison.clause);
-        this.state.params.push(...comparison.params);
+        this.state.predicates.push(resolvePredicate(
+            { columnName: sqlColumn, ...findColumn(this.entityType, column) }, operator, value, 'where'
+        ));
         return this;
     }
 
@@ -119,59 +114,24 @@ export class SelectQueryBuilder<T, TResult> {
      * Execute query and return projected results
      */
     async toList(): Promise<TResult[]> {
-        const provider = this.context.getProvider();
-        const dialect = provider.getDialect();
-
-        // First, get the entities
-        const filter = this.compileFilters();
-        const allConditions = [...this.state.conditions, ...filter.clauses];
-        const queryParams = [...this.state.params, ...filter.params];
-        let whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-
-        if (this.state.orderByColumns.length > 0) {
-            const orderByClause = this.state.orderByColumns
-                .map(o => `${o.column} ${o.direction}`)
-                .join(', ');
-            whereClause += (whereClause ? ' ' : '') + `ORDER BY ${orderByClause}`;
-        }
-
-        if (dialect === 'mssql') {
-            if (this.state.skipCount !== undefined || this.state.takeCount !== undefined) {
-                if (this.state.orderByColumns.length === 0) {
-                    whereClause += (whereClause ? ' ' : '') + 'ORDER BY (SELECT NULL)';
-                }
-                whereClause += ` OFFSET ${this.state.skipCount ?? 0} ROWS`;
-                if (this.state.takeCount !== undefined) {
-                    whereClause += ` FETCH NEXT ${this.state.takeCount} ROWS ONLY`;
-                }
-            }
-        } else {
-            if (this.state.takeCount !== undefined) {
-                whereClause += ` LIMIT ${this.state.takeCount}`;
-            }
-            if (this.state.skipCount !== undefined) {
-                whereClause += ` OFFSET ${this.state.skipCount}`;
-            }
-        }
-
         // Check if we can optimize with SQL projection
         const projectedColumns = this.extractProjectedColumns();
+        const hasProjection = projectedColumns !== null && projectedColumns.length > 0;
 
-        let sql: string;
-        if (projectedColumns && projectedColumns.length > 0) {
-            // Use SQL projection for simple property selections
-            const distinctKeyword = this.state.isDistinct ? 'DISTINCT ' : '';
-            const columnList = projectedColumns.join(', ');
-            sql = `SELECT ${distinctKeyword}${columnList} FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
-        } else {
-            // Fall back to selecting all columns and projecting in memory
-            const distinctKeyword = this.state.isDistinct ? 'DISTINCT ' : '';
-            sql = `SELECT ${distinctKeyword}* FROM ${this.tableName}${whereClause ? ' ' + whereClause : ''}`;
-        }
+        const stmt = this.context.getProvider().getTranslator().translateSelect({
+            table: this.tableName,
+            distinct: this.state.isDistinct || undefined,
+            // No projection: select all columns and project in memory.
+            items: hasProjection ? projectedColumns : undefined,
+            where: this.state.where(this.filterPredicates()),
+            orderBy: this.state.orderItems(),
+            skip: this.state.skipCount,
+            take: this.state.takeCount,
+        });
 
-        const res = await this.context.query(sql, queryParams);
+        const res = await this.context.query(stmt.text, stmt.params);
 
-        if (projectedColumns && projectedColumns.length > 0) {
+        if (hasProjection) {
             if (this.projectsSingleProperty) {
                 // `u => u.age` is typed TResult[] (number[]), so the caller gets
                 // the values, not the one-key driver rows they arrive in. The
@@ -206,11 +166,14 @@ export class SelectQueryBuilder<T, TResult> {
      * Count results (doesn't apply projection)
      */
     async count(): Promise<number> {
-        const filter = this.compileFilters();
-        const allConditions = [...this.state.conditions, ...filter.clauses];
-        const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(" AND ")}` : "";
-        const sql = `SELECT COUNT(*) as count FROM ${this.tableName} ${whereClause}`;
-        const res = await this.context.query(sql, [...this.state.params, ...filter.params]);
+        const where = this.state.where(this.filterPredicates());
+        const stmt = this.context.getProvider().getTranslator().translateSelect({
+            table: this.tableName,
+            items: [{ operand: { kind: 'agg', fn: 'count' }, alias: 'count' }],
+            where,
+        });
+        // The old builder left a trailing space when there was no WHERE.
+        const res = await this.context.query(where ? stmt.text : stmt.text + ' ', stmt.params);
         return toCount(res.rows[0]?.count);
     }
 
@@ -228,7 +191,7 @@ export class SelectQueryBuilder<T, TResult> {
      * Throws if the selector names a property that isn't a mapped column: an unmapped
      * property is a caller bug, not something to silently degrade into a full-table scan.
      */
-    private extractProjectedColumns(): string[] | null {
+    private extractProjectedColumns(): SelectItem[] | null {
         const result = capture(this.selector as unknown as (entity: any) => any);
         if (result.kind === "opaque") {
             // Honest fallback: the selector computes something SQL cannot express,
@@ -249,11 +212,12 @@ export class SelectQueryBuilder<T, TResult> {
 
         if (result.kind === "property") {
             this.projectsSingleProperty = true;
-            return [columnFor(result.path)];
+            return [{ operand: { kind: 'column', name: columnFor(result.path) } }];
         }
 
-        return Object.entries(result.aliases).map(
-            ([alias, propertyName]) => `${columnFor(propertyName)} AS ${assertAlias(alias, 'select')}`
-        );
+        return Object.entries(result.aliases).map(([alias, propertyName]) => ({
+            operand: { kind: 'column' as const, name: columnFor(propertyName) },
+            alias: assertAlias(alias, 'select'),
+        }));
     }
 }

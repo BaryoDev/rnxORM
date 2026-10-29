@@ -8,9 +8,9 @@ import * as path from 'path';
  */
 const ALLOWED: Record<string, number> = {
     'core/DbContext.ts': 4,
-    'core/query/GroupedQueryBuilder.ts': 1,
+    'core/query/GroupedQueryBuilder.ts': 0,
     'core/query/QueryBuilder.ts': 0,
-    'core/query/SelectQueryBuilder.ts': 1,
+    'core/query/SelectQueryBuilder.ts': 0,
     'migrations/DdlIdentifiers.ts': 3,
     'migrations/MigrationBuilder.ts': 15,
     'migrations/Migrator.ts': 3,

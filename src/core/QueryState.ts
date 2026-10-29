@@ -1,4 +1,6 @@
-import { QueryParameter, SortDirection } from "./types";
+import { SortDirection } from "./types";
+import { Predicate } from "./query/model/Predicate";
+import { OrderItem } from "./query/model/SelectModel";
 
 /** An `ORDER BY` term: a validated column and its direction. */
 export interface OrderByTerm {
@@ -10,7 +12,7 @@ export interface OrderByTerm {
  * The clause state a query accumulates before it is turned into SQL.
  *
  * `DbSet`, `QueryBuilder`, `SelectQueryBuilder` and `GroupedQueryBuilder` all
- * collect the same WHERE conditions, bound parameters, ordering and row
+ * collect the same WHERE predicates, ordering and row
  * limits. They used to declare those fields separately and hand them over with
  * `builder['conditions'] = [...]`, reaching through `private` by index because
  * the builders are siblings rather than a hierarchy. That made the state
@@ -20,8 +22,8 @@ export interface OrderByTerm {
  * through an ordinary method call, so the fields can stay genuinely private.
  */
 export class QueryState {
-    conditions: string[] = [];
-    params: QueryParameter[] = [];
+    /** WHERE predicates in call order, ANDed together. */
+    predicates: Predicate[] = [];
     orderByColumns: OrderByTerm[] = [];
     skipCount?: number;
     takeCount?: number;
@@ -36,8 +38,7 @@ export class QueryState {
      */
     clone(): QueryState {
         const copy = new QueryState();
-        copy.conditions = [...this.conditions];
-        copy.params = [...this.params];
+        copy.predicates = [...this.predicates];
         copy.orderByColumns = [...this.orderByColumns];
         copy.skipCount = this.skipCount;
         copy.takeCount = this.takeCount;
@@ -46,15 +47,20 @@ export class QueryState {
         return copy;
     }
 
-    /** The WHERE clause for the conditions collected so far, or "". */
-    whereClause(): string {
-        return this.conditions.length > 0 ? `WHERE ${this.conditions.join(" AND ")}` : "";
+    /** The collected predicates as one WHERE predicate, or undefined. */
+    where(extra: Predicate[] = []): Predicate | undefined {
+        const all = [...this.predicates, ...extra];
+        if (all.length === 0) return undefined;
+        if (all.length === 1) return all[0];
+        return { op: 'and', parts: all };
     }
 
-    /** The ORDER BY clause for the terms collected so far, or "". */
-    orderByClause(): string {
-        if (this.orderByColumns.length === 0) return "";
-        return `ORDER BY ${this.orderByColumns.map(o => `${o.column} ${o.direction}`).join(", ")}`;
+    /** The ORDER BY terms as model items. */
+    orderItems(): OrderItem[] {
+        return this.orderByColumns.map(o => ({
+            operand: { kind: 'column', name: o.column },
+            direction: o.direction === 'DESC' ? 'desc' : 'asc',
+        }));
     }
 
     /** Whether a row limit is in play, which several paths guard on. */

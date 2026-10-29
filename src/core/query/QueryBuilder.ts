@@ -5,7 +5,7 @@ import { RelationType, EntityMetadata } from "../MetadataStorage";
 import { resolveColumn, resolvePropertyName } from "../expressions/PropertyCapture";
 import { queryFilterPredicates } from "../QueryFilter";
 import { toCount, toExactNumber } from "../Numerics";
-import { assertColumn, assertLimit, convertValueToDb, findColumn, resolvePredicate } from "../Identifiers";
+import { assertColumn, assertLimit, convertValueToDb, findColumn, resolvePredicate, columnTypeOf } from "../Identifiers";
 import { Predicate } from "./model/Predicate";
 import { AggregateFn } from "./model/Operand";
 import { SelectModel } from "./model/SelectModel";
@@ -23,8 +23,6 @@ interface IncludeInfo {
 export class QueryBuilder<T> {
     /** WHERE conditions, bound params, ordering and row limits. */
     private readonly state = new QueryState();
-    /** where() predicates in call order. state.conditions stays empty. */
-    private predicates: Predicate[] = [];
     private noTracking: boolean = false;
     private includes: IncludeInfo[] = [];
 
@@ -45,7 +43,7 @@ export class QueryBuilder<T> {
         // operator set before touching SQL (issues #13/#24); the value is
         // always bound as a parameter. The translator numbers the placeholders.
         const sqlColumn = assertColumn(this.entityType, column, 'where');
-        this.predicates.push(resolvePredicate(
+        this.state.predicates.push(resolvePredicate(
             { columnName: sqlColumn, ...findColumn(this.entityType, column) }, operator, value, 'where'
         ));
         return this;
@@ -151,11 +149,11 @@ export class QueryBuilder<T> {
     }
 
     /** Run an aggregate over the filtered rows. Skip and take do not apply. */
-    private async aggregate(fn: AggregateFn, column: string | undefined, alias: string): Promise<DatabaseRow | undefined> {
-        const where = this.whereOf([...this.predicates, ...this.filterPredicates()]);
+    private async aggregate(fn: AggregateFn, column: string | undefined, alias: string, columnType?: string): Promise<DatabaseRow | undefined> {
+        const where = this.whereOf([...this.state.predicates, ...this.filterPredicates()]);
         const stmt = this.translate({
             table: this.tableName,
-            items: [{ operand: { kind: 'agg', fn, column }, alias }],
+            items: [{ operand: { kind: 'agg', fn, column, columnType }, alias }],
             where,
         });
         // The old builder emitted "FROM table " with a trailing space when
@@ -199,7 +197,7 @@ export class QueryBuilder<T> {
         const stmt = this.translate({
             table: this.tableName,
             distinct: this.state.isDistinct || undefined,
-            where: this.whereOf([...this.predicates, ...this.filterPredicates()]),
+            where: this.whereOf([...this.state.predicates, ...this.filterPredicates()]),
             orderBy: this.state.orderByColumns.map(o => ({
                 operand: { kind: 'column' as const, name: o.column },
                 direction: o.direction === 'DESC' ? 'desc' as const : 'asc' as const,
@@ -305,7 +303,7 @@ export class QueryBuilder<T> {
     async sum(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'sum');
 
-        const row = await this.aggregate('sum', columnName, 'total');
+        const row = await this.aggregate('sum', columnName, 'total', columnTypeOf(this.entityType, columnName));
         return toExactNumber(row?.total) ?? 0;
     }
 
@@ -316,7 +314,7 @@ export class QueryBuilder<T> {
     async average(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'average');
 
-        const row = await this.aggregate('avg', columnName, 'avg');
+        const row = await this.aggregate('avg', columnName, 'avg', columnTypeOf(this.entityType, columnName));
         return toExactNumber(row?.avg) ?? 0;
     }
 
@@ -327,7 +325,7 @@ export class QueryBuilder<T> {
     async min(selector: (entity: T) => any): Promise<any> {
         const columnName = resolveColumn(selector, this.entityType, 'min');
 
-        const row = await this.aggregate('min', columnName, 'min');
+        const row = await this.aggregate('min', columnName, 'min', columnTypeOf(this.entityType, columnName));
         return row!.min;
     }
 
@@ -338,7 +336,7 @@ export class QueryBuilder<T> {
     async max(selector: (entity: T) => any): Promise<any> {
         const columnName = resolveColumn(selector, this.entityType, 'max');
 
-        const row = await this.aggregate('max', columnName, 'max');
+        const row = await this.aggregate('max', columnName, 'max', columnTypeOf(this.entityType, columnName));
         return row!.max;
     }
 
@@ -348,25 +346,8 @@ export class QueryBuilder<T> {
      */
     select<TResult>(selector: (entity: T) => TResult): SelectQueryBuilder<T, TResult> {
         const builder = new SelectQueryBuilder(this.entityType, this.context, this.tableName, selector);
-        builder.adoptState(this.legacyState());
+        builder.adoptState(this.state.clone());
         return builder;
-    }
-
-    /**
-     * The state the string-based builders (select, groupBy) continue from:
-     * ordering, limits and flags as they are, with the where() predicates
-     * rendered to one condition and its parameters.
-     */
-    private legacyState(): QueryState {
-        const state = this.state.clone();
-        const where = this.whereOf(this.predicates);
-        if (where) {
-            const stmt = this.translate({ table: this.tableName, where });
-            const marker = ' WHERE ';
-            state.conditions = [stmt.text.slice(stmt.text.indexOf(marker) + marker.length)];
-            state.params = [...stmt.params];
-        }
-        return state;
     }
 
     /**
@@ -387,8 +368,7 @@ export class QueryBuilder<T> {
         // Only the WHERE state carries over: a GROUP BY re-derives its own
         // ordering and row limits, so cloning them would apply the outer
         // query's LIMIT to the grouped result.
-        const legacy = this.legacyState();
-        builder.adoptWhere(legacy.conditions, legacy.params);
+        builder.adoptWhere(this.state.predicates);
         if (!this.state.ignoreFilters) {
             builder.applyQueryFilter();
         }

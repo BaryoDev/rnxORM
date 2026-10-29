@@ -7,7 +7,7 @@ import { Predicate } from "./model/Predicate";
 import { AggregateFn } from "./model/Operand";
 import { SelectModel } from "./model/SelectModel";
 import { toCount, toExactNumber } from "../Numerics";
-import { convertValueToDb } from "../Identifiers";
+import { columnTypeOf, convertValueToDb } from "../Identifiers";
 import { mapRowToEntity, resolvePkValue } from "./EntityMapper";
 import { QueryBuilder } from "./QueryBuilder";
 import { SelectQueryBuilder } from "./SelectQueryBuilder";
@@ -229,11 +229,11 @@ export class DbSet<T> {
         return this.context.getProvider().getTranslator().translateSelect(model);
     }
 
-    private async aggregate(fn: AggregateFn, column: string | undefined, alias: string): Promise<any> {
+    private async aggregate(fn: AggregateFn, column: string | undefined, alias: string, columnType?: string): Promise<any> {
         const where = this.filterWhere();
         const stmt = this.translate({
             table: this.tableName,
-            items: [{ operand: { kind: 'agg', fn, column }, alias }],
+            items: [{ operand: { kind: 'agg', fn, column, columnType }, alias }],
             where,
         });
         const res = await this.context.query(stmt.text, where ? stmt.params : undefined);
@@ -256,7 +256,7 @@ export class DbSet<T> {
     async sum(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'sum');
 
-        const row = await this.aggregate('sum', columnName, 'total');
+        const row = await this.aggregate('sum', columnName, 'total', columnTypeOf(this.entityType, columnName));
         return toExactNumber(row?.total) ?? 0;
     }
 
@@ -268,7 +268,7 @@ export class DbSet<T> {
     async average(selector: (entity: T) => number): Promise<ExactNumeric> {
         const columnName = resolveColumn(selector, this.entityType, 'average');
 
-        const row = await this.aggregate('avg', columnName, 'avg');
+        const row = await this.aggregate('avg', columnName, 'avg', columnTypeOf(this.entityType, columnName));
         return toExactNumber(row?.avg) ?? 0;
     }
 
@@ -280,7 +280,7 @@ export class DbSet<T> {
     async min(selector: (entity: T) => any): Promise<any> {
         const columnName = resolveColumn(selector, this.entityType, 'min');
 
-        const row = await this.aggregate('min', columnName, 'min');
+        const row = await this.aggregate('min', columnName, 'min', columnTypeOf(this.entityType, columnName));
         return row.min;
     }
 
@@ -292,7 +292,7 @@ export class DbSet<T> {
     async max(selector: (entity: T) => any): Promise<any> {
         const columnName = resolveColumn(selector, this.entityType, 'max');
 
-        const row = await this.aggregate('max', columnName, 'max');
+        const row = await this.aggregate('max', columnName, 'max', columnTypeOf(this.entityType, columnName));
         return row.max;
     }
 
