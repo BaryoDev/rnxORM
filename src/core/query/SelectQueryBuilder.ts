@@ -87,9 +87,9 @@ export class SelectQueryBuilder<T, TResult> {
     }
 
     private orderColumn(column: string | ((entity: T) => unknown), apiName: string): string {
-        return typeof column === 'function'
+        return this.context.withModel(() => typeof column === 'function'
             ? resolveColumn(column, this.entityType, apiName)
-            : assertColumn(this.entityType, column, apiName);
+            : assertColumn(this.entityType, column, apiName));
     }
 
     /**
