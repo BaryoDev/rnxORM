@@ -41,6 +41,8 @@ async function names(source: { query: DbContext['query'] }, provider: IDatabaseP
     return result.rows.map(r => String(r.name));
 }
 
+// SQLite has one writer, so two open write transactions, or a pool write beside
+// an open one, cannot run there. The single-transaction tests still do.
 describe('Transaction handle (#52)', () => {
     getTestProviders().forEach(providerName => {
         describe(`${providerName} - transactions`, () => {
@@ -77,7 +79,9 @@ describe('Transaction handle (#52)', () => {
                 second.changeTracker.clear();
             });
 
-            it('keeps two contexts on one provider independent', async () => {
+            const needsConcurrentWriters = providerName === 'sqlite' ? it.skip : it;
+
+            needsConcurrentWriters('keeps two contexts on one provider independent', async () => {
                 await first.beginTransaction();
                 await second.beginTransaction();
 
@@ -97,7 +101,7 @@ describe('Transaction handle (#52)', () => {
                 expect(await names(provider, provider, 2)).toEqual(['second']);
             });
 
-            it('runs a plain provider.query outside an open transaction', async () => {
+            needsConcurrentWriters('runs a plain provider.query outside an open transaction', async () => {
                 await first.beginTransaction();
                 first.set(TxHandleItem).add(newItem(1, 'in transaction'));
                 await first.saveChanges();

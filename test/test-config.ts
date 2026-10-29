@@ -4,6 +4,9 @@ import { MSSQLProvider } from '../src/providers/MSSQLProvider';
 import { MariaDBProvider } from '../src/providers/MariaDBProvider';
 import { IDatabaseProvider } from '../src/providers/IDatabaseProvider';
 import { MockDatabaseProvider } from './mocks/MockDatabaseProvider';
+import { SqliteProvider } from './support/sqlite/SqliteProvider';
+
+export type TestProviderName = 'postgres' | 'mssql' | 'mariadb' | 'sqlite' | 'mock';
 
 /**
  * Test database configurations for PostgreSQL, SQL Server, and MariaDB
@@ -40,12 +43,17 @@ const testDatabaseConfigs = {
  * Create a database provider for testing
  * Defaults to mock provider unless USE_REAL_DB=true is set
  */
-export function createTestProvider(provider: 'postgres' | 'mssql' | 'mariadb' | 'mock' = 'mock'): IDatabaseProvider {
+export function createTestProvider(provider: TestProviderName = 'mock'): IDatabaseProvider {
     // Use mock provider by default unless explicitly requesting real database
     const useRealDb = process.env.USE_REAL_DB === 'true';
 
     if (!useRealDb || provider === 'mock') {
         return new MockDatabaseProvider();
+    }
+
+    // An in-memory SQLite database needs no server, so each call is a fresh one.
+    if (provider === 'sqlite') {
+        return new SqliteProvider();
     }
 
     const config = testDatabaseConfigs[provider];
@@ -66,7 +74,7 @@ export function createTestProvider(provider: 'postgres' | 'mssql' | 'mariadb' | 
  * Helper to get available database providers for testing
  * Defaults to mock if no environment variable is set
  */
-export function getTestProviders(): Array<'postgres' | 'mssql' | 'mariadb' | 'mock'> {
+export function getTestProviders(): TestProviderName[] {
     const useRealDb = process.env.USE_REAL_DB === 'true';
 
     if (!useRealDb) {
@@ -74,7 +82,7 @@ export function getTestProviders(): Array<'postgres' | 'mssql' | 'mariadb' | 'mo
     }
 
     const providersEnv = process.env.TEST_PROVIDERS || 'postgres';
-    return providersEnv.split(',') as Array<'postgres' | 'mssql' | 'mariadb'>;
+    return providersEnv.split(',') as TestProviderName[];
 }
 
 /**
