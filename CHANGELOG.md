@@ -63,6 +63,16 @@
   Two rendering changes come with it: a case-insensitive `LIKE` on SQL Server
   and MariaDB now renders `LOWER(col) LIKE LOWER(p)`, and `<>` now renders as
   `!=` on every dialect.
+- **Migration DDL comes from the translators** (issue #4). `SqlTranslator` has a
+  public `translateDdl(op)` and new abstract members: `quoteDdlPart`,
+  `renderAutoIncrementColumn`, `renderAlterColumn`, `renderRenameColumn`,
+  `renderRenameTable`, `renderDropIndex` and `renderMigrationHistory`. A custom
+  subclass must implement them. `ColumnDefinition` is now an alias of
+  `DdlColumn`, and its `defaultValue` is `unknown`, not `any`. The `Migrator` no
+  longer throws its own unsupported-dialect error; its SQL comes from the
+  provider's translator. PostgreSQL `alterColumn` validates and renders every
+  statement before it runs any. A bad default used to leave the `TYPE` change
+  applied; now nothing runs.
 
 - **`sum()` and `average()` return `ExactNumeric`** (issue #54). They could already
   return a string for a value a JS number cannot hold exactly; the type now says

@@ -6,6 +6,8 @@ import { DeleteModel } from '../../core/query/model/DeleteModel';
 import { SelectModel } from '../../core/query/model/SelectModel';
 import { SqlStatement } from '../../core/query/model/SqlStatement';
 import { QueryParameter } from '../../core/types';
+import { AlterColumnOp, DdlOperation, RenameColumnOp, RenameTableOp } from '../../core/query/model/DdlOperation';
+import { assertCascadeAction, assertColumnType, assertIdentifierPart } from '../../migrations/DdlIdentifiers';
 
 const COMPARE_SQL = {
     eq: '=',
@@ -196,4 +198,135 @@ export abstract class SqlTranslator {
         if (model.where) text += ` WHERE ${this.renderPredicate(model.where, state, false)}`;
         return { text, params: state.params };
     }
+
+    /** Wraps one validated identifier part in the dialect's quote characters. */
+    protected abstract quoteDdlPart(part: string): string;
+
+    protected abstract renderAutoIncrementColumn(quotedName: string): string;
+
+    /** ALTER COLUMN differs enough per dialect that each one builds its own statements. */
+    protected abstract renderAlterColumn(op: AlterColumnOp, table: string, column: string, type: string): string[];
+
+    protected abstract renderRenameColumn(op: RenameColumnOp, table: string, from: string, to: string): string;
+
+    protected abstract renderRenameTable(op: RenameTableOp, from: string, to: string): string;
+
+    protected abstract renderDropIndex(table: string, index: string): string;
+
+    protected abstract renderMigrationHistory(table: string): string;
+
+    protected renderDdlBoolean(value: boolean): string {
+        return value ? 'TRUE' : 'FALSE';
+    }
+
+    /** Validates an identifier (`name` or `schema.name`) and quotes each part. */
+    protected quoteDdlName(name: string, apiName: string): string {
+        if (typeof name !== 'string' || name.length === 0) {
+            throw new Error(`${apiName}(): identifier is required`);
+        }
+        const parts = name.split('.');
+        if (parts.length > 2) {
+            throw new Error(
+                `${apiName}(): '${name}' has too many qualifiers. Use 'name' or 'schema.name'.`
+            );
+        }
+        return parts
+            .map((part) => this.quoteDdlPart(assertIdentifierPart(part, apiName, name)))
+            .join('.');
+    }
+
+    /**
+     * Renders a value as a SQL literal for a DEFAULT clause. Strings have
+     * embedded quotes doubled so a default can never close its own literal.
+     */
+    protected renderDdlLiteral(value: unknown, apiName: string): string {
+        if (typeof value === 'number') {
+            if (!Number.isFinite(value)) {
+                throw new Error(`${apiName}(): default value ${value} is not a finite number`);
+            }
+            return String(value);
+        }
+        if (typeof value === 'boolean') return this.renderDdlBoolean(value);
+        if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+        throw new Error(
+            `${apiName}(): default value must be a string, number, or boolean, received ${
+                value === null ? 'null' : typeof value
+            }`
+        );
+    }
+
+    translateDdl(op: DdlOperation): SqlStatement[] {
+        const api = op.op;
+        const name = (n: string) => this.quoteDdlName(n, api);
+        const one = (text: string): SqlStatement[] => [{ text, params: [] }];
+
+        switch (op.op) {
+            case 'createTable': {
+                const table = name(op.table);
+                const defs = op.columns.map((col) => {
+                    const colName = name(col.name);
+                    let def = `${colName} ${assertColumnType(col.type, api)}`;
+                    if (col.isPrimaryKey) def += ' PRIMARY KEY';
+                    if (col.isAutoIncrement) def = this.renderAutoIncrementColumn(colName);
+                    if (col.nullable === false && !col.isPrimaryKey) def += ' NOT NULL';
+                    if (col.defaultValue !== undefined) def += ` DEFAULT ${this.renderDdlLiteral(col.defaultValue, api)}`;
+                    return def;
+                });
+                return one(`CREATE TABLE ${table} (${defs.join(', ')})`);
+            }
+            case 'dropTable':
+                return one(`DROP TABLE IF EXISTS ${name(op.table)}`);
+            case 'addColumn': {
+                const table = name(op.table);
+                const column = name(op.column);
+                let text = `ALTER TABLE ${table} ADD COLUMN ${column} ${assertColumnType(op.type, api)}`;
+                if (op.nullable === false) text += ' NOT NULL';
+                if (op.defaultValue !== undefined) text += ` DEFAULT ${this.renderDdlLiteral(op.defaultValue, api)}`;
+                return one(text);
+            }
+            case 'dropColumn':
+                return one(`ALTER TABLE ${name(op.table)} DROP COLUMN ${name(op.column)}`);
+            case 'alterColumn': {
+                const table = name(op.table);
+                const column = name(op.column);
+                const type = assertColumnType(op.type, api);
+                return this.renderAlterColumn(op, table, column, type).map((text) => ({ text, params: [] }));
+            }
+            case 'renameColumn':
+                return one(this.renderRenameColumn(op, name(op.table), name(op.from), name(op.to)));
+            case 'renameTable':
+                return one(this.renderRenameTable(op, name(op.from), name(op.to)));
+            case 'createIndex': {
+                const table = name(op.table);
+                const index = name(op.index);
+                const columns = op.columns.map(name).join(', ');
+                return one(`CREATE ${op.unique ? 'UNIQUE ' : ''}INDEX ${index} ON ${table} (${columns})`);
+            }
+            case 'dropIndex':
+                return one(this.renderDropIndex(name(op.table), name(op.index)));
+            case 'addForeignKey': {
+                const table = name(op.table);
+                const constraint = name(op.constraint);
+                const column = name(op.column);
+                const refTable = name(op.referencedTable);
+                const refColumn = name(op.referencedColumn);
+                const action = assertCascadeAction(op.onDelete);
+                return one(
+                    `ALTER TABLE ${table} ADD CONSTRAINT ${constraint} ` +
+                    `FOREIGN KEY (${column}) REFERENCES ${refTable}(${refColumn}) ` +
+                    `ON DELETE ${action}`
+                );
+            }
+            case 'dropForeignKey':
+                return one(`ALTER TABLE ${name(op.table)} DROP CONSTRAINT ${name(op.constraint)}`);
+            case 'createMigrationHistory':
+                return one(this.renderMigrationHistory(op.table));
+            default:
+                return assertNever(op);
+        }
+    }
+}
+
+function assertNever(op: never): never {
+    throw new Error(`Unhandled DDL operation: ${JSON.stringify(op)}`);
 }

@@ -55,40 +55,13 @@ export class Migrator {
      */
     private async ensureMigrationHistoryTable(): Promise<void> {
         const provider = this.context.getProvider();
-        const dialect = provider.getDialect();
+        const statements = provider
+            .getTranslator()
+            .translateDdl({ op: 'createMigrationHistory', table: Migrator.HISTORY_TABLE });
 
-        let createTableSql: string;
-
-        if (dialect === 'postgresql') {
-            createTableSql = `
-                CREATE TABLE IF NOT EXISTS ${Migrator.HISTORY_TABLE} (
-                    migration_id VARCHAR(255) PRIMARY KEY,
-                    migration_name VARCHAR(255) NOT NULL,
-                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            `;
-        } else if (dialect === 'mssql') {
-            createTableSql = `
-                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${Migrator.HISTORY_TABLE}')
-                CREATE TABLE ${Migrator.HISTORY_TABLE} (
-                    migration_id NVARCHAR(255) PRIMARY KEY,
-                    migration_name NVARCHAR(255) NOT NULL,
-                    applied_at DATETIME2 NOT NULL DEFAULT GETDATE()
-                )
-            `;
-        } else if (dialect === 'mariadb') {
-            createTableSql = `
-                CREATE TABLE IF NOT EXISTS ${Migrator.HISTORY_TABLE} (
-                    migration_id VARCHAR(255) PRIMARY KEY,
-                    migration_name VARCHAR(255) NOT NULL,
-                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            `;
-        } else {
-            throw new Error(`Unsupported database dialect: ${dialect}`);
+        for (const statement of statements) {
+            await provider.query(statement.text);
         }
-
-        await provider.query(createTableSql);
     }
 
     /**
