@@ -19,6 +19,10 @@
   handle. `connect()` no longer pins a connection for later queries; it only
   checks that one can be opened.
 
+- **`sum()` and `average()` return `ExactNumeric`** (issue #54). They could already
+  return a string for a value a JS number cannot hold exactly; the type now says
+  so. Narrow with `typeof` before arithmetic.
+
 ### Fixed
 
 - **One metadata registry per process** (issue #53). A second copy of the
