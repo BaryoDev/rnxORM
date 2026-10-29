@@ -32,6 +32,13 @@
   executor its statements run on, and `Migrator` passes each migration its own
   handle. `connect()` no longer pins a connection for later queries; it only
   checks that one can be opened.
+- **Insert, update and delete SQL comes from the translators** (issue #4).
+  `generateInsertSql`, `generateUpdateSql`, `generateDeleteSql` and
+  `generateSelectSql` are removed from `IDatabaseProvider` and the three
+  providers. `DbContext` builds an insert, update or delete model and the
+  provider's `getTranslator()` renders it, including `RETURNING` on
+  PostgreSQL and `OUTPUT INSERTED` and `IDENTITY_INSERT` on SQL Server. A
+  custom provider can drop those four methods.
 - **Providers render queries through a translator** (issue #4).
   `IDatabaseProvider` has a new required `getTranslator()` that returns the
   `SqlTranslator` for its dialect. A custom provider must add it; one that
