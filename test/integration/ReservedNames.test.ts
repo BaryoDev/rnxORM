@@ -48,9 +48,12 @@ describe('entities named after reserved words', () => {
     for (const providerName of realProviders) {
         describe(providerName, () => {
             let db: DbContext;
+            // One provider for every context: an in-memory SQLite database lives in the provider.
+            let provider: ReturnType<typeof createTestProvider>;
 
             beforeAll(async () => {
-                db = new DbContext(createTestProvider(providerName));
+                provider = createTestProvider(providerName);
+                db = new DbContext(provider);
                 await db.connect();
                 await dropTables(db);
                 await db.ensureCreated();
@@ -83,13 +86,10 @@ describe('entities named after reserved words', () => {
 
                 a.select = 10;
                 await db.saveChanges();
-                const reread = new DbContext(createTestProvider(providerName));
-                await reread.connect();
-                try {
+                const reread = new DbContext(provider);
+                {
                     const updated = await reread.set(Order).where('group', '=', 'a').toList();
                     expect(updated.map(o => o.select)).toEqual([10]);
-                } finally {
-                    await reread.disconnect();
                 }
 
                 orders.remove(a);
@@ -114,13 +114,10 @@ describe('entities named after reserved words', () => {
 
                 u.name = 'Anna';
                 await db.saveChanges();
-                const reread = new DbContext(createTestProvider(providerName));
-                await reread.connect();
-                try {
+                const reread = new DbContext(provider);
+                {
                     const [row] = await reread.set(User).toList();
                     expect(row.name).toBe('Anna');
-                } finally {
-                    await reread.disconnect();
                 }
 
                 users.remove(u);
