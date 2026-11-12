@@ -407,6 +407,47 @@ describe('Migrator', () => {
             expect(provider.historyRows.map(r => r.migration_id)).toEqual(['20240101']);
         });
 
+        it('breaks an applied_at tie by migration id, so the highest id reverts first', async () => {
+            const { migrator, provider } = createMigrator();
+            migrator.addMigrations([new TestMigration('20240101', 'first'), new TestMigration('20240102', 'second')]);
+            // MariaDB TIMESTAMP has second precision: both rows carry the same time,
+            // and the database returns them in an arbitrary order.
+            const appliedAt = '2024-05-01T10:00:00.000Z';
+            provider.historyRows = [
+                { migration_id: '20240102', migration_name: 'second', applied_at: appliedAt },
+                { migration_id: '20240101', migration_name: 'first', applied_at: appliedAt },
+            ];
+
+            expect(await migrator.revert()).toBe(true);
+
+            expect(provider.events.filter(e => e.startsWith('-- down'))).toEqual(['-- down 20240102']);
+            expect(provider.historyRows.map(r => r.migration_id)).toEqual(['20240101']);
+        });
+
+        it('asks the database for applied_at, then migration_id', async () => {
+            const { migrator, provider } = createMigrator();
+            migrator.addMigration(new TestMigration('20240101', 'first'));
+            await migrator.migrate();
+            await migrator.revert();
+
+            const select = provider.queries.find(q => q.sql.startsWith('SELECT migration_id'));
+            expect(select!.sql).toContain('ORDER BY applied_at, migration_id');
+        });
+
+        it('refuses to revert when an applied migration is not registered, and names it', async () => {
+            const { migrator, provider } = createMigrator();
+            migrator.addMigration(new TestMigration('20240101', 'first'));
+            provider.historyRows = [
+                { migration_id: '20240101', migration_name: 'first', applied_at: '2024-05-01T10:00:00.000Z' },
+                { migration_id: '20240105', migration_name: 'removed', applied_at: '2024-05-02T10:00:00.000Z' },
+            ];
+
+            await expect(migrator.revert()).rejects.toThrow(/not registered: 20240105/);
+
+            expect(provider.events).not.toContain('BEGIN');
+            expect(provider.historyRows.map(r => r.migration_id)).toEqual(['20240101', '20240105']);
+        });
+
         it('rolls back and rethrows when down() fails, keeping the history record', async () => {
             const { migrator, provider } = createMigrator();
             migrator.addMigration(new TestMigration('20240101', 'first'));
@@ -436,6 +477,18 @@ describe('Migrator', () => {
             const downs = provider.events.filter(e => e.startsWith('-- down'));
             expect(downs).toEqual(['-- down 20240103', '-- down 20240102']);
             expect(provider.historyRows.map(r => r.migration_id)).toEqual(['20240101']);
+        });
+
+        it('refuses to revert to a target when an applied migration is not registered', async () => {
+            const { migrator, provider } = createMigrator();
+            migrator.addMigration(new TestMigration('20240101', 'first'));
+            provider.historyRows = [
+                { migration_id: '20240101', migration_name: 'first', applied_at: '2024-05-01T10:00:00.000Z' },
+                { migration_id: '20240105', migration_name: 'removed', applied_at: '2024-05-02T10:00:00.000Z' },
+            ];
+
+            await expect(migrator.revertTo('20240101')).rejects.toThrow(/not registered: 20240105/);
+            expect(provider.events).not.toContain('BEGIN');
         });
 
         it('throws when the target migration is not in the applied list', async () => {

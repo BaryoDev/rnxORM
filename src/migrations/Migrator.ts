@@ -72,17 +72,26 @@ export class Migrator {
 
         const provider = this.context.getProvider();
         const result = await provider.query(
-            `SELECT migration_id, migration_name, applied_at FROM ${Migrator.HISTORY_TABLE} ORDER BY applied_at`
+            `SELECT migration_id, migration_name, applied_at FROM ${Migrator.HISTORY_TABLE} ORDER BY applied_at, migration_id`
         );
 
         // Columns come off the driver as `unknown`: the three drivers disagree
         // on whether a timestamp arrives as a Date or a string, so the value is
         // coerced rather than cast.
-        return result.rows.map(row => ({
+        const records = result.rows.map(row => ({
             migrationId: String(row.migration_id),
             migrationName: String(row.migration_name),
             appliedAt: toDate(row.applied_at)
         }));
+
+        // MariaDB's TIMESTAMP has second precision, so migrations applied in
+        // the same second tie on applied_at. They were applied in id order,
+        // so the id breaks the tie. Sorted here as well, so the order does not
+        // depend on the database honouring ORDER BY the same way.
+        return records.sort(
+            (a, b) =>
+                a.appliedAt.getTime() - b.appliedAt.getTime() || a.migrationId.localeCompare(b.migrationId)
+        );
     }
 
     /**
@@ -141,15 +150,28 @@ export class Migrator {
     }
 
     /**
-     * Get all applied migrations in order
+     * Get all applied migrations in order.
+     *
+     * An applied migration that is not registered cannot be reverted, and
+     * skipping it would make revert() undo an older migration while a newer
+     * one stays applied. So this throws and names the ids. Register the
+     * missing migrations, or delete their rows from the history table if they
+     * were removed on purpose.
+     * @throws when the history holds a migration id that is not registered
      */
     async getAppliedMigrationsOrdered(): Promise<Migration[]> {
         const appliedRecords = await this.getAppliedMigrations();
         const migrationMap = new Map(this.migrations.map(m => [m.id, m]));
 
-        return appliedRecords
-            .map(record => migrationMap.get(record.migrationId))
-            .filter((m): m is Migration => m !== undefined);
+        const unregistered = appliedRecords.filter(r => !migrationMap.has(r.migrationId));
+        if (unregistered.length > 0) {
+            throw new Error(
+                `Applied migration(s) not registered: ${unregistered.map(r => r.migrationId).join(', ')}. ` +
+                `Register them before reverting, or remove their rows from ${Migrator.HISTORY_TABLE}.`
+            );
+        }
+
+        return appliedRecords.map(record => migrationMap.get(record.migrationId) as Migration);
     }
 
     /**

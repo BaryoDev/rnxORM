@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- **Migrations and `ensureCreated()` DDL.** SQL Server `addColumn` emits `ADD`, not `ADD COLUMN`. Migration history is ordered by `applied_at` then id, and `revert()` throws on an applied migration that is not registered instead of skipping it. A type change in `ensureCreated()` keeps NOT NULL (and the MariaDB default), and a failed change is logged with `console.warn` instead of swallowed.
 - **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks. PostgreSQL tables created through `ensureCreated()` with a mixed-case name are now case-sensitive, the same as the migration path.
 - **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
   translator now returns them as text in the select list, so the driver cannot

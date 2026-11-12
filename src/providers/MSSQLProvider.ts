@@ -207,7 +207,7 @@ export class MSSQLProvider implements IDatabaseProvider {
     getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] } {
         return {
             sql: `
-                SELECT COLUMN_NAME as column_name, DATA_TYPE as data_type
+                SELECT COLUMN_NAME as column_name, DATA_TYPE as data_type, IS_NULLABLE as is_nullable
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_NAME = @p0;
             `,

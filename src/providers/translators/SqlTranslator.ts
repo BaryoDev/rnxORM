@@ -13,7 +13,7 @@ import {
     RenameColumnOp,
     RenameTableOp,
 } from '../../core/query/model/DdlOperation';
-import { assertCascadeAction, assertColumnType, assertIdentifierPart } from '../../migrations/DdlIdentifiers';
+import { assertCascadeAction, assertColumnType, assertDefaultExpression, assertIdentifierPart } from '../../migrations/DdlIdentifiers';
 
 const COMPARE_SQL = {
     eq: '=',
@@ -278,11 +278,23 @@ export abstract class SqlTranslator {
         return parts[parts.length - 1];
     }
 
+    /** The words between the table and a new column. T-SQL has no COLUMN keyword here. */
+    protected readonly addColumnKeyword: string = 'ADD COLUMN';
+
     protected renderEnsureAddColumn(table: string, column: string, type: string): string {
-        return `ALTER TABLE ${table} ADD COLUMN ${column} ${type}`;
+        return `ALTER TABLE ${table} ${this.addColumnKeyword} ${column} ${type}`;
     }
 
-    protected abstract renderEnsureAlterColumnType(table: string, column: string, type: string): string;
+    /**
+     * Changes a column's type. `keep` carries what the column has today, for
+     * dialects whose statement replaces the whole definition.
+     */
+    protected abstract renderEnsureAlterColumnType(
+        table: string,
+        column: string,
+        type: string,
+        keep: { nullable?: boolean; defaultSql?: string }
+    ): string;
 
     protected renderDdlBoolean(value: boolean): string {
         return value ? 'TRUE' : 'FALSE';
@@ -348,7 +360,7 @@ export abstract class SqlTranslator {
             case 'addColumn': {
                 const table = name(op.table);
                 const column = name(op.column);
-                let text = `ALTER TABLE ${table} ADD COLUMN ${column} ${assertColumnType(op.type, api)}`;
+                let text = `ALTER TABLE ${table} ${this.addColumnKeyword} ${column} ${assertColumnType(op.type, api)}`;
                 if (op.nullable === false) text += ' NOT NULL';
                 if (op.defaultValue !== undefined) text += ` DEFAULT ${this.renderDdlLiteral(op.defaultValue, api)}`;
                 return one(text);
@@ -422,7 +434,13 @@ export abstract class SqlTranslator {
             case 'ensureAddColumn':
                 return one(this.renderEnsureAddColumn(name(op.table), name(op.column), this.mapType(op.type)));
             case 'ensureAlterColumnType':
-                return one(this.renderEnsureAlterColumnType(name(op.table), name(op.column), this.mapType(op.type)));
+                return one(
+                    this.renderEnsureAlterColumnType(name(op.table), name(op.column), this.mapType(op.type), {
+                        nullable: op.existingNullable,
+                        defaultSql:
+                            op.existingDefault === undefined ? undefined : assertDefaultExpression(op.existingDefault, api),
+                    })
+                );
             default:
                 return assertNever(op);
         }

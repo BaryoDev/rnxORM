@@ -165,6 +165,14 @@ export interface EnsureAlterColumnTypeOp {
     table: string;
     column: string;
     type: string;
+    /**
+     * What the database column has today. MariaDB's MODIFY and SQL Server's
+     * ALTER COLUMN replace the whole definition, so these are repeated to keep
+     * them. Left out when the provider could not report them.
+     */
+    existingNullable?: boolean;
+    /** The column's current default as the database reports it (an SQL expression). */
+    existingDefault?: string;
 }
 
 export type DdlOperation =

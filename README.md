@@ -2226,7 +2226,8 @@ If you change the type of a property (e.g., from `string` to `number`), rnxORM a
 
 1.  **Detection**: It checks if the database column type matches the TypeScript type.
 2.  **Auto-Fix**: It attempts to migrate the column using `ALTER COLUMN ... TYPE ... USING ...`.
-3.  **Failure is silent**: If the existing data does not fit the new type (converting "abc" to integer, for example), the database rejects the change, rnxORM swallows the error, and the column keeps its old type. Nothing is logged, so check the column yourself after a type change.
+3.  **Failure is reported**: If the existing data does not fit the new type (converting "abc" to integer, for example), the database rejects the change, the column keeps its old type, and `ensureCreated()` logs a warning with the table, column and database error, then carries on.
+4.  **NOT NULL and defaults are kept**: MariaDB's `MODIFY COLUMN` and SQL Server's `ALTER COLUMN` replace the whole definition, so rnxORM reads the column's current nullability (and MariaDB's default) and repeats them. A MariaDB default that is not NULL, a number, a quoted string or `CURRENT_TIMESTAMP` is not repeated; the change is skipped with a warning instead of dropping the default.
 
 ## Migrations
 
@@ -2516,6 +2517,8 @@ if (reverted) {
 // Revert all migrations back to and including this one
 await migrator.revertTo('20240115120000');
 ```
+
+History is read ordered by `applied_at`, then by migration id, so migrations applied in the same second (MariaDB `TIMESTAMP` has second precision) revert newest id first. If the history holds an applied migration that is not registered with the migrator, `revert()` and `revertTo()` throw an error naming the ids instead of skipping them. Register the missing migrations, or delete their rows from `__MigrationHistory` if they were removed on purpose.
 
 ### Migration History
 

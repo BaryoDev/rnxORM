@@ -181,7 +181,7 @@ export class MariaDBProvider implements IDatabaseProvider {
     getSchemaColumnsQuery(tableName: string): { sql: string; params: any[] } {
         return {
             sql: `
-                SELECT COLUMN_NAME as column_name, DATA_TYPE as data_type
+                SELECT COLUMN_NAME as column_name, DATA_TYPE as data_type, IS_NULLABLE as is_nullable, COLUMN_DEFAULT as column_default
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_NAME = ? AND TABLE_SCHEMA = DATABASE();
             `,

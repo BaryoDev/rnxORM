@@ -103,6 +103,8 @@ export class MsSqlTranslator extends SqlTranslator {
         return super.renderOrderOperand(operand, model);
     }
 
+    protected readonly addColumnKeyword = 'ADD';
+
     protected quoteQueryPart(part: string): string {
         return `[${part.replace(/]/g, ']]')}]`;
     }
@@ -140,13 +142,17 @@ export class MsSqlTranslator extends SqlTranslator {
                 )`;
     }
 
-    protected renderEnsureAddColumn(table: string, column: string, type: string): string {
-        return `ALTER TABLE ${table} ADD ${column} ${type}`;
-    }
-
-    /** SQL Server has no USING clause, so existing data is not converted. */
-    protected renderEnsureAlterColumnType(table: string, column: string, type: string): string {
-        return `ALTER TABLE ${table} ALTER COLUMN ${column} ${type}`;
+    /**
+     * SQL Server has no USING clause, so existing data is not converted.
+     * ALTER COLUMN makes the column nullable unless NOT NULL is repeated.
+     */
+    protected renderEnsureAlterColumnType(
+        table: string,
+        column: string,
+        type: string,
+        keep: { nullable?: boolean }
+    ): string {
+        return `ALTER TABLE ${table} ALTER COLUMN ${column} ${type}${keep.nullable === false ? ' NOT NULL' : ''}`;
     }
 
     /**
