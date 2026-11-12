@@ -29,7 +29,12 @@ class RowTypesProbe {
 // fresh context, because a context that wrote the row hands back the tracked
 // instance and would hide what the driver returned.
 describe('rows come back in the declared property types', () => {
-    for (const providerName of getTestProviders().filter(p => p !== 'mock')) {
+    const realProviders = getTestProviders().filter(p => p !== 'mock');
+    // The mock provider has no SQL engine. Without a real database the suite
+    // would hold no test, which Jest fails.
+    if (realProviders.length === 0) it.skip('needs a real database (USE_REAL_DB=true)', () => undefined);
+
+    for (const providerName of realProviders) {
         it(`${providerName} reads number, boolean, bigint and string columns as declared`, async () => {
             const writer = new DbContext(createTestProvider(providerName));
             await writer.connect();

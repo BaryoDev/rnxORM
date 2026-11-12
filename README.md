@@ -419,6 +419,12 @@ significant digits loses precision. For exact values declare the property as
 are not available there for plain reads. A column with a `hasConversion`
 converter gets the raw driver value and skips this step.
 
+The property's declared type comes from `emitDecoratorMetadata`. Without it, or
+when the type is a union such as `number | null` (which emits `Object`), a
+`bigint` column becomes a `BigInt` even if the property is typed `number`, and
+`JSON.stringify` throws on it. Declare such columns with a plain `number`,
+`bigint` or `string` property type.
+
 ### Overriding Types
 
 To use a specific database type, pass the `type` option to the `@Column` decorator:
