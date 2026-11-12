@@ -6,9 +6,6 @@ export interface ColumnMetadata {
     propertyName: string;
     columnName: string;
     type: string;
-    /** The property's declared TypeScript type, from `design:type`, when the decorator saw one. */
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-    designType?: Function;
     isPrimaryKey: boolean;
     isNullable: boolean;
     isAutoIncrement?: boolean;
@@ -300,7 +297,6 @@ export class MetadataStorage {
                 propertyName,
                 columnName,
                 type: options.type || existing.type,
-                designType: options.designType ?? existing.designType,
                 isPrimaryKey: options.isPrimaryKey ?? existing.isPrimaryKey,
                 isNullable: options.isNullable ?? existing.isNullable,
                 isAutoIncrement: options.isAutoIncrement ?? existing.isAutoIncrement,
@@ -313,7 +309,6 @@ export class MetadataStorage {
             propertyName,
             columnName: options.columnName || propertyName,
             type: options.type || "text", // Default type, will be inferred later if possible
-            designType: options.designType,
             isPrimaryKey: options.isPrimaryKey || false,
             isNullable: options.isNullable || false,
             isAutoIncrement: options.isAutoIncrement,

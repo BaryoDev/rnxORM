@@ -2,7 +2,6 @@ import { DbContext } from "../DbContext";
 import { DatabaseRow } from "../types";
 import { MetadataStorage, EntityMetadata, ColumnMetadata } from "../MetadataStorage";
 import { EntityState, snapshotEntity } from "../EntityEntry";
-import { convertColumnValue } from "../ColumnConversion";
 
 /**
  * Resolve the (converted) primary key value for a row, using the same
@@ -22,8 +21,6 @@ export function resolvePkValue(
     let pkValue = row[pkColumn.columnName];
     if (pkColumn.hasConversion && pkColumn.convertFromDb) {
         pkValue = pkColumn.convertFromDb(pkValue);
-    } else {
-        pkValue = convertColumnValue(pkColumn, pkValue);
     }
 
     if (pkValue === null || pkValue === undefined) return null;
@@ -61,8 +58,6 @@ export function mapRowToEntity<T>(
 
         if (col.hasConversion && col.convertFromDb) {
             value = col.convertFromDb(value);
-        } else {
-            value = convertColumnValue(col, value);
         }
 
         // Only set non-shadow properties on the entity
