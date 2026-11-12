@@ -554,7 +554,7 @@ describe('SelectTranslator dialect differences', () => {
 
         const normalise = (text: string) =>
             text
-                .replace(/[`\[\]]/g, '"')
+                .replace(/[`[\]]/g, '"')
                 .replace(/\$\d+|@p\d+|\?/g, '#')
                 .replace(/ LIMIT 2 OFFSET 1| OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY/, ' PAGE');
         const normalised = out.map((o) => normalise(o.text));
