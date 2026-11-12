@@ -17,6 +17,7 @@
 ### Fixed
 
 - **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks.
+- **Rows are converted by column type.** Number, boolean and bigint columns read back as the declared property type on every provider, not as driver strings, `BigInt` or 0/1.
 - **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
   translator now returns them as text in the select list, so the driver cannot
   round them to a double. `sum()` and `average()` already parse them back, but

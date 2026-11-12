@@ -37,6 +37,7 @@ export function Column(options: ColumnOptions = {}) {
         MetadataStorage.get().addColumn(target.constructor, propertyName, {
             columnName: options.name || propertyName.toLowerCase(),
             type,
+            designType,
             isNullable: options.nullable,
         });
     };
@@ -53,7 +54,8 @@ export function PrimaryKey() {
             columnName: propertyName.toLowerCase(),
             isPrimaryKey: true,
             isAutoIncrement: type === "integer",
-            type
+            type,
+            designType
         });
     };
 }
