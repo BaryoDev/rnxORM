@@ -395,6 +395,36 @@ quantity!: number;
 Primary keys are unaffected: `@PrimaryKey()` on a `number` is still an
 auto-incrementing integer.
 
+### Values read back
+
+The drivers disagree about numeric types (pg returns `NUMERIC` and `BIGINT` as
+strings, MariaDB returns `DECIMAL` as a string, `BIGINT` as a `BigInt` and
+`TINYINT(1)` as 0 or 1). When a row is mapped to an entity, each column is
+converted by its declared type, so the same entity holds the same runtime types
+on every provider:
+
+| Column type | Property type | Value you get |
+|-------------|---------------|---------------|
+| `decimal`, `numeric`, `float`, `double`, integer types | `number` | `number` |
+| `decimal`, `numeric`, integer types | `string` | the driver's text |
+| `boolean`, `bit`, `tinyint(1)` | `boolean` | `boolean` |
+| `bigint` | `bigint` (or undeclared) | `bigint` |
+| `bigint` | `number` | `number`, exact only up to 2^53 |
+| `bigint` | `string` | exact text |
+
+A `number` property holds a double, so a `DECIMAL` with more than about 15
+significant digits loses precision. For exact values declare the property as
+`string` (or `bigint` on a `bigint` column). SQL Server's driver parses
+`DECIMAL` into a double before the ORM sees it, so exact digits beyond that
+are not available there for plain reads. A column with a `hasConversion`
+converter gets the raw driver value and skips this step.
+
+The property's declared type comes from `emitDecoratorMetadata`. Without it, or
+when the type is a union such as `number | null` (which emits `Object`), a
+`bigint` column becomes a `BigInt` even if the property is typed `number`, and
+`JSON.stringify` throws on it. Declare such columns with a plain `number`,
+`bigint` or `string` property type.
+
 ### Overriding Types
 
 To use a specific database type, pass the `type` option to the `@Column` decorator:
