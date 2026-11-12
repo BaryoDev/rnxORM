@@ -314,6 +314,61 @@ describe('ensureCreated DDL translation', () => {
             );
         });
 
+        it('repeats NOT NULL and the default where the statement replaces the whole definition', () => {
+            expectPerDialect(
+                {
+                    op: 'ensureAlterColumnType',
+                    table: 't',
+                    column: 'name',
+                    type: 'text',
+                    existingNullable: false,
+                    existingDefault: "'x'",
+                },
+                {
+                    postgresql: 'ALTER TABLE t ALTER COLUMN name TYPE TEXT USING name::TEXT',
+                    mssql: 'ALTER TABLE "t" ALTER COLUMN "name" NVARCHAR(MAX) NOT NULL',
+                    mariadb: 'ALTER TABLE "t" MODIFY COLUMN "name" TEXT NOT NULL DEFAULT \'x\'',
+                }
+            );
+        });
+
+        it('repeats AUTO_INCREMENT on MariaDB and accepts a backslash-escaped default', () => {
+            expect(
+                render('mariadb', {
+                    op: 'ensureAlterColumnType',
+                    table: 't',
+                    column: 'n',
+                    type: 'integer',
+                    existingNullable: false,
+                    existingDefault: "'it\\'s'",
+                    existingAutoIncrement: true,
+                })
+            ).toBe("ALTER TABLE `t` MODIFY COLUMN `n` INT NOT NULL DEFAULT 'it\\'s' AUTO_INCREMENT");
+        });
+
+        it('leaves a nullable column nullable', () => {
+            expectPerDialect(
+                { op: 'ensureAlterColumnType', table: 't', column: 'name', type: 'text', existingNullable: true },
+                {
+                    postgresql: 'ALTER TABLE t ALTER COLUMN name TYPE TEXT USING name::TEXT',
+                    mssql: 'ALTER TABLE "t" ALTER COLUMN "name" NVARCHAR(MAX)',
+                    mariadb: 'ALTER TABLE "t" MODIFY COLUMN "name" TEXT',
+                }
+            );
+        });
+
+        it('refuses a default it cannot repeat safely instead of dropping it', () => {
+            expect(() =>
+                translators.mariadb.translateDdl({
+                    op: 'ensureAlterColumnType',
+                    table: 't',
+                    column: 'name',
+                    type: 'text',
+                    existingDefault: "uuid(); DROP TABLE t",
+                })
+            ).toThrow(/cannot be repeated safely/);
+        });
+
         it('repeats the mapped type in the PostgreSQL cast', () => {
             expectPerDialect(
                 { op: 'ensureAlterColumnType', table: 't', column: 'name', type: 'varchar(20)' },

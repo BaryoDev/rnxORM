@@ -58,8 +58,17 @@ export class MariaDbTranslator extends SqlTranslator {
         return [`ALTER TABLE ${table} MODIFY COLUMN ${column} ${type}${op.nullable === false ? ' NOT NULL' : ''}`];
     }
 
-    protected renderEnsureAlterColumnType(table: string, column: string, type: string): string {
-        return `ALTER TABLE ${table} MODIFY COLUMN ${column} ${type}`;
+    /** MODIFY replaces the whole definition, so NOT NULL, the default and AUTO_INCREMENT are repeated. */
+    protected renderEnsureAlterColumnType(
+        table: string,
+        column: string,
+        type: string,
+        keep: { nullable?: boolean; defaultSql?: string; autoIncrement?: boolean }
+    ): string {
+        const notNull = keep.nullable === false ? ' NOT NULL' : '';
+        const dflt = keep.defaultSql === undefined ? '' : ` DEFAULT ${keep.defaultSql}`;
+        const auto = keep.autoIncrement ? ' AUTO_INCREMENT' : '';
+        return `ALTER TABLE ${table} MODIFY COLUMN ${column} ${type}${notNull}${dflt}${auto}`;
     }
 
     protected renderRenameColumn(_op: RenameColumnOp, table: string, from: string, to: string): string {

@@ -94,6 +94,7 @@ export class PostgresTranslator extends SqlTranslator {
         return statements;
     }
 
+    /** ALTER COLUMN TYPE keeps NOT NULL and the default, so `keep` is not needed. */
     protected renderEnsureAlterColumnType(table: string, column: string, type: string): string {
         return `ALTER TABLE ${table} ALTER COLUMN ${column} TYPE ${type} USING ${column}::${type}`;
     }

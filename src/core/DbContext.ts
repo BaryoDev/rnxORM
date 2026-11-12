@@ -923,19 +923,31 @@ export class DbContext {
             const schemaQuery = this.provider.getSchemaColumnsQuery(entity.tableName);
             const existingColumnsRes = await this.query(schemaQuery.sql, schemaQuery.params);
 
-            // information_schema always reports these two as strings.
+            // information_schema always reports the name and type as strings.
+            // MariaDB and SQL Server also report nullability, and MariaDB the
+            // default, which a type change has to repeat to keep.
             const existingColumns = new Map(
                 existingColumnsRes.rows.map((r) => [
                     String(r.column_name).toLowerCase(),
-                    String(r.data_type).toLowerCase()
+                    {
+                        type: String(r.data_type).toLowerCase(),
+                        nullable: r.is_nullable === undefined || r.is_nullable === null
+                            ? undefined
+                            : String(r.is_nullable).toUpperCase() === 'YES',
+                        defaultSql: r.column_default === undefined || r.column_default === null
+                            ? undefined
+                            : String(r.column_default),
+                        autoIncrement: String(r.extra ?? '').toLowerCase().includes('auto_increment'),
+                    },
                 ])
             );
 
             for (const col of entity.columns) {
                 const colName = col.columnName.toLowerCase();
-                const existingType = existingColumns.get(colName);
+                const existing = existingColumns.get(colName);
+                const existingType = existing?.type;
 
-                if (!existingType) {
+                if (existing === undefined || existingType === undefined) {
                     await this.runDdl({
                         op: 'ensureAddColumn',
                         table: entity.tableName,
@@ -950,9 +962,15 @@ export class DbContext {
                                 table: entity.tableName,
                                 column: col.columnName,
                                 type: col.type,
+                                existingNullable: existing.nullable,
+                                existingDefault: existing.defaultSql,
+                                existingAutoIncrement: existing.autoIncrement || undefined,
                             });
-                        } catch {
-                            // Type migration failed. Data may be incompatible
+                        } catch (error: any) {
+                            // Data may be incompatible, or the column's default could not be repeated.
+                            console.warn(
+                                `Warning: Could not change the type of ${entity.tableName}.${col.columnName} to ${col.type}: ${error.message}`
+                            );
                         }
                     }
                 }

@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- **Migrations and `ensureCreated()` DDL.** SQL Server `addColumn` emits `ADD`, not `ADD COLUMN`. Migration history is ordered by `applied_at` then id. A type change in `ensureCreated()` keeps NOT NULL, the MariaDB default and AUTO_INCREMENT, and a failed change is logged with `console.warn` instead of swallowed.
 - **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks.
 - **Rows are converted by column type.** Number, boolean and bigint columns read back as the declared property type on every provider, not as driver strings, `BigInt` or 0/1.
 - **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
@@ -30,6 +31,8 @@
 ### Changed
 
 - **Breaking on PostgreSQL: mixed-case names from `ensureCreated()` are now case-sensitive.** Queries and `ensureCreated()` quote every identifier. An explicit `@Entity('Orders')` or `@Column({ name: 'Label' })` mixed-case name that an earlier version created through `ensureCreated()` is stored folded to lower case (`orders`, `label`), so the quoted query no longer finds it. Rename it in the entity to the lower-case form, or rename the table or column in the database. Default names are lower-cased by the decorators and are unaffected.
+
+- **Breaking for renamed or removed migrations: `revert()`, `revertTo()` and `getAppliedMigrationsOrdered()` throw on an applied migration that is not registered.** They used to skip it, so `revert()` undid an older migration while a newer one stayed applied. The error names the ids. Register the migration, or delete its row from `__MigrationHistory` if it was removed on purpose.
 
 ### Breaking
 

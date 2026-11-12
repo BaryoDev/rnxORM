@@ -84,7 +84,7 @@ describe('DDL translation', () => {
                 { op: 'addColumn', table: 'users', column: 'age', type: 'integer', nullable: false, defaultValue: 0 },
                 {
                     postgresql: ['ALTER TABLE users ADD COLUMN age integer NOT NULL DEFAULT 0'],
-                    mssql: ['ALTER TABLE [users] ADD COLUMN [age] integer NOT NULL DEFAULT 0'],
+                    mssql: ['ALTER TABLE [users] ADD [age] integer NOT NULL DEFAULT 0'],
                     mariadb: ['ALTER TABLE `users` ADD COLUMN `age` integer NOT NULL DEFAULT 0'],
                 }
             );
@@ -93,10 +93,16 @@ describe('DDL translation', () => {
         it('renders a boolean default as 1/0 on MSSQL and TRUE/FALSE elsewhere', () => {
             const on = { op: 'addColumn', table: 't', column: 'c', type: 'bit', defaultValue: true } as const;
             const off = { ...on, defaultValue: false };
-            expect(texts(translators.mssql, on)).toEqual(['ALTER TABLE [t] ADD COLUMN [c] bit DEFAULT 1']);
-            expect(texts(translators.mssql, off)).toEqual(['ALTER TABLE [t] ADD COLUMN [c] bit DEFAULT 0']);
+            expect(texts(translators.mssql, on)).toEqual(['ALTER TABLE [t] ADD [c] bit DEFAULT 1']);
+            expect(texts(translators.mssql, off)).toEqual(['ALTER TABLE [t] ADD [c] bit DEFAULT 0']);
             expect(texts(translators.postgresql, on)).toEqual(['ALTER TABLE t ADD COLUMN c bit DEFAULT TRUE']);
             expect(texts(translators.mariadb, off)).toEqual(['ALTER TABLE `t` ADD COLUMN `c` bit DEFAULT FALSE']);
+        });
+
+        it('never emits COLUMN after ADD on SQL Server, which T-SQL rejects', () => {
+            const text = texts(translators.mssql, { op: 'addColumn', table: 't', column: 'c', type: 'int' })[0];
+            expect(text).toBe('ALTER TABLE [t] ADD [c] int');
+            expect(text).not.toContain('ADD COLUMN');
         });
 
         it('doubles quotes in a string default so it cannot close the literal', () => {
