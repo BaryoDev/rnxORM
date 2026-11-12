@@ -31,7 +31,7 @@ describe('Seed insert with an explicit auto-increment key', () => {
         const db = new DbContext(provider);
         await db.connect();
         await db.ensureCreated();
-        return provider.calls.map((c) => c.sql).filter((s) => s.includes('INSERT INTO "seed_roles"'));
+        return provider.calls.map((c) => c.sql).filter((s) => /INSERT INTO \W?seed_roles/.test(s));
     }
 
     it('wraps the insert in IDENTITY_INSERT on mssql', async () => {

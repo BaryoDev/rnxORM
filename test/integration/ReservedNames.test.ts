@@ -40,7 +40,12 @@ async function dropTables(db: DbContext): Promise<void> {
 }
 
 describe('entities named after reserved words', () => {
-    for (const providerName of getTestProviders().filter(p => p !== 'mock')) {
+    const realProviders = getTestProviders().filter(p => p !== 'mock');
+    // The mock provider has no SQL engine. Without a real database the suite
+    // would hold no test, which Jest fails.
+    if (realProviders.length === 0) it.skip('needs a real database (USE_REAL_DB=true)', () => undefined);
+
+    for (const providerName of realProviders) {
         describe(providerName, () => {
             let db: DbContext;
 

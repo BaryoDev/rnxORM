@@ -16,8 +16,8 @@
 
 ### Fixed
 
-- **Migrations and `ensureCreated()` DDL.** SQL Server `addColumn` emits `ADD`, not `ADD COLUMN`. Migration history is ordered by `applied_at` then id, and `revert()` throws on an applied migration that is not registered instead of skipping it. A type change in `ensureCreated()` keeps NOT NULL (and the MariaDB default), and a failed change is logged with `console.warn` instead of swallowed.
-- **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks. PostgreSQL tables created through `ensureCreated()` with a mixed-case name are now case-sensitive, the same as the migration path.
+- **Migrations and `ensureCreated()` DDL.** SQL Server `addColumn` emits `ADD`, not `ADD COLUMN`. Migration history is ordered by `applied_at` then id. A type change in `ensureCreated()` keeps NOT NULL, the MariaDB default and AUTO_INCREMENT, and a failed change is logged with `console.warn` instead of swallowed.
+- **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks.
 - **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
   translator now returns them as text in the select list, so the driver cannot
   round them to a double. `sum()` and `average()` already parse them back, but
@@ -26,6 +26,12 @@
   that could lose digits. HAVING and ORDER BY still compare the number.
 - **SQL Server AVG over an integer column keeps its fraction.** The average of
   1 and 2 is now 1.5, as on PostgreSQL and MariaDB. It used to be 1.
+
+### Changed
+
+- **Breaking on PostgreSQL: mixed-case names from `ensureCreated()` are now case-sensitive.** Queries and `ensureCreated()` quote every identifier. An explicit `@Entity('Orders')` or `@Column({ name: 'Label' })` mixed-case name that an earlier version created through `ensureCreated()` is stored folded to lower case (`orders`, `label`), so the quoted query no longer finds it. Rename it in the entity to the lower-case form, or rename the table or column in the database. Default names are lower-cased by the decorators and are unaffected.
+
+- **Breaking for renamed or removed migrations: `revert()`, `revertTo()` and `getAppliedMigrationsOrdered()` throw on an applied migration that is not registered.** They used to skip it, so `revert()` undid an older migration while a newer one stayed applied. The error names the ids. Register the migration, or delete its row from `__MigrationHistory` if it was removed on purpose.
 
 ### Breaking
 
