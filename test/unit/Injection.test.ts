@@ -266,13 +266,13 @@ describe('query API rejects untrusted identifiers end-to-end', () => {
     it('orderByDescending(selector) maps the column and sorts DESC', async () => {
         const { db, provider } = makeDb();
         await db.set(InjProduct).orderByDescending(p => p.price).toList();
-        expect(provider.calls[0].sql).toContain('ORDER BY unit_price DESC');
+        expect(provider.calls[0].sql).toContain('ORDER BY "unit_price" DESC');
     });
 
     it('select().orderBy(selector) maps the column', async () => {
         const { db, provider } = makeDb();
         await db.set(InjProduct).select(p => p.price).orderBy(p => p.price).toList();
-        expect(provider.calls[0].sql).toContain('ORDER BY unit_price ASC');
+        expect(provider.calls[0].sql).toContain('ORDER BY "unit_price" ASC');
     });
 
     it('a nested or method-call selector is rejected', () => {
@@ -300,7 +300,7 @@ describe('query API rejects untrusted identifiers end-to-end', () => {
     it('orderBy() accepts a selector', async () => {
         const { db, provider } = makeDb();
         await db.set(InjProduct).orderBy(p => p.price).toList();
-        expect(provider.lastCall!.sql).toContain('ORDER BY unit_price ASC');
+        expect(provider.lastCall!.sql).toContain('ORDER BY "unit_price" ASC');
     });
 
     it('having() rejects non-aggregate expressions', () => {
@@ -313,13 +313,13 @@ describe('query API rejects untrusted identifiers end-to-end', () => {
     it('where() resolves a renamed property to its mapped column', async () => {
         const { db, provider } = makeDb();
         await db.set(InjProduct).where('price', '>', 10).toList();
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products WHERE unit_price > $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "inj_products" WHERE "unit_price" > $1');
     });
 
     it('keyword operators are normalized into SQL', async () => {
         const { db, provider } = makeDb();
         await db.set(InjProduct).where('name', 'like', '%a%').toList();
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products WHERE name LIKE $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "inj_products" WHERE "name" LIKE $1');
     });
 });
 
@@ -378,7 +378,7 @@ describe('skip()/take() reject non-integer payloads end-to-end (C1)', () => {
         await db.set(InjProduct).skip(5).take(10).toList();
         // (The double space before LIMIT is the pre-existing shape of a
         // paginated query with no WHERE/ORDER BY clause.)
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM inj_products LIMIT 10 OFFSET 5');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "inj_products" LIMIT 10 OFFSET 5');
     });
 });
 
@@ -420,6 +420,6 @@ describe('projection aliases (#31)', () => {
     it('still allows ordinary aliases', async () => {
         const { db, provider } = makeDb();
         await db.set(InjProduct).select(p => ({ label: p.name })).toList();
-        expect(provider.lastCall!.sql).toBe('SELECT name AS label FROM inj_products');
+        expect(provider.lastCall!.sql).toBe('SELECT "name" AS "label" FROM "inj_products"');
     });
 });

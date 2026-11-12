@@ -55,22 +55,34 @@ async function captured(dialect: CaptureDialect): Promise<string[]> {
 
 const MSSQL_GUARD = (table: string) => `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${table}')\n                `;
 
+/** SQL Server and MariaDB always quote. Their expected text writes quoted names with double quotes. */
+const dq = (dialect: 'mssql' | 'mariadb', text: string) =>
+    text.replace(/"([^"]+)"/g, (_m, name: string) => (dialect === 'mssql' ? `[${name}]` : `\`${name}\``));
+
 const FK =
     'ALTER TABLE wt_posts ADD CONSTRAINT fk_wt_posts_authorid FOREIGN KEY (authorid) REFERENCES wt_users(uid) ON DELETE SET NULL ON UPDATE CASCADE';
 const INDEX_PLAIN = 'CREATE INDEX idx_wt_users_name_email ON wt_users (name, email)';
 const INDEX_UNIQUE = 'CREATE UNIQUE INDEX ux_wt_users_email ON wt_users (email)';
 const UNIQUE = 'ALTER TABLE wt_users ADD CONSTRAINT uq_wt_users_name_email UNIQUE (name, email)';
 
-const joinTable = (type: string, pad: string, close: string) =>
-    [
-        `CREATE TABLE ${close === '        )' ? 'IF NOT EXISTS ' : ''}wt_post_user (`,
-        `${pad}post_ref ${type} NOT NULL,`,
-        `${pad}user_ref ${type} NOT NULL,`,
-        `${pad}PRIMARY KEY (post_ref, user_ref),`,
-        `${pad}FOREIGN KEY (post_ref) REFERENCES wt_posts(pid) ON DELETE SET NULL,`,
-        `${pad}FOREIGN KEY (user_ref) REFERENCES wt_users(uid) ON DELETE SET NULL`,
+const FK_Q =
+    'ALTER TABLE "wt_posts" ADD CONSTRAINT "fk_wt_posts_authorid" FOREIGN KEY ("authorid") REFERENCES "wt_users"("uid") ON DELETE SET NULL ON UPDATE CASCADE';
+const INDEX_PLAIN_Q = 'CREATE INDEX "idx_wt_users_name_email" ON "wt_users" ("name", "email")';
+const INDEX_UNIQUE_Q = 'CREATE UNIQUE INDEX "ux_wt_users_email" ON "wt_users" ("email")';
+const UNIQUE_Q = 'ALTER TABLE "wt_users" ADD CONSTRAINT "uq_wt_users_name_email" UNIQUE ("name", "email")';
+
+const joinTable = (type: string, pad: string, close: string, quoted = false) => {
+    const q = (n: string) => (quoted ? `"${n}"` : n);
+    return [
+        `CREATE TABLE ${close === '        )' ? 'IF NOT EXISTS ' : ''}${q('wt_post_user')} (`,
+        `${pad}${q('post_ref')} ${type} NOT NULL,`,
+        `${pad}${q('user_ref')} ${type} NOT NULL,`,
+        `${pad}PRIMARY KEY (${q('post_ref')}, ${q('user_ref')}),`,
+        `${pad}FOREIGN KEY (${q('post_ref')}) REFERENCES ${q('wt_posts')}(${q('pid')}) ON DELETE SET NULL,`,
+        `${pad}FOREIGN KEY (${q('user_ref')}) REFERENCES ${q('wt_users')}(${q('uid')}) ON DELETE SET NULL`,
         close,
     ].join('\n');
+};
 
 describe('ensureCreated hands the model to the DDL translator', () => {
     it('postgresql', async () => {
@@ -91,48 +103,51 @@ describe('ensureCreated hands the model to the DDL translator', () => {
     });
 
     it('mssql', async () => {
-        expect(await captured('mssql')).toEqual([
+        const expected = [
             MSSQL_GUARD('wt_users') +
-                'CREATE TABLE wt_users (uid INT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(MAX), email NVARCHAR(50) NOT NULL);',
-            MSSQL_GUARD('wt_posts') + 'CREATE TABLE wt_posts (pid INT IDENTITY(1,1) PRIMARY KEY, authorid INT NOT NULL);',
+                'CREATE TABLE "wt_users" ("uid" INT IDENTITY(1,1) PRIMARY KEY, "name" NVARCHAR(MAX), "email" NVARCHAR(50) NOT NULL);',
+            MSSQL_GUARD('wt_posts') +
+                'CREATE TABLE "wt_posts" ("pid" INT IDENTITY(1,1) PRIMARY KEY, "authorid" INT NOT NULL);',
             MSSQL_GUARD('wt_post_user') +
                 [
-                    'CREATE TABLE wt_post_user (',
+                    'CREATE TABLE "wt_post_user" (',
                     ...[
-                        'post_ref INT NOT NULL,',
-                        'user_ref INT NOT NULL,',
-                        'PRIMARY KEY (post_ref, user_ref),',
-                        'FOREIGN KEY (post_ref) REFERENCES wt_posts(pid) ON DELETE SET NULL,',
-                        'FOREIGN KEY (user_ref) REFERENCES wt_users(uid) ON DELETE SET NULL',
+                        '"post_ref" INT NOT NULL,',
+                        '"user_ref" INT NOT NULL,',
+                        'PRIMARY KEY ("post_ref", "user_ref"),',
+                        'FOREIGN KEY ("post_ref") REFERENCES "wt_posts"("pid") ON DELETE SET NULL,',
+                        'FOREIGN KEY ("user_ref") REFERENCES "wt_users"("uid") ON DELETE SET NULL',
                     ].map((l) => ' '.repeat(20) + l),
                     ' '.repeat(16) + ')',
                 ].join('\n'),
-            FK,
-            INDEX_PLAIN,
-            INDEX_UNIQUE,
-            UNIQUE,
-            'ALTER TABLE wt_users ADD uid INT',
-            'ALTER TABLE wt_users ADD name NVARCHAR(MAX)',
-            'ALTER TABLE wt_users ADD email NVARCHAR(50)',
-            'ALTER TABLE wt_posts ADD pid INT',
-            'ALTER TABLE wt_posts ADD authorid INT',
-        ]);
+            FK_Q,
+            INDEX_PLAIN_Q,
+            INDEX_UNIQUE_Q,
+            UNIQUE_Q,
+            'ALTER TABLE "wt_users" ADD "uid" INT',
+            'ALTER TABLE "wt_users" ADD "name" NVARCHAR(MAX)',
+            'ALTER TABLE "wt_users" ADD "email" NVARCHAR(50)',
+            'ALTER TABLE "wt_posts" ADD "pid" INT',
+            'ALTER TABLE "wt_posts" ADD "authorid" INT',
+        ].map((text) => dq('mssql', text));
+        expect(await captured('mssql')).toEqual(expected);
     });
 
     it('mariadb', async () => {
-        expect(await captured('mariadb')).toEqual([
-            'CREATE TABLE IF NOT EXISTS wt_users (uid INT AUTO_INCREMENT PRIMARY KEY, name TEXT, email VARCHAR(50) NOT NULL);',
-            'CREATE TABLE IF NOT EXISTS wt_posts (pid INT AUTO_INCREMENT PRIMARY KEY, authorid INT NOT NULL);',
-            joinTable('INT', ' '.repeat(12), '        )'),
-            FK,
-            INDEX_PLAIN,
-            INDEX_UNIQUE,
-            UNIQUE,
-            'ALTER TABLE wt_users ADD COLUMN uid INT',
-            'ALTER TABLE wt_users ADD COLUMN name TEXT',
-            'ALTER TABLE wt_users ADD COLUMN email VARCHAR(50)',
-            'ALTER TABLE wt_posts ADD COLUMN pid INT',
-            'ALTER TABLE wt_posts ADD COLUMN authorid INT',
-        ]);
+        const expected = [
+            'CREATE TABLE IF NOT EXISTS "wt_users" ("uid" INT AUTO_INCREMENT PRIMARY KEY, "name" TEXT, "email" VARCHAR(50) NOT NULL);',
+            'CREATE TABLE IF NOT EXISTS "wt_posts" ("pid" INT AUTO_INCREMENT PRIMARY KEY, "authorid" INT NOT NULL);',
+            joinTable('INT', ' '.repeat(12), '        )', true),
+            FK_Q,
+            INDEX_PLAIN_Q,
+            INDEX_UNIQUE_Q,
+            UNIQUE_Q,
+            'ALTER TABLE "wt_users" ADD COLUMN "uid" INT',
+            'ALTER TABLE "wt_users" ADD COLUMN "name" TEXT',
+            'ALTER TABLE "wt_users" ADD COLUMN "email" VARCHAR(50)',
+            'ALTER TABLE "wt_posts" ADD COLUMN "pid" INT',
+            'ALTER TABLE "wt_posts" ADD COLUMN "authorid" INT',
+        ].map((text) => dq('mariadb', text));
+        expect(await captured('mariadb')).toEqual(expected);
     });
 });

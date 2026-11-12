@@ -21,9 +21,15 @@ function render(dialect: Dialect, op: DdlOperation): string {
     return statements[0].text;
 }
 
+/** SQL Server and MariaDB always quote. Their expected text writes quoted names with double quotes. */
+function dialectQuotes(text: string, dialect: Dialect): string {
+    if (dialect === 'postgresql') return text;
+    return text.replace(/"([^"]+)"/g, (_m, name: string) => (dialect === 'mssql' ? `[${name}]` : `\`${name}\``));
+}
+
 function expectPerDialect(op: DdlOperation, expected: Record<Dialect, string>): void {
     for (const dialect of dialects) {
-        expect(render(dialect, op)).toBe(expected[dialect]);
+        expect(render(dialect, op)).toBe(dialectQuotes(expected[dialect], dialect));
     }
 }
 
@@ -57,9 +63,9 @@ describe('ensureCreated DDL translation', () => {
                         'CREATE TABLE IF NOT EXISTS t (id SERIAL PRIMARY KEY, name TEXT, email VARCHAR(50) NOT NULL, price DECIMAL(18,2) NOT NULL, ok BOOLEAN, data JSONB NOT NULL);',
                     mssql:
                         MSSQL_GUARD('t') +
-                        'CREATE TABLE t (id INT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(MAX), email NVARCHAR(50) NOT NULL, price DECIMAL(18,2) NOT NULL, ok BIT, data NVARCHAR(MAX) NOT NULL);',
+                        'CREATE TABLE "t" ("id" INT IDENTITY(1,1) PRIMARY KEY, "name" NVARCHAR(MAX), "email" NVARCHAR(50) NOT NULL, "price" DECIMAL(18,2) NOT NULL, "ok" BIT, "data" NVARCHAR(MAX) NOT NULL);',
                     mariadb:
-                        'CREATE TABLE IF NOT EXISTS t (id INT AUTO_INCREMENT PRIMARY KEY, name TEXT, email VARCHAR(50) NOT NULL, price DECIMAL(18,2) NOT NULL, ok TINYINT(1), data JSON NOT NULL);',
+                        'CREATE TABLE IF NOT EXISTS "t" ("id" INT AUTO_INCREMENT PRIMARY KEY, "name" TEXT, "email" VARCHAR(50) NOT NULL, "price" DECIMAL(18,2) NOT NULL, "ok" TINYINT(1), "data" JSON NOT NULL);',
                 }
             );
         });
@@ -69,8 +75,8 @@ describe('ensureCreated DDL translation', () => {
                 { op: 'ensureTable', table: 't', columns: [col('code', 'varchar(10)', true, false), col('n', 'integer', false, false)] },
                 {
                     postgresql: 'CREATE TABLE IF NOT EXISTS t (code VARCHAR(10) PRIMARY KEY, n INTEGER NOT NULL);',
-                    mssql: MSSQL_GUARD('t') + 'CREATE TABLE t (code NVARCHAR(10) PRIMARY KEY, n INT NOT NULL);',
-                    mariadb: 'CREATE TABLE IF NOT EXISTS t (code VARCHAR(10) PRIMARY KEY, n INT NOT NULL);',
+                    mssql: MSSQL_GUARD('t') + 'CREATE TABLE "t" ("code" NVARCHAR(10) PRIMARY KEY, "n" INT NOT NULL);',
+                    mariadb: 'CREATE TABLE IF NOT EXISTS "t" ("code" VARCHAR(10) PRIMARY KEY, "n" INT NOT NULL);',
                 }
             );
         });
@@ -80,8 +86,8 @@ describe('ensureCreated DDL translation', () => {
                 { op: 'ensureTable', table: 't', columns: [col('id', 'integer', true, false), col('note', 'text', false, true)] },
                 {
                     postgresql: 'CREATE TABLE IF NOT EXISTS t (id SERIAL PRIMARY KEY, note TEXT);',
-                    mssql: MSSQL_GUARD('t') + 'CREATE TABLE t (id INT IDENTITY(1,1) PRIMARY KEY, note NVARCHAR(MAX));',
-                    mariadb: 'CREATE TABLE IF NOT EXISTS t (id INT AUTO_INCREMENT PRIMARY KEY, note TEXT);',
+                    mssql: MSSQL_GUARD('t') + 'CREATE TABLE "t" ("id" INT IDENTITY(1,1) PRIMARY KEY, "note" NVARCHAR(MAX));',
+                    mariadb: 'CREATE TABLE IF NOT EXISTS "t" ("id" INT AUTO_INCREMENT PRIMARY KEY, "note" TEXT);',
                 }
             );
         });
@@ -100,17 +106,44 @@ describe('ensureCreated DDL translation', () => {
                     postgresql: 'CREATE TABLE IF NOT EXISTS t (a SERIAL PRIMARY KEY, b SERIAL PRIMARY KEY, c TEXT);',
                     mssql:
                         MSSQL_GUARD('t') +
-                        'CREATE TABLE t (a INT IDENTITY(1,1) PRIMARY KEY, b INT IDENTITY(1,1) PRIMARY KEY, c NVARCHAR(MAX));',
+                        'CREATE TABLE "t" ("a" INT IDENTITY(1,1) PRIMARY KEY, "b" INT IDENTITY(1,1) PRIMARY KEY, "c" NVARCHAR(MAX));',
                     mariadb:
-                        'CREATE TABLE IF NOT EXISTS t (a INT AUTO_INCREMENT PRIMARY KEY, b INT AUTO_INCREMENT PRIMARY KEY, c TEXT);',
+                        'CREATE TABLE IF NOT EXISTS "t" ("a" INT AUTO_INCREMENT PRIMARY KEY, "b" INT AUTO_INCREMENT PRIMARY KEY, "c" TEXT);',
                 }
             );
         });
 
-        it('does not quote or validate names', () => {
+        it('quotes each part of a schema-qualified name and checks the unqualified name in the guard', () => {
             const text = render('mssql', { op: 'ensureTable', table: 'dbo.t', columns: [col('id', 'integer', true, false)] });
-            expect(text).toContain("name = 'dbo.t'");
-            expect(text).toContain('CREATE TABLE dbo.t (');
+            expect(text).toContain("name = 't'");
+            expect(text).toContain('CREATE TABLE [dbo].[t] (');
+        });
+
+        it('quotes names that are keywords, and keeps mixed case on PostgreSQL', () => {
+            const cols = [col('id', 'integer', true, false), col('order', 'text'), col('userId', 'integer')];
+            expectPerDialect(
+                { op: 'ensureTable', table: 'Order', columns: cols },
+                {
+                    postgresql: 'CREATE TABLE IF NOT EXISTS "Order" (id SERIAL PRIMARY KEY, "order" TEXT, "userId" INTEGER);',
+                    mssql:
+                        MSSQL_GUARD('Order') +
+                        'CREATE TABLE "Order" ("id" INT IDENTITY(1,1) PRIMARY KEY, "order" NVARCHAR(MAX), "userId" INT);',
+                    mariadb:
+                        'CREATE TABLE IF NOT EXISTS "Order" ("id" INT AUTO_INCREMENT PRIMARY KEY, "order" TEXT, "userId" INT);',
+                }
+            );
+        });
+
+        it('rejects a name that is not a plain identifier', () => {
+            for (const dialect of dialects) {
+                expect(() =>
+                    translators[dialect].translateDdl({
+                        op: 'ensureTable',
+                        table: "o'x",
+                        columns: [col('id', 'integer', true, false)],
+                    })
+                ).toThrow(/not a valid SQL identifier/);
+            }
         });
     });
 
@@ -123,30 +156,32 @@ describe('ensureCreated DDL translation', () => {
             referencedTable1: 'students',
             referencedTable2: 'courses',
         };
-        const lines = (type: string, ref1: string, ref2: string, action: string, indent: string) =>
-            [
-                `student_id ${type} NOT NULL,`,
-                `course_id ${type} NOT NULL,`,
-                'PRIMARY KEY (student_id, course_id),',
-                `FOREIGN KEY (student_id) REFERENCES students(${ref1}) ON DELETE ${action},`,
-                `FOREIGN KEY (course_id) REFERENCES courses(${ref2}) ON DELETE ${action}`,
+        const lines = (type: string, ref1: string, ref2: string, action: string, indent: string, quoted = true) => {
+            const q = (n: string) => (quoted ? `"${n}"` : n);
+            return [
+                `${q('student_id')} ${type} NOT NULL,`,
+                `${q('course_id')} ${type} NOT NULL,`,
+                `PRIMARY KEY (${q('student_id')}, ${q('course_id')}),`,
+                `FOREIGN KEY (${q('student_id')}) REFERENCES ${q('students')}(${q(ref1)}) ON DELETE ${action},`,
+                `FOREIGN KEY (${q('course_id')}) REFERENCES ${q('courses')}(${q(ref2)}) ON DELETE ${action}`,
             ]
                 .map((l) => indent + l)
                 .join('\n');
+        };
 
         it('defaults referenced columns to id and the delete action to CASCADE', () => {
             expectPerDialect(base, {
                 postgresql:
                     'CREATE TABLE IF NOT EXISTS student_course (\n' +
-                    lines('INTEGER', 'id', 'id', 'CASCADE', ' '.repeat(12)) +
+                    lines('INTEGER', 'id', 'id', 'CASCADE', ' '.repeat(12), false) +
                     '\n        )',
                 mssql:
                     MSSQL_GUARD('student_course') +
-                    'CREATE TABLE student_course (\n' +
+                    'CREATE TABLE "student_course" (\n' +
                     lines('INT', 'id', 'id', 'CASCADE', ' '.repeat(20)) +
                     '\n                )',
                 mariadb:
-                    'CREATE TABLE IF NOT EXISTS student_course (\n' +
+                    'CREATE TABLE IF NOT EXISTS "student_course" (\n' +
                     lines('INT', 'id', 'id', 'CASCADE', ' '.repeat(12)) +
                     '\n        )',
             });
@@ -158,15 +193,15 @@ describe('ensureCreated DDL translation', () => {
                 {
                     postgresql:
                         'CREATE TABLE IF NOT EXISTS student_course (\n' +
-                        lines('INTEGER', 'sid', 'cid', 'SET NULL', ' '.repeat(12)) +
+                        lines('INTEGER', 'sid', 'cid', 'SET NULL', ' '.repeat(12), false) +
                         '\n        )',
                     mssql:
                         MSSQL_GUARD('student_course') +
-                        'CREATE TABLE student_course (\n' +
+                        'CREATE TABLE "student_course" (\n' +
                         lines('INT', 'sid', 'cid', 'SET NULL', ' '.repeat(20)) +
                         '\n                )',
                     mariadb:
-                        'CREATE TABLE IF NOT EXISTS student_course (\n' +
+                        'CREATE TABLE IF NOT EXISTS "student_course" (\n' +
                         lines('INT', 'sid', 'cid', 'SET NULL', ' '.repeat(12)) +
                         '\n        )',
                 }
@@ -184,10 +219,12 @@ describe('ensureCreated DDL translation', () => {
         };
         const head =
             'ALTER TABLE orders ADD CONSTRAINT fk_orders_user_id FOREIGN KEY (user_id) REFERENCES users(id)';
+        const quotedHead =
+            'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id" FOREIGN KEY ("user_id") REFERENCES "users"("id")';
         const same = (suffix: string): Record<Dialect, string> => ({
             postgresql: head + suffix,
-            mssql: head + suffix,
-            mariadb: head + suffix,
+            mssql: quotedHead + suffix,
+            mariadb: quotedHead + suffix,
         });
 
         it('names the constraint fk_<table>_<column> and adds no action by default', () => {
@@ -213,17 +250,19 @@ describe('ensureCreated DDL translation', () => {
     describe('ensureIndex', () => {
         it('renders a plain index over several columns', () => {
             const sql = 'CREATE INDEX idx_t_a_b ON t (a, b)';
+            const quoted = 'CREATE INDEX "idx_t_a_b" ON "t" ("a", "b")';
             expectPerDialect(
                 { op: 'ensureIndex', table: 't', index: 'idx_t_a_b', columns: ['a', 'b'], unique: false },
-                { postgresql: sql, mssql: sql, mariadb: sql }
+                { postgresql: sql, mssql: quoted, mariadb: quoted }
             );
         });
 
         it('renders a unique index', () => {
             const sql = 'CREATE UNIQUE INDEX idx_t_a ON t (a)';
+            const quoted = 'CREATE UNIQUE INDEX "idx_t_a" ON "t" ("a")';
             expectPerDialect(
                 { op: 'ensureIndex', table: 't', index: 'idx_t_a', columns: ['a'], unique: true },
-                { postgresql: sql, mssql: sql, mariadb: sql }
+                { postgresql: sql, mssql: quoted, mariadb: quoted }
             );
         });
     });
@@ -231,9 +270,10 @@ describe('ensureCreated DDL translation', () => {
     describe('ensureUniqueConstraint', () => {
         it('adds a named unique constraint over its columns', () => {
             const sql = 'ALTER TABLE t ADD CONSTRAINT uq_t_a_b UNIQUE (a, b)';
+            const quoted = 'ALTER TABLE "t" ADD CONSTRAINT "uq_t_a_b" UNIQUE ("a", "b")';
             expectPerDialect(
                 { op: 'ensureUniqueConstraint', table: 't', constraint: 'uq_t_a_b', columns: ['a', 'b'] },
-                { postgresql: sql, mssql: sql, mariadb: sql }
+                { postgresql: sql, mssql: quoted, mariadb: quoted }
             );
         });
     });
@@ -244,8 +284,8 @@ describe('ensureCreated DDL translation', () => {
                 { op: 'ensureAddColumn', table: 't', column: 'name', type: 'text' },
                 {
                     postgresql: 'ALTER TABLE t ADD COLUMN name TEXT',
-                    mssql: 'ALTER TABLE t ADD name NVARCHAR(MAX)',
-                    mariadb: 'ALTER TABLE t ADD COLUMN name TEXT',
+                    mssql: 'ALTER TABLE "t" ADD "name" NVARCHAR(MAX)',
+                    mariadb: 'ALTER TABLE "t" ADD COLUMN "name" TEXT',
                 }
             );
         });
@@ -255,8 +295,8 @@ describe('ensureCreated DDL translation', () => {
                 { op: 'ensureAddColumn', table: 't', column: 'name', type: 'varchar(20)' },
                 {
                     postgresql: 'ALTER TABLE t ADD COLUMN name VARCHAR(20)',
-                    mssql: 'ALTER TABLE t ADD name NVARCHAR(20)',
-                    mariadb: 'ALTER TABLE t ADD COLUMN name VARCHAR(20)',
+                    mssql: 'ALTER TABLE "t" ADD "name" NVARCHAR(20)',
+                    mariadb: 'ALTER TABLE "t" ADD COLUMN "name" VARCHAR(20)',
                 }
             );
         });
@@ -268,8 +308,8 @@ describe('ensureCreated DDL translation', () => {
                 { op: 'ensureAlterColumnType', table: 't', column: 'name', type: 'text' },
                 {
                     postgresql: 'ALTER TABLE t ALTER COLUMN name TYPE TEXT USING name::TEXT',
-                    mssql: 'ALTER TABLE t ALTER COLUMN name NVARCHAR(MAX)',
-                    mariadb: 'ALTER TABLE t MODIFY COLUMN name TEXT',
+                    mssql: 'ALTER TABLE "t" ALTER COLUMN "name" NVARCHAR(MAX)',
+                    mariadb: 'ALTER TABLE "t" MODIFY COLUMN "name" TEXT',
                 }
             );
         });
@@ -279,8 +319,8 @@ describe('ensureCreated DDL translation', () => {
                 { op: 'ensureAlterColumnType', table: 't', column: 'name', type: 'varchar(20)' },
                 {
                     postgresql: 'ALTER TABLE t ALTER COLUMN name TYPE VARCHAR(20) USING name::VARCHAR(20)',
-                    mssql: 'ALTER TABLE t ALTER COLUMN name NVARCHAR(20)',
-                    mariadb: 'ALTER TABLE t MODIFY COLUMN name VARCHAR(20)',
+                    mssql: 'ALTER TABLE "t" ALTER COLUMN "name" NVARCHAR(20)',
+                    mariadb: 'ALTER TABLE "t" MODIFY COLUMN "name" VARCHAR(20)',
                 }
             );
         });

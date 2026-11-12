@@ -24,17 +24,17 @@ describe('SqliteTranslator', () => {
                     ],
                 },
             });
-            expect(stmt.text).toBe('SELECT * FROM users WHERE age >= ? AND score BETWEEN ? AND ? AND id IN (?, ?)');
+            expect(stmt.text).toBe('SELECT * FROM "users" WHERE "age" >= ? AND "score" BETWEEN ? AND ? AND "id" IN (?, ?)');
             expect(stmt.params).toEqual([18, 1, 9, 1, 2]);
         });
 
         it('paginates with LIMIT and OFFSET, using LIMIT -1 for skip alone', () => {
             const base = { table: 'users', orderBy: [{ operand: { kind: 'column' as const, name: 'id' }, direction: 'asc' as const }] };
             expect(t.translateSelect({ ...base, skip: 5, take: 10 }).text).toBe(
-                'SELECT * FROM users ORDER BY id ASC LIMIT 10 OFFSET 5'
+                'SELECT * FROM "users" ORDER BY "id" ASC LIMIT 10 OFFSET 5'
             );
-            expect(t.translateSelect({ ...base, take: 10 }).text).toBe('SELECT * FROM users ORDER BY id ASC LIMIT 10');
-            expect(t.translateSelect({ ...base, skip: 5 }).text).toBe('SELECT * FROM users ORDER BY id ASC LIMIT -1 OFFSET 5');
+            expect(t.translateSelect({ ...base, take: 10 }).text).toBe('SELECT * FROM "users" ORDER BY "id" ASC LIMIT 10');
+            expect(t.translateSelect({ ...base, skip: 5 }).text).toBe('SELECT * FROM "users" ORDER BY "id" ASC LIMIT -1 OFFSET 5');
         });
 
         it('renders ilike through LOWER', () => {
@@ -42,7 +42,7 @@ describe('SqliteTranslator', () => {
                 table: 'users',
                 where: { op: 'ilike', left: { kind: 'column', name: 'name' }, value: 'a%' },
             });
-            expect(stmt.text).toBe('SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?)');
+            expect(stmt.text).toBe('SELECT * FROM "users" WHERE LOWER("name") LIKE LOWER(?)');
             expect(stmt.params).toEqual(['a%']);
         });
     });
@@ -50,13 +50,13 @@ describe('SqliteTranslator', () => {
     describe('insert', () => {
         it('uses RETURNING for a generated key', () => {
             const stmt = t.translateInsert({ table: 'users', columns: ['name', 'age'], values: ['a', 3], returning: 'id' });
-            expect(stmt.text).toBe('INSERT INTO users (name, age) VALUES (?, ?) RETURNING id');
+            expect(stmt.text).toBe('INSERT INTO "users" ("name", "age") VALUES (?, ?) RETURNING "id"');
             expect(stmt.params).toEqual(['a', 3]);
         });
 
         it('ignores identityInsert and omits RETURNING when no key is read back', () => {
             const stmt = t.translateInsert({ table: 'users', columns: ['id'], values: [1], identityInsert: true });
-            expect(stmt.text).toBe('INSERT INTO users (id) VALUES (?)');
+            expect(stmt.text).toBe('INSERT INTO "users" ("id") VALUES (?)');
         });
     });
 
@@ -130,7 +130,7 @@ describe('SqliteTranslator', () => {
                     ],
                 })
             ).toEqual([
-                'CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(50) NOT NULL, ok BOOLEAN, at DATETIME);',
+                'CREATE TABLE IF NOT EXISTS "t" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "name" VARCHAR(50) NOT NULL, "ok" BOOLEAN, "at" DATETIME);',
             ]);
         });
 
@@ -143,20 +143,20 @@ describe('SqliteTranslator', () => {
                 referencedTable1: 'a',
                 referencedTable2: 'b',
             });
-            expect(text).toContain('a_id INTEGER NOT NULL');
-            expect(text).toContain('PRIMARY KEY (a_id, b_id)');
-            expect(text).toContain('FOREIGN KEY (a_id) REFERENCES a(id) ON DELETE CASCADE');
+            expect(text).toContain('"a_id" INTEGER NOT NULL');
+            expect(text).toContain('PRIMARY KEY ("a_id", "b_id")');
+            expect(text).toContain('FOREIGN KEY ("a_id") REFERENCES "a"("id") ON DELETE CASCADE');
         });
 
         it('adds columns and indexes, and turns a unique constraint into a unique index', () => {
             expect(ddl({ op: 'ensureAddColumn', table: 't', column: 'c', type: 'integer' })).toEqual([
-                'ALTER TABLE t ADD COLUMN c INTEGER',
+                'ALTER TABLE "t" ADD COLUMN "c" INTEGER',
             ]);
             expect(ddl({ op: 'ensureIndex', table: 't', index: 'ix', columns: ['a', 'b'], unique: false })).toEqual([
-                'CREATE INDEX ix ON t (a, b)',
+                'CREATE INDEX "ix" ON "t" ("a", "b")',
             ]);
             expect(ddl({ op: 'ensureUniqueConstraint', table: 't', constraint: 'uq', columns: ['a'] })).toEqual([
-                'CREATE UNIQUE INDEX uq ON t (a)',
+                'CREATE UNIQUE INDEX "uq" ON "t" ("a")',
             ]);
         });
 

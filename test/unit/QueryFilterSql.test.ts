@@ -92,7 +92,7 @@ describe('SQL-translated global query filters', () => {
         const { db, provider } = makeDb();
         await db.set(QfDoc).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_docs WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_docs" WHERE "isdeleted" = $1');
         expect(provider.lastCall!.params).toEqual([false]);
     });
 
@@ -100,7 +100,7 @@ describe('SQL-translated global query filters', () => {
         const { db, provider } = makeDb();
         await db.set(QfPlain).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_plain');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_plain"');
         expect(provider.lastCall!.params).toBeUndefined();
     });
 
@@ -108,7 +108,7 @@ describe('SQL-translated global query filters', () => {
         const { db, provider } = makeDb();
         await db.set(QfDoc).where('title', '=', 'Spec').toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_docs WHERE title = $1 AND isdeleted = $2');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_docs" WHERE "title" = $1 AND "isdeleted" = $2');
         expect(provider.lastCall!.params).toEqual(['Spec', false]);
     });
 
@@ -116,14 +116,14 @@ describe('SQL-translated global query filters', () => {
         const { db, provider } = makeDb('mssql');
         await db.set(QfDoc).where('title', '=', 'Spec').toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_docs WHERE title = @p0 AND isdeleted = @p1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM [qf_docs] WHERE [title] = @p0 AND [isdeleted] = @p1');
     });
 
     it('uses positional placeholders on mariadb', async () => {
         const { db, provider } = makeDb('mariadb');
         await db.set(QfDoc).where('title', '=', 'Spec').toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_docs WHERE title = ? AND isdeleted = ?');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM `qf_docs` WHERE `title` = ? AND `isdeleted` = ?');
         expect(provider.lastCall!.params).toEqual(['Spec', false]);
     });
 
@@ -132,7 +132,7 @@ describe('SQL-translated global query filters', () => {
         provider.nextResult({ rows: [{ id: 1, title: 'Spec', isdeleted: false }], rowCount: 1 });
         const doc = await db.set(QfDoc).find(1);
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_docs WHERE id = $1 AND isdeleted = $2');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_docs" WHERE "id" = $1 AND "isdeleted" = $2');
         expect(provider.lastCall!.params).toEqual([1, false]);
         expect(doc!.title).toBe('Spec');
     });
@@ -142,7 +142,7 @@ describe('SQL-translated global query filters', () => {
         provider.nextResult({ rows: [{ count: '3' }], rowCount: 1 });
         const count = await db.set(QfDoc).count();
 
-        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as count FROM qf_docs WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as "count" FROM "qf_docs" WHERE "isdeleted" = $1');
         expect(count).toBe(3);
     });
 
@@ -151,7 +151,7 @@ describe('SQL-translated global query filters', () => {
         provider.nextResult({ rows: [{ total: '99' }], rowCount: 1 });
         await db.set(QfOrder).sum(o => o.total);
 
-        expect(provider.lastCall!.sql).toBe('SELECT SUM(total) as total FROM qf_orders WHERE tenantid = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT SUM("total") as "total" FROM "qf_orders" WHERE "tenantid" = $1');
         expect(provider.lastCall!.params).toEqual([1]);
     });
 
@@ -160,7 +160,7 @@ describe('SQL-translated global query filters', () => {
         provider.nextResult({ rows: [{ count: '2' }], rowCount: 1 });
         await db.set(QfDoc).where('title', '=', 'Spec').count();
 
-        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as count FROM qf_docs WHERE title = $1 AND isdeleted = $2');
+        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as "count" FROM "qf_docs" WHERE "title" = $1 AND "isdeleted" = $2');
         expect(provider.lastCall!.params).toEqual(['Spec', false]);
     });
 
@@ -169,7 +169,7 @@ describe('SQL-translated global query filters', () => {
         provider.nextResult({ rows: [{ avg: '10' }], rowCount: 1 });
         await db.set(QfOrder).where('total', '>', 5).average(o => o.total);
 
-        expect(provider.lastCall!.sql).toBe('SELECT AVG(total) as avg FROM qf_orders WHERE total > $1 AND tenantid = $2');
+        expect(provider.lastCall!.sql).toBe('SELECT AVG("total") as "avg" FROM "qf_orders" WHERE "total" > $1 AND "tenantid" = $2');
         expect(provider.lastCall!.params).toEqual([5, 1]);
     });
 
@@ -177,7 +177,7 @@ describe('SQL-translated global query filters', () => {
         const { db, provider } = makeDb();
         await db.set(QfDoc).select(d => ({ title: d.title })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT title AS title FROM qf_docs WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT "title" AS "title" FROM "qf_docs" WHERE "isdeleted" = $1');
         expect(provider.lastCall!.params).toEqual([false]);
     });
 
@@ -215,7 +215,7 @@ describe('SQL-translated global query filters', () => {
         const { db, provider } = makeDb();
         await db.set(QfMulti).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_multi WHERE isdeleted = $1 AND isarchived = $2');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_multi" WHERE "isdeleted" = $1 AND "isarchived" = $2');
         expect(provider.lastCall!.params).toEqual([false, false]);
     });
 
@@ -237,7 +237,7 @@ describe('ignoreQueryFilters()', () => {
         const { db, provider } = makeDb();
         await db.set(QfDoc).ignoreQueryFilters().toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_docs');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_docs"');
         expect(provider.lastCall!.params).toEqual([]);
     });
 
@@ -245,7 +245,7 @@ describe('ignoreQueryFilters()', () => {
         const { db, provider } = makeDb();
         await db.set(QfDoc).where('title', '=', 'Spec').ignoreQueryFilters().toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_docs WHERE title = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_docs" WHERE "title" = $1');
         expect(provider.lastCall!.params).toEqual(['Spec']);
     });
 
@@ -253,7 +253,7 @@ describe('ignoreQueryFilters()', () => {
         const { db, provider } = makeDb();
         await db.set(QfDoc).where('title', '=', 'Spec').ignoreQueryFilters().select(d => ({ title: d.title })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT title AS title FROM qf_docs WHERE title = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT "title" AS "title" FROM "qf_docs" WHERE "title" = $1');
     });
 });
 
@@ -268,7 +268,7 @@ describe('query filters on raw SQL', () => {
             rowCount: 2,
         });
 
-        const docs = await db.set(QfDoc).fromSqlRaw('SELECT * FROM qf_docs').toList();
+        const docs = await db.set(QfDoc).fromSqlRaw('SELECT * FROM "qf_docs"').toList();
 
         expect(docs).toHaveLength(1);
         expect(docs[0].title).toBe('Kept');
@@ -287,9 +287,9 @@ describe('query filters on raw SQL', () => {
  */
 describe('query filters using set and null operators', () => {
     it.each([
-        ['postgresql', 'SELECT * FROM qf_tagged WHERE status IN ($1, $2)'],
-        ['mssql', 'SELECT * FROM qf_tagged WHERE status IN (@p0, @p1)'],
-        ['mariadb', 'SELECT * FROM qf_tagged WHERE status IN (?, ?)'],
+        ['postgresql', 'SELECT * FROM "qf_tagged" WHERE "status" IN ($1, $2)'],
+        ['mssql', 'SELECT * FROM [qf_tagged] WHERE [status] IN (@p0, @p1)'],
+        ['mariadb', 'SELECT * FROM `qf_tagged` WHERE `status` IN (?, ?)'],
     ])('expands an IN filter on plain toList() (%s)', async (dialect, expected) => {
         const { db, provider } = makeDb(dialect as CaptureDialect);
         await db.set(QfTagged).toList();
@@ -299,9 +299,9 @@ describe('query filters using set and null operators', () => {
     });
 
     it.each([
-        ['postgresql', 'SELECT * FROM qf_tagged WHERE title = $1 AND status IN ($2, $3)'],
-        ['mssql', 'SELECT * FROM qf_tagged WHERE title = @p0 AND status IN (@p1, @p2)'],
-        ['mariadb', 'SELECT * FROM qf_tagged WHERE title = ? AND status IN (?, ?)'],
+        ['postgresql', 'SELECT * FROM "qf_tagged" WHERE "title" = $1 AND "status" IN ($2, $3)'],
+        ['mssql', 'SELECT * FROM [qf_tagged] WHERE [title] = @p0 AND [status] IN (@p1, @p2)'],
+        ['mariadb', 'SELECT * FROM `qf_tagged` WHERE `title` = ? AND `status` IN (?, ?)'],
     ])('numbers an IN filter after the user conditions (%s)', async (dialect, expected) => {
         const { db, provider } = makeDb(dialect as CaptureDialect);
         await db.set(QfTagged).where('title', '=', 'x').toList();
@@ -315,7 +315,7 @@ describe('query filters using set and null operators', () => {
         await db.set(QfTagged).where('title', 'IN', ['a', 'b']).where('id', '>', 3).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM qf_tagged WHERE title IN ($1, $2) AND id > $3 AND status IN ($4, $5)'
+            'SELECT * FROM "qf_tagged" WHERE "title" IN ($1, $2) AND "id" > $3 AND "status" IN ($4, $5)'
         );
         expect(provider.lastCall!.params).toEqual(['a', 'b', 3, 'live', 'draft']);
     });
@@ -325,7 +325,7 @@ describe('query filters using set and null operators', () => {
         await db.set(QfTagged).find(7);
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM qf_tagged WHERE id = $1 AND status IN ($2, $3)'
+            'SELECT * FROM "qf_tagged" WHERE "id" = $1 AND "status" IN ($2, $3)'
         );
         expect(provider.lastCall!.params).toEqual([7, 'live', 'draft']);
     });
@@ -334,12 +334,12 @@ describe('query filters using set and null operators', () => {
         const { db, provider } = makeDb();
         provider.nextResult({ rows: [{ count: '2' }], rowCount: 1 });
         await db.set(QfTagged).count();
-        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as count FROM qf_tagged WHERE status IN ($1, $2)');
+        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as "count" FROM "qf_tagged" WHERE "status" IN ($1, $2)');
 
         await db.set(QfTagged).groupBy(t => t.status).having('COUNT(*)', '>', 1)
             .select(g => ({ n: g.count() })).toList();
         expect(provider.lastCall!.sql).toBe(
-            'SELECT status, COUNT(*) as n FROM qf_tagged WHERE status IN ($1, $2) GROUP BY status HAVING COUNT(*) > $3'
+            'SELECT "status", COUNT(*) as "n" FROM "qf_tagged" WHERE "status" IN ($1, $2) GROUP BY "status" HAVING COUNT(*) > $3'
         );
         expect(provider.lastCall!.params).toEqual(['live', 'draft', 1]);
     });
@@ -348,7 +348,7 @@ describe('query filters using set and null operators', () => {
         const { db, provider } = makeDb();
         await db.set(QfSoft).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_soft WHERE deletedat IS NULL');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_soft" WHERE "deletedat" IS NULL');
         expect(provider.lastCall!.params).toEqual([]);
     });
 
@@ -356,7 +356,7 @@ describe('query filters using set and null operators', () => {
         const { db, provider } = makeDb();
         await db.set(QfSoft).where('title', '=', 'x').toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_soft WHERE title = $1 AND deletedat IS NULL');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_soft" WHERE "title" = $1 AND "deletedat" IS NULL');
         expect(provider.lastCall!.params).toEqual(['x']);
     });
 });
@@ -383,7 +383,7 @@ describe('query filter operators are validated at registration time', () => {
         const { db, provider } = makeDb();
         await db.set(QfBadOp).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qf_badop');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qf_badop"');
     });
 
     it('still validates at compile time when metadata is mutated directly', async () => {

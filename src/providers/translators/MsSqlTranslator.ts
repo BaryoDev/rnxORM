@@ -103,6 +103,10 @@ export class MsSqlTranslator extends SqlTranslator {
         return super.renderOrderOperand(operand, model);
     }
 
+    protected quoteQueryPart(part: string): string {
+        return `[${part.replace(/]/g, ']]')}]`;
+    }
+
     protected quoteDdlPart(part: string): string {
         return `[${part}]`;
     }
@@ -120,22 +124,19 @@ export class MsSqlTranslator extends SqlTranslator {
         return [`ALTER TABLE ${table} ALTER COLUMN ${column} ${type}${op.nullable === false ? ' NOT NULL' : ''}`];
     }
 
-    protected renderEnsureTable(table: string, columns: string): string {
-        return `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${table}')\n                CREATE TABLE ${table} (${columns});`;
+    protected renderEnsureTable(table: string, columns: string, tableName: string): string {
+        return `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${tableName}')\n                CREATE TABLE ${table} (${columns});`;
     }
 
     protected renderEnsureJoinTable(op: EnsureJoinTableOp): string {
-        const { table: t, column1: c1, column2: c2 } = op;
-        const cascade = op.onDelete ? ` ON DELETE ${op.onDelete}` : ' ON DELETE CASCADE';
-        const ref1 = op.referencedColumn1 ?? 'id';
-        const ref2 = op.referencedColumn2 ?? 'id';
-        return `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${t}')
+        const { t, c1, c2, rt1, rt2, ref1, ref2, cascade } = this.joinTableNames(op);
+        return `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '${this.lastNamePart(op.table, op.op)}')
                 CREATE TABLE ${t} (
                     ${c1} INT NOT NULL,
                     ${c2} INT NOT NULL,
                     PRIMARY KEY (${c1}, ${c2}),
-                    FOREIGN KEY (${c1}) REFERENCES ${op.referencedTable1}(${ref1})${cascade},
-                    FOREIGN KEY (${c2}) REFERENCES ${op.referencedTable2}(${ref2})${cascade}
+                    FOREIGN KEY (${c1}) REFERENCES ${rt1}(${ref1})${cascade},
+                    FOREIGN KEY (${c2}) REFERENCES ${rt2}(${ref2})${cascade}
                 )`;
     }
 

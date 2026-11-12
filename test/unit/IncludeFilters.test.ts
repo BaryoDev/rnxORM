@@ -107,7 +107,7 @@ describe('query filters reach eager-loaded relations (#37)', () => {
         await db.set(IfBlog).include(b => b.posts).toList();
 
         expect(provider.calls[1].sql).toBe(
-            'SELECT * FROM if_posts WHERE blogid IN ($1) AND isdeleted = $2'
+            'SELECT * FROM "if_posts" WHERE "blogid" IN ($1) AND "isdeleted" = $2'
         );
         expect(provider.calls[1].params).toEqual([1, false]);
     });
@@ -120,7 +120,7 @@ describe('query filters reach eager-loaded relations (#37)', () => {
         await db.set(IfArticle).include(a => a.author).toList();
 
         expect(provider.calls[1].sql).toBe(
-            'SELECT * FROM if_authors WHERE id IN ($1) AND isdeleted = $2'
+            'SELECT * FROM "if_authors" WHERE "id" IN ($1) AND "isdeleted" = $2'
         );
         expect(provider.calls[1].params).toEqual([7, false]);
     });
@@ -134,7 +134,7 @@ describe('query filters reach eager-loaded relations (#37)', () => {
         await db.set(IfStudent).include(s => s.courses).toList();
 
         expect(provider.calls[2].sql).toBe(
-            'SELECT * FROM if_courses WHERE id IN ($1) AND isdeleted = $2'
+            'SELECT * FROM "if_courses" WHERE "id" IN ($1) AND "isdeleted" = $2'
         );
         expect(provider.calls[2].params).toEqual([5, false]);
     });
@@ -150,7 +150,7 @@ describe('query filters reach eager-loaded relations (#37)', () => {
         await db.set(IfBlog).include(b => b.posts).toList();
 
         expect(provider.calls[1].sql).toBe(
-            'SELECT * FROM if_posts WHERE blogid IN ($1, $2) AND isdeleted = $3'
+            'SELECT * FROM "if_posts" WHERE "blogid" IN ($1, $2) AND "isdeleted" = $3'
         );
         expect(provider.calls[1].params).toEqual([1, 2, false]);
     });
@@ -162,7 +162,7 @@ describe('query filters reach eager-loaded relations (#37)', () => {
 
         await db.set(IfBlog).ignoreQueryFilters().include(b => b.posts).toList();
 
-        expect(provider.calls[1].sql).toBe('SELECT * FROM if_posts WHERE blogid IN ($1)');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "if_posts" WHERE "blogid" IN ($1)');
         expect(provider.calls[1].params).toEqual([1]);
     });
 
@@ -174,7 +174,7 @@ describe('query filters reach eager-loaded relations (#37)', () => {
         await db.set(IfPost).include(p => p.blog).toList();
 
         // if_blogs has no filter of its own.
-        expect(provider.calls[1].sql).toBe('SELECT * FROM if_blogs WHERE id IN ($1)');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "if_blogs" WHERE "id" IN ($1)');
     });
 });
 

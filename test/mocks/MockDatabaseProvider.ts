@@ -6,6 +6,11 @@ import { PostgresTranslator } from '../../src/providers/translators/PostgresTran
 
 /** Renders PG style SQL, which the mock's regex parser reads. */
 export class MockTranslator extends PostgresTranslator {
+    /** The mock's regex parser reads bare names, so it opts out of quoting. */
+    protected quoteQueryPart(part: string): string {
+        return part;
+    }
+
     /** The mock's insert parser has no RETURNING, so the key comes back as insertId. */
     protected renderInsertReturning(): string {
         return '';

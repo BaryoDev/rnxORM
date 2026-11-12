@@ -81,7 +81,7 @@ describe('QueryBuilder SQL generation', () => {
         await db.set(SgUser).where('age', '>', 18).orderBy('name').skip(5).take(10).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM sqlgen_users WHERE age > $1 ORDER BY name ASC LIMIT 10 OFFSET 5'
+            'SELECT * FROM "sqlgen_users" WHERE "age" > $1 ORDER BY "name" ASC LIMIT 10 OFFSET 5'
         );
         expect(provider.lastCall!.params).toEqual([18]);
     });
@@ -91,7 +91,7 @@ describe('QueryBuilder SQL generation', () => {
         await db.set(SgUser).where('age', '>', 18).orderBy('name').skip(5).take(10).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM sqlgen_users WHERE age > ? ORDER BY name ASC LIMIT 10 OFFSET 5'
+            'SELECT * FROM `sqlgen_users` WHERE `age` > ? ORDER BY `name` ASC LIMIT 10 OFFSET 5'
         );
     });
 
@@ -100,7 +100,7 @@ describe('QueryBuilder SQL generation', () => {
         await db.set(SgUser).where('age', '>', 18).orderBy('name').skip(5).take(10).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM sqlgen_users WHERE age > @p0 ORDER BY name ASC OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY'
+            'SELECT * FROM [sqlgen_users] WHERE [age] > @p0 ORDER BY [name] ASC OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY'
         );
     });
 
@@ -109,7 +109,7 @@ describe('QueryBuilder SQL generation', () => {
         await db.set(SgUser).skip(5).take(10).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM sqlgen_users ORDER BY (SELECT NULL) OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY'
+            'SELECT * FROM [sqlgen_users] ORDER BY (SELECT NULL) OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY'
         );
     });
 
@@ -118,7 +118,7 @@ describe('QueryBuilder SQL generation', () => {
         await db.set(SgUser).where('age', '>', 18).where('name', '=', 'Alice').toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM sqlgen_users WHERE age > $1 AND name = $2'
+            'SELECT * FROM "sqlgen_users" WHERE "age" > $1 AND "name" = $2'
         );
         expect(provider.lastCall!.params).toEqual([18, 'Alice']);
     });
@@ -127,7 +127,7 @@ describe('QueryBuilder SQL generation', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgUser).distinct().toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT DISTINCT * FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT DISTINCT * FROM "sqlgen_users"');
     });
 
     it('generates find() by primary key', async () => {
@@ -135,7 +135,7 @@ describe('QueryBuilder SQL generation', () => {
         provider.nextResult({ rows: [{ id: 1, name: 'Alice', age: 30 }], rowCount: 1 });
         const user = await db.set(SgUser).find(1);
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_users WHERE id = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_users" WHERE "id" = $1');
         expect(provider.lastCall!.params).toEqual([1]);
         expect(user!.name).toBe('Alice');
     });
@@ -147,7 +147,7 @@ describe('Aggregate SQL generation', () => {
         provider.nextResult({ rows: [{ total: '42' }], rowCount: 1 });
         const total = await db.set(SgUser).sum(u => u.age);
 
-        expect(provider.lastCall!.sql).toBe('SELECT SUM(age) as total FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT SUM("age") as "total" FROM "sqlgen_users"');
         expect(total).toBe(42);
     });
 
@@ -156,7 +156,7 @@ describe('Aggregate SQL generation', () => {
         provider.nextResult({ rows: [{ avg: '21.5' }], rowCount: 1 });
         const avg = await db.set(SgUser).average(u => u.age);
 
-        expect(provider.lastCall!.sql).toBe('SELECT AVG(age) as avg FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT AVG("age") as "avg" FROM "sqlgen_users"');
         expect(avg).toBe(21.5);
     });
 
@@ -164,11 +164,11 @@ describe('Aggregate SQL generation', () => {
         const { db, provider } = makeDb('postgresql');
         provider.nextResult({ rows: [{ min: 1 }], rowCount: 1 });
         await db.set(SgUser).min(u => u.age);
-        expect(provider.lastCall!.sql).toBe('SELECT MIN(age) as min FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT MIN("age") as "min" FROM "sqlgen_users"');
 
         provider.nextResult({ rows: [{ max: 99 }], rowCount: 1 });
         await db.set(SgUser).max(u => u.age);
-        expect(provider.lastCall!.sql).toBe('SELECT MAX(age) as max FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT MAX("age") as "max" FROM "sqlgen_users"');
     });
 
     it('generates COUNT(*)', async () => {
@@ -176,7 +176,7 @@ describe('Aggregate SQL generation', () => {
         provider.nextResult({ rows: [{ count: '7' }], rowCount: 1 });
         const count = await db.set(SgUser).count();
 
-        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as count FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as "count" FROM "sqlgen_users"');
         expect(count).toBe(7);
     });
 });
@@ -192,7 +192,7 @@ describe('INSERT SQL generation and generated-id backfill', () => {
         await db.saveChanges();
 
         expect(provider.lastCall!.sql).toBe(
-            'INSERT INTO sqlgen_users (name, age) VALUES ($1, $2) RETURNING id'
+            'INSERT INTO "sqlgen_users" ("name", "age") VALUES ($1, $2) RETURNING "id"'
         );
         expect(provider.lastCall!.params).toEqual(['Alice', 30]);
         expect(user.id).toBe(42);
@@ -208,7 +208,7 @@ describe('INSERT SQL generation and generated-id backfill', () => {
         await db.saveChanges();
 
         expect(provider.lastCall!.sql).toBe(
-            'INSERT INTO sqlgen_users (name, age) OUTPUT INSERTED.id VALUES (@p0, @p1)'
+            'INSERT INTO [sqlgen_users] ([name], [age]) OUTPUT INSERTED.[id] VALUES (@p0, @p1)'
         );
         expect(user.id).toBe(7);
     });
@@ -223,7 +223,7 @@ describe('INSERT SQL generation and generated-id backfill', () => {
         await db.saveChanges();
 
         expect(provider.lastCall!.sql).toBe(
-            'INSERT INTO sqlgen_users (name, age) VALUES (?, ?)'
+            'INSERT INTO `sqlgen_users` (`name`, `age`) VALUES (?, ?)'
         );
         expect(user.id).toBe(99);
     });
@@ -238,9 +238,9 @@ describe('INSERT SQL generation and generated-id backfill', () => {
         await db.saveChanges();
 
         expect(provider.lastCall!.sql).toBe(
-            'SET IDENTITY_INSERT sqlgen_users ON; ' +
-            'INSERT INTO sqlgen_users (id, name, age) VALUES (@p0, @p1, @p2); ' +
-            'SET IDENTITY_INSERT sqlgen_users OFF'
+            'SET IDENTITY_INSERT [sqlgen_users] ON; ' +
+            'INSERT INTO [sqlgen_users] ([id], [name], [age]) VALUES (@p0, @p1, @p2); ' +
+            'SET IDENTITY_INSERT [sqlgen_users] OFF'
         );
         expect(provider.lastCall!.params).toEqual([5, 'Dave', 50]);
     });
@@ -255,7 +255,7 @@ describe('INSERT SQL generation and generated-id backfill', () => {
         await db.saveChanges();
 
         expect(provider.lastCall!.sql).toBe(
-            'INSERT INTO sqlgen_users (id, name, age) VALUES ($1, $2, $3)'
+            'INSERT INTO "sqlgen_users" ("id", "name", "age") VALUES ($1, $2, $3)'
         );
     });
 });
@@ -277,7 +277,7 @@ describe('UPDATE SQL generation with concurrency tokens', () => {
         await db.saveChanges();
 
         expect(provider.lastCall!.sql).toBe(
-            'UPDATE sqlgen_products SET price = $1, version = $2 WHERE id = $3 AND version = $4'
+            'UPDATE "sqlgen_products" SET "price" = $1, "version" = $2 WHERE "id" = $3 AND "version" = $4'
         );
         expect(provider.lastCall!.params).toEqual([20, 4, 1, 3]);
         expect(product.version).toBe(4);
@@ -303,7 +303,7 @@ describe('DELETE SQL generation', () => {
         db.set(SgUser).remove(user);
         await db.saveChanges();
 
-        expect(provider.lastCall!.sql).toBe('DELETE FROM sqlgen_users WHERE id = $1');
+        expect(provider.lastCall!.sql).toBe('DELETE FROM "sqlgen_users" WHERE "id" = $1');
         expect(provider.lastCall!.params).toEqual([3]);
     });
 });
@@ -314,7 +314,7 @@ describe('SELECT projection SQL generation', () => {
         await db.set(SgUser).select(u => ({ userName: u.name, userAge: u.age })).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT name AS userName, age AS userAge FROM sqlgen_users'
+            'SELECT "name" AS "userName", "age" AS "userAge" FROM "sqlgen_users"'
         );
     });
 
@@ -322,7 +322,7 @@ describe('SELECT projection SQL generation', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgUser).select(u => u.age).distinct().toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT DISTINCT age FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT DISTINCT "age" FROM "sqlgen_users"');
     });
 
     it('falls back to SELECT * and in-memory projection for complex selectors', async () => {
@@ -330,7 +330,7 @@ describe('SELECT projection SQL generation', () => {
         provider.nextResult({ rows: [{ id: 1, name: 'Bob', age: 30 }], rowCount: 1 });
         const results = await db.set(SgUser).select(u => ({ label: `${u.name}!` })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_users"');
         expect(results).toEqual([{ label: 'Bob!' }]);
     });
 });
@@ -344,7 +344,7 @@ describe('GROUP BY SQL generation', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT age, COUNT(*) as count, SUM(age) as total FROM sqlgen_users GROUP BY age'
+            'SELECT "age", COUNT(*) as "count", SUM("age") as "total" FROM "sqlgen_users" GROUP BY "age"'
         );
     });
 
@@ -357,7 +357,7 @@ describe('GROUP BY SQL generation', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT age, COUNT(*) as count FROM sqlgen_users GROUP BY age HAVING COUNT(*) > $1'
+            'SELECT "age", COUNT(*) as "count" FROM "sqlgen_users" GROUP BY "age" HAVING COUNT(*) > $1'
         );
         expect(provider.lastCall!.params).toEqual([5]);
     });
@@ -371,7 +371,7 @@ describe('GROUP BY SQL generation', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT age, COUNT(*) as count FROM sqlgen_users GROUP BY age LIMIT 3 OFFSET 2'
+            'SELECT "age", COUNT(*) as "count" FROM "sqlgen_users" GROUP BY "age" LIMIT 3 OFFSET 2'
         );
     });
 
@@ -384,7 +384,7 @@ describe('GROUP BY SQL generation', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT age, COUNT(*) as count FROM sqlgen_users GROUP BY age' +
+            'SELECT [age], COUNT(*) as [count] FROM [sqlgen_users] GROUP BY [age]' +
             ' ORDER BY (SELECT NULL) OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY'
         );
     });
@@ -397,7 +397,7 @@ describe('GROUP BY SQL generation', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT age, AVG(age) as avgAge FROM sqlgen_users GROUP BY age'
+            'SELECT "age", AVG("age") as "avgAge" FROM "sqlgen_users" GROUP BY "age"'
         );
     });
 
@@ -409,7 +409,7 @@ describe('GROUP BY SQL generation', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT age, MIN(age) as minAge FROM sqlgen_users GROUP BY age'
+            'SELECT "age", MIN("age") as "minAge" FROM "sqlgen_users" GROUP BY "age"'
         );
     });
 
@@ -421,7 +421,7 @@ describe('GROUP BY SQL generation', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT age, MAX(age) as maxAge FROM sqlgen_users GROUP BY age'
+            'SELECT "age", MAX("age") as "maxAge" FROM "sqlgen_users" GROUP BY "age"'
         );
     });
 });
@@ -430,13 +430,13 @@ describe('projection SQL from captured selectors (renamed columns and error path
     it('uses the mapped column name, not the property name, for a renamed column', async () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgAccount).select(a => ({ n: a.fullName })).toList();
-        expect(provider.lastCall!.sql).toBe('SELECT full_name AS n FROM sqlgen_accounts');
+        expect(provider.lastCall!.sql).toBe('SELECT "full_name" AS "n" FROM "sqlgen_accounts"');
     });
 
     it('uses the mapped column name for a renamed column in a single-property projection', async () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgAccount).select(a => a.fullName).toList();
-        expect(provider.lastCall!.sql).toBe('SELECT full_name FROM sqlgen_accounts');
+        expect(provider.lastCall!.sql).toBe('SELECT "full_name" FROM "sqlgen_accounts"');
     });
 
     it('throws when a projected property is not a mapped column', async () => {
@@ -454,7 +454,7 @@ describe('projection SQL from captured selectors (renamed columns and error path
         provider.nextResult({ rows: [{ id: 1, name: 'Ada', age: 15 }], rowCount: 1 });
         const results = await db.set(SgUser).select(u => u.age * 2).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_users"');
         expect(results).toEqual([30]);
     });
 });
@@ -468,7 +468,7 @@ describe('GROUP BY SQL generation with renamed columns', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT full_name, SUM(acct_balance) as total FROM sqlgen_accounts GROUP BY full_name'
+            'SELECT "full_name", SUM("acct_balance") as "total" FROM "sqlgen_accounts" GROUP BY "full_name"'
         );
     });
 
@@ -480,7 +480,7 @@ describe('GROUP BY SQL generation with renamed columns', () => {
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT full_name AS dept, SUM(acct_balance) as total FROM sqlgen_accounts GROUP BY full_name'
+            'SELECT "full_name" AS "dept", SUM("acct_balance") as "total" FROM "sqlgen_accounts" GROUP BY "full_name"'
         );
     });
 });
@@ -499,9 +499,9 @@ describe('GROUP BY SQL generation with renamed columns', () => {
  */
 describe('set and null operators (I4)', () => {
     it.each([
-        ['postgresql', 'SELECT * FROM sqlgen_docs WHERE status IN ($1, $2, $3)'],
-        ['mssql', 'SELECT * FROM sqlgen_docs WHERE status IN (@p0, @p1, @p2)'],
-        ['mariadb', 'SELECT * FROM sqlgen_docs WHERE status IN (?, ?, ?)'],
+        ['postgresql', 'SELECT * FROM "sqlgen_docs" WHERE "status" IN ($1, $2, $3)'],
+        ['mssql', 'SELECT * FROM [sqlgen_docs] WHERE [status] IN (@p0, @p1, @p2)'],
+        ['mariadb', 'SELECT * FROM `sqlgen_docs` WHERE `status` IN (?, ?, ?)'],
     ])('expands IN to one placeholder per element (%s)', async (dialect, expected) => {
         const { db, provider } = makeDb(dialect as CaptureDialect);
         await db.set(SgDoc).where('status', 'IN', ['a', 'b', 'c']).toList();
@@ -511,9 +511,9 @@ describe('set and null operators (I4)', () => {
     });
 
     it.each([
-        ['postgresql', 'SELECT * FROM sqlgen_docs WHERE status IN ($1, $2, $3) AND title = $4'],
-        ['mssql', 'SELECT * FROM sqlgen_docs WHERE status IN (@p0, @p1, @p2) AND title = @p3'],
-        ['mariadb', 'SELECT * FROM sqlgen_docs WHERE status IN (?, ?, ?) AND title = ?'],
+        ['postgresql', 'SELECT * FROM "sqlgen_docs" WHERE "status" IN ($1, $2, $3) AND "title" = $4'],
+        ['mssql', 'SELECT * FROM [sqlgen_docs] WHERE [status] IN (@p0, @p1, @p2) AND [title] = @p3'],
+        ['mariadb', 'SELECT * FROM `sqlgen_docs` WHERE `status` IN (?, ?, ?) AND `title` = ?'],
     ])('continues placeholder numbering after an IN (%s)', async (dialect, expected) => {
         const { db, provider } = makeDb(dialect as CaptureDialect);
         await db.set(SgDoc).where('status', 'IN', ['a', 'b', 'c']).where('title', '=', 'x').toList();
@@ -526,14 +526,14 @@ describe('set and null operators (I4)', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgDoc).where('status', 'NOT IN', ['a', 'b']).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs WHERE status NOT IN ($1, $2)');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_docs" WHERE "status" NOT IN ($1, $2)');
         expect(provider.lastCall!.params).toEqual(['a', 'b']);
     });
 
     it.each([
-        ['postgresql', 'SELECT * FROM sqlgen_docs WHERE deletedat IS NULL'],
-        ['mssql', 'SELECT * FROM sqlgen_docs WHERE deletedat IS NULL'],
-        ['mariadb', 'SELECT * FROM sqlgen_docs WHERE deletedat IS NULL'],
+        ['postgresql', 'SELECT * FROM "sqlgen_docs" WHERE "deletedat" IS NULL'],
+        ['mssql', 'SELECT * FROM [sqlgen_docs] WHERE [deletedat] IS NULL'],
+        ['mariadb', 'SELECT * FROM `sqlgen_docs` WHERE `deletedat` IS NULL'],
     ])('emits IS NULL with no parameter (%s)', async (dialect, expected) => {
         const { db, provider } = makeDb(dialect as CaptureDialect);
         await db.set(SgDoc).where('deletedAt', 'IS', null).toList();
@@ -546,7 +546,7 @@ describe('set and null operators (I4)', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgDoc).where('deletedAt', 'IS NOT', null).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs WHERE deletedat IS NOT NULL');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_docs" WHERE "deletedat" IS NOT NULL');
         expect(provider.lastCall!.params).toEqual([]);
     });
 
@@ -554,7 +554,7 @@ describe('set and null operators (I4)', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgDoc).where('deletedAt', 'IS', null).where('title', '=', 'x').toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs WHERE deletedat IS NULL AND title = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_docs" WHERE "deletedat" IS NULL AND "title" = $1');
         expect(provider.lastCall!.params).toEqual(['x']);
     });
 
@@ -562,7 +562,7 @@ describe('set and null operators (I4)', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgDoc).where('status', 'IN', []).where('title', '=', 'x').toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs WHERE 1 = 0 AND title = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_docs" WHERE 1 = 0 AND "title" = $1');
         expect(provider.lastCall!.params).toEqual(['x']);
     });
 
@@ -570,7 +570,7 @@ describe('set and null operators (I4)', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgDoc).where('status', 'NOT IN', []).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs WHERE 1 = 1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_docs" WHERE 1 = 1');
     });
 
     it('throws when IN receives a non-array value', () => {
@@ -589,7 +589,7 @@ describe('set and null operators (I4)', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgDoc).select(d => d.title).where('status', 'IN', ['a', 'b']).where('title', '=', 'x').toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT title FROM sqlgen_docs WHERE status IN ($1, $2) AND title = $3');
+        expect(provider.lastCall!.sql).toBe('SELECT "title" FROM "sqlgen_docs" WHERE "status" IN ($1, $2) AND "title" = $3');
         expect(provider.lastCall!.params).toEqual(['a', 'b', 'x']);
     });
 });
@@ -603,7 +603,7 @@ describe('short-circuit selectors fall back to in-memory projection (I2)', () =>
         provider.nextResult({ rows: [{ id: 1, status: 'live', title: '', deletedat: null }], rowCount: 1 });
         const results = await db.set(SgDoc).select(selector).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_docs"');
         // '' is falsy, so `||` yields 'live'. And `??` yields '' (only nullish
         // falls through). Asserting both proves the selector ran in JS with real
         // values rather than being resolved to a single column at capture time.
@@ -615,7 +615,7 @@ describe('short-circuit selectors fall back to in-memory projection (I2)', () =>
         provider.nextResult({ rows: [{ id: 1, status: 'live', title: '', deletedat: null }], rowCount: 1 });
         const results = await db.set(SgDoc).select(d => ({ label: d.title || d.status, s: d.status })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_docs');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_docs"');
         expect(results).toEqual([{ label: 'live', s: 'live' }]);
     });
 
@@ -630,7 +630,7 @@ describe('short-circuit selectors fall back to in-memory projection (I2)', () =>
         const { db, provider } = makeDb('postgresql');
         await db.set(SgDoc).select(d => ({ a: d.title, b: d.status })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT title AS a, status AS b FROM sqlgen_docs');
+        expect(provider.lastCall!.sql).toBe('SELECT "title" AS "a", "status" AS "b" FROM "sqlgen_docs"');
     });
 });
 
@@ -647,25 +647,25 @@ describe('grouped aggregates require a column selector', () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(SgUser).groupBy(u => u.age).select(g => ({ n: g.count() })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT age, COUNT(*) as n FROM sqlgen_users GROUP BY age');
+        expect(provider.lastCall!.sql).toBe('SELECT "age", COUNT(*) as "n" FROM "sqlgen_users" GROUP BY "age"');
     });
 });
 
 describe('Raw SQL passthrough', () => {
     it('passes fromSqlRaw SQL and params through verbatim', async () => {
         const { db, provider } = makeDb('postgresql');
-        await db.set(SgUser).fromSqlRaw('SELECT * FROM sqlgen_users WHERE age > $1', [18]).toList();
+        await db.set(SgUser).fromSqlRaw('SELECT * FROM "sqlgen_users" WHERE "age" > $1', [18]).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM sqlgen_users WHERE age > $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "sqlgen_users" WHERE "age" > $1');
         expect(provider.lastCall!.params).toEqual([18]);
     });
 
     it('executeSqlRaw returns the affected row count', async () => {
         const { db, provider } = makeDb('postgresql');
         provider.nextResult({ rows: [], rowCount: 5 });
-        const affected = await db.executeSqlRaw('UPDATE sqlgen_users SET age = $1', [1]);
+        const affected = await db.executeSqlRaw('UPDATE "sqlgen_users" SET "age" = $1', [1]);
 
-        expect(provider.lastCall!.sql).toBe('UPDATE sqlgen_users SET age = $1');
+        expect(provider.lastCall!.sql).toBe('UPDATE "sqlgen_users" SET "age" = $1');
         expect(affected).toBe(5);
     });
 });
@@ -684,7 +684,7 @@ describe('select(u => u.prop) result shape (#45)', () => {
 
         const ages = await db.set(SgUser).select(u => u.age).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT age FROM sqlgen_users');
+        expect(provider.lastCall!.sql).toBe('SELECT "age" FROM "sqlgen_users"');
         expect(ages).toEqual([30, 41]);
     });
 
@@ -694,7 +694,7 @@ describe('select(u => u.prop) result shape (#45)', () => {
 
         const names = await db.set(SgAccount).select(a => a.fullName).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT full_name FROM sqlgen_accounts');
+        expect(provider.lastCall!.sql).toBe('SELECT "full_name" FROM "sqlgen_accounts"');
         expect(names).toEqual(['Ada', 'Grace']);
     });
 

@@ -113,7 +113,7 @@ export class SqliteTranslator extends SqlTranslator {
                 return [];
             case 'ensureUniqueConstraint':
                 return [{
-                    text: `CREATE UNIQUE INDEX ${op.constraint} ON ${op.table} (${op.columns.join(', ')})`,
+                    text: `CREATE UNIQUE INDEX ${this.quoteDdlName(op.constraint, op.op)} ON ${this.quoteDdlName(op.table, op.op)} (${op.columns.map((c) => this.quoteDdlName(c, op.op)).join(', ')})`,
                     params: [],
                 }];
             default:

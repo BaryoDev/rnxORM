@@ -2330,8 +2330,19 @@ builder.createTable('UserAccounts', ...)  // CREATE TABLE "UserAccounts" (...)
 The PostgreSQL manual's advice is to "always quote a particular name or never
 quote it", so quoting a name that was previously emitted bare would point it at
 a different table. Note that a mixed-case name creates a case-sensitive table
-(`UserAccounts`, not `useraccounts`), and the string query API does not quote,
-so stick to lower-case names unless you have a reason not to.
+(`UserAccounts`, not `useraccounts`).
+
+**Queries and `ensureCreated()` quote every identifier.** `SELECT`, `INSERT`,
+`UPDATE`, `DELETE` and `ORDER BY` emit each table and column name quoted for the
+dialect (`"order"`, `` `order` ``, `[order]`), with a quote character inside a
+name doubled. An entity named `Order`, `User` or `Group` works on all three
+providers. The string query API (`where('name', '=', x)`) still validates names
+against the mapped columns before quoting them. On PostgreSQL a name quoted in a
+query is case-sensitive, so a table or column that was created with a mixed-case
+name unquoted (and so folded to lower case) has to be addressed in lower case.
+`ensureCreated()` now creates mixed-case names quoted, which means they are
+case-sensitive too; an existing database that holds the folded name needs the
+entity's table or column name set to the lower-case form.
 
 String defaults have their embedded quotes doubled, so a default value cannot
 close the literal it sits in. Column types must look like a type

@@ -128,6 +128,15 @@ function sqls(postgresql: string, mssql: string, mariadb: string): Record<Dialec
     return { postgresql, mssql, mariadb };
 }
 
+const MAPPED_COLUMNS = /\b(email|age|nickname|full_name|code)\b/g;
+
+/** The cases below spell columns bare. The translator quotes them per dialect. */
+function quoteColumns(text: string, dialect: Dialect): string {
+    return text.replace(MAPPED_COLUMNS, (c) =>
+        dialect === 'postgresql' ? `"${c}"` : dialect === 'mssql' ? `[${c}]` : `\`${c}\``
+    );
+}
+
 describe('condition builders: SQL per dialect', () => {
     const cases: [string, (u: CbUser) => any, Record<Dialect, string>, any[]][] = [
         ['eq', u => eq(u.email, 'a'), sqls('email = $1', 'email = @p0', 'email = ?'), ['a']],
@@ -158,7 +167,7 @@ describe('condition builders: SQL per dialect', () => {
             it(`${name} on ${dialect}`, async () => {
                 const { db, provider } = makeDb(dialect);
                 await db.set(CbUser).where(build).toList();
-                expect(provider.lastCall!.sql).toContain(` WHERE ${sql[dialect]}`);
+                expect(provider.lastCall!.sql).toContain(` WHERE ${quoteColumns(sql[dialect], dialect)}`);
                 expect(provider.lastCall!.params ?? []).toEqual(params);
             });
         }
@@ -177,7 +186,7 @@ describe('condition builders: SQL per dialect', () => {
         call = await run(u => notInArray(u.code, ['a', 'b']));
         expect(call.params).toEqual(['db:a', 'db:b']);
         call = await run(u => and(eq(u.name, 'x'), eq(u.code, 'y')));
-        expect(call.sql).toContain(' WHERE full_name = $1 AND code = $2');
+        expect(call.sql).toContain(' WHERE "full_name" = $1 AND "code" = $2');
         expect(call.params).toEqual(['x', 'db:y']);
         call = await run(u => or(eq(u.name, 'x'), eq(u.code, 'y')));
         expect(call.params).toEqual(['x', 'db:y']);
@@ -191,9 +200,9 @@ describe('condition builders: SQL per dialect', () => {
             const a = u.age;
             return and(gt(a, 1), lt(a, 5));
         }).toList();
-        expect(provider.lastCall!.sql).toContain(' WHERE age > $1 AND age < $2');
+        expect(provider.lastCall!.sql).toContain(' WHERE "age" > $1 AND "age" < $2');
         await db.set(CbUser).where(({ age }) => and(gt(age, 1), lt(age, 5))).toList();
-        expect(provider.lastCall!.sql).toContain(' WHERE age > $1 AND age < $2');
+        expect(provider.lastCall!.sql).toContain(' WHERE "age" > $1 AND "age" < $2');
     });
 
     it('checks the column before the operator on the string path', () => {
@@ -216,13 +225,13 @@ describe('condition builders: SQL per dialect', () => {
     it('ilike renders on postgresql', async () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(CbUser).where(u => ilike(u.email, '%a')).toList();
-        expect(provider.lastCall!.sql).toContain(' WHERE email ILIKE $1');
+        expect(provider.lastCall!.sql).toContain(' WHERE "email" ILIKE $1');
     });
 
     it('where chains on QueryBuilder and works on SelectQueryBuilder', async () => {
         const { db, provider } = makeDb('postgresql');
         await db.set(CbUser).where(u => gt(u.age, 1)).where(u => eq(u.email, 'a')).toList();
-        expect(provider.lastCall!.sql).toContain(' WHERE age > $1 AND email = $2');
+        expect(provider.lastCall!.sql).toContain(' WHERE "age" > $1 AND "email" = $2');
     });
 
     it.each(['postgresql', 'mssql', 'mariadb'] as Dialect[])(

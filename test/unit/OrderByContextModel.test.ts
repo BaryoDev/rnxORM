@@ -28,24 +28,24 @@ describe('orderBy resolves columns against the context model', () => {
     it('uses the context column name for a selector on QueryBuilder', async () => {
         const { p, ctx } = setup();
         await ctx.set(ObUser).orderBy(u => u.name).toList();
-        expect(p.lastCall!.sql).toContain('ORDER BY full_name ASC');
+        expect(p.lastCall!.sql).toContain('ORDER BY "full_name" ASC');
     });
 
     it('uses the context column name for a keyof string on QueryBuilder', async () => {
         const { p, ctx } = setup();
         await ctx.set(ObUser).orderByDescending('name').toList();
-        expect(p.lastCall!.sql).toContain('ORDER BY full_name DESC');
+        expect(p.lastCall!.sql).toContain('ORDER BY "full_name" DESC');
     });
 
     it('uses the context column name for a selector on SelectQueryBuilder', async () => {
         const { p, ctx } = setup();
         await ctx.set(ObUser).select(u => ({ n: u.name })).orderBy(u => u.name).toList();
-        expect(p.lastCall!.sql).toContain('ORDER BY full_name ASC');
+        expect(p.lastCall!.sql).toContain('ORDER BY "full_name" ASC');
     });
 
     it('uses the context column name for a keyof string on SelectQueryBuilder', async () => {
         const { p, ctx } = setup();
         await ctx.set(ObUser).select(u => ({ n: u.name })).orderByDescending('name').toList();
-        expect(p.lastCall!.sql).toContain('ORDER BY full_name DESC');
+        expect(p.lastCall!.sql).toContain('ORDER BY "full_name" DESC');
     });
 });

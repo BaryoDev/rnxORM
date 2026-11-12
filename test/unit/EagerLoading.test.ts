@@ -93,8 +93,8 @@ describe('eager loading with include()', () => {
 
         const posts = await db.set(ElPost).include(p => p.author).toList();
 
-        expect(provider.calls[0].sql).toBe('SELECT * FROM el_posts');
-        expect(provider.calls[1].sql).toBe('SELECT * FROM el_authors WHERE id IN ($1)');
+        expect(provider.calls[0].sql).toBe('SELECT * FROM "el_posts"');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "el_authors" WHERE "id" IN ($1)');
         expect(provider.calls[1].params).toEqual([10]);
 
         expect(posts[0].author.name).toBe('Ann');
@@ -122,7 +122,7 @@ describe('eager loading with include()', () => {
 
         await db.set(ElPost).include(p => p.author).toList();
 
-        expect(provider.calls[1].sql).toBe('SELECT * FROM el_authors WHERE id IN ($1, $2)');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "el_authors" WHERE "id" IN ($1, $2)');
         expect(provider.calls[1].params).toEqual([10, 11]);
     });
 
@@ -145,7 +145,7 @@ describe('eager loading with include()', () => {
 
         const authors = await db.set(ElAuthor).include(a => a.posts).toList();
 
-        expect(provider.calls[1].sql).toBe('SELECT * FROM el_posts WHERE authorid IN ($1, $2)');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "el_posts" WHERE "authorid" IN ($1, $2)');
         expect(provider.calls[1].params).toEqual([10, 11]);
 
         expect(authors[0].posts).toHaveLength(2);
@@ -163,7 +163,7 @@ describe('eager loading with include()', () => {
 
         const users = await db.set(ElUser).include(u => u.profile).toList();
 
-        expect(provider.calls[1].sql).toBe('SELECT * FROM el_profiles WHERE id IN ($1)');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "el_profiles" WHERE "id" IN ($1)');
         expect(users[0].profile.bio).toBe('Hello');
     });
 
@@ -194,9 +194,9 @@ describe('eager loading with include()', () => {
 
         const students = await db.set(ElStudent).include(s => s.courses).toList();
 
-        expect(provider.calls[1].sql).toBe('SELECT * FROM elcourse_elstudent WHERE elstudentid IN ($1, $2)');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "elcourse_elstudent" WHERE "elstudentid" IN ($1, $2)');
         expect(provider.calls[1].params).toEqual([1, 2]);
-        expect(provider.calls[2].sql).toBe('SELECT * FROM el_courses WHERE id IN ($1, $2)');
+        expect(provider.calls[2].sql).toBe('SELECT * FROM "el_courses" WHERE "id" IN ($1, $2)');
         expect(provider.calls[2].params).toEqual([100, 101]);
 
         expect(students[0].courses.map(c => c.title)).toEqual(['Math', 'Art']);

@@ -119,7 +119,7 @@ describe('change detection by value (#40)', () => {
 
         expect(saved).toBe(1);
         const update = provider.calls.find(c => c.sql.startsWith('UPDATE'))!;
-        expect(update.sql).toContain('lastseen =');
+        expect(update.sql).toContain('"lastseen" =');
     });
 
     it('detects an edit to a nested object', async () => {
@@ -134,7 +134,7 @@ describe('change detection by value (#40)', () => {
 
         expect(saved).toBe(1);
         const update = provider.calls.find(c => c.sql.startsWith('UPDATE'))!;
-        expect(update.sql).toContain('config =');
+        expect(update.sql).toContain('"config" =');
         expect(update.params![0]).toEqual({ theme: 'light' });
     });
 
@@ -150,7 +150,7 @@ describe('change detection by value (#40)', () => {
 
         expect(saved).toBe(1);
         const update = provider.calls.find(c => c.sql.startsWith('UPDATE'))!;
-        expect(update.sql).toContain('tags =');
+        expect(update.sql).toContain('"tags" =');
         expect(update.params![0]).toEqual(['a', 'b']);
     });
 
@@ -251,10 +251,10 @@ describe('update() on a detached entity (#33)', () => {
         expect(saved).toBe(1);
         const update = provider.calls.find(c => c.sql.startsWith('UPDATE'))!;
         expect(update).toBeDefined();
-        expect(update.sql).toContain('name =');
-        expect(update.sql).toContain('config =');
-        expect(update.sql).toContain('tags =');
-        expect(update.sql).toContain('WHERE id =');
+        expect(update.sql).toContain('"name" =');
+        expect(update.sql).toContain('"config" =');
+        expect(update.sql).toContain('"tags" =');
+        expect(update.sql).toContain('WHERE "id" =');
     });
 
     it('does not write the primary key into the SET clause', async () => {
@@ -306,7 +306,7 @@ describe('delete concurrency and token handling (#41)', () => {
         await db.saveChanges();
 
         const del = provider.calls.find(c => c.sql.startsWith('DELETE'))!;
-        expect(del.sql).toBe('DELETE FROM cd_users WHERE id = $1 AND version = $2');
+        expect(del.sql).toBe('DELETE FROM "cd_users" WHERE "id" = $1 AND "version" = $2');
         expect(del.params).toEqual([1, 1]);
     });
 
@@ -385,7 +385,7 @@ describe('save ordering and key propagation (#36)', () => {
 
         const tables = provider.calls
             .filter(c => c.sql.startsWith('INSERT'))
-            .map(c => c.sql.match(/INSERT INTO (\w+)/)![1]);
+            .map(c => c.sql.match(/INSERT INTO \W?(\w+)/)![1]);
         expect(tables).toEqual(['cd_users', 'cd_posts']);
     });
 
@@ -408,7 +408,7 @@ describe('save ordering and key propagation (#36)', () => {
         expect(user.id).toBe(7);
         expect((post as any).authorid).toBe(7);
 
-        const postInsert = provider.calls.find(c => c.sql.includes('INSERT INTO cd_posts'))!;
+        const postInsert = provider.calls.find(c => c.sql.includes('INSERT INTO "cd_posts"'))!;
         expect(postInsert.sql).toContain('authorid');
         expect(postInsert.params).toContain(7);
     });
@@ -430,7 +430,7 @@ describe('save ordering and key propagation (#36)', () => {
 
         const tables = provider.calls
             .filter(c => c.sql.startsWith('DELETE'))
-            .map(c => c.sql.match(/DELETE FROM (\w+)/)![1]);
+            .map(c => c.sql.match(/DELETE FROM \W?(\w+)/)![1]);
         expect(tables).toEqual(['cd_posts', 'cd_users']);
     });
 
@@ -445,7 +445,7 @@ describe('save ordering and key propagation (#36)', () => {
         db.set(CdPost).add(post);
         await db.saveChanges();
 
-        const insert = provider.calls.find(c => c.sql.includes('INSERT INTO cd_posts'))!;
+        const insert = provider.calls.find(c => c.sql.includes('INSERT INTO "cd_posts"'))!;
         expect(insert.params).toContain(42);
     });
 
