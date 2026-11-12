@@ -36,7 +36,28 @@ export function fromDb(value: unknown, declaredType: string | null): unknown {
     return value;
 }
 
+/**
+ * better-sqlite3's native code builds its errors with the constructor of the
+ * first Jest context that loaded the addon. In a worker that runs several test
+ * files, a later file then gets an error that is not `instanceof` its own
+ * `Error`, and `rejects.toThrow()` does not recognise it. Rethrowing a plain
+ * Error keeps the message and the SQLite code.
+ */
+function plainError(error: unknown): Error {
+    if (error instanceof Error) return error;
+    const source = error as { message?: unknown; code?: unknown } | null;
+    return Object.assign(new Error(String(source?.message ?? error)), { code: source?.code });
+}
+
 function runStatement(db: Database.Database, text: string, params: QueryParameter[] = []): QueryResult {
+    try {
+        return runStatementRaw(db, text, params);
+    } catch (error) {
+        throw plainError(error);
+    }
+}
+
+function runStatementRaw(db: Database.Database, text: string, params: QueryParameter[]): QueryResult {
     const stmt = db.prepare(text);
     const bound = params.map(toBindValue);
     if (stmt.reader) {

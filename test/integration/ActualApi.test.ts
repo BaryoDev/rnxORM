@@ -384,7 +384,18 @@ describe('Actual API Integration Tests', () => {
 
                 users.add(user2);
 
-                await expect(db.saveChanges()).rejects.toThrow();
+                // Assert on the error itself, not rejects.toThrow(): an error object
+                // from a native driver can come from another realm and fail
+                // Jest's Error check even though the insert was rejected.
+                let rejection: unknown;
+                try {
+                    await db.saveChanges();
+                } catch (error) {
+                    rejection = error;
+                }
+                expect(rejection).toBeDefined();
+                const shown = `${(rejection as { code?: unknown })?.code ?? ''} ${(rejection as { message?: unknown })?.message ?? rejection}`;
+                expect(shown).toMatch(/duplicate|unique|primary key|constraint/i);
             });
 
             it('should handle rapid consecutive queries', async () => {
