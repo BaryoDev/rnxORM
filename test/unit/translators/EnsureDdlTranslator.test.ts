@@ -332,6 +332,20 @@ describe('ensureCreated DDL translation', () => {
             );
         });
 
+        it('repeats AUTO_INCREMENT on MariaDB and accepts a backslash-escaped default', () => {
+            expect(
+                render('mariadb', {
+                    op: 'ensureAlterColumnType',
+                    table: 't',
+                    column: 'n',
+                    type: 'integer',
+                    existingNullable: false,
+                    existingDefault: "'it\\'s'",
+                    existingAutoIncrement: true,
+                })
+            ).toBe("ALTER TABLE `t` MODIFY COLUMN `n` INT NOT NULL DEFAULT 'it\\'s' AUTO_INCREMENT");
+        });
+
         it('leaves a nullable column nullable', () => {
             expectPerDialect(
                 { op: 'ensureAlterColumnType', table: 't', column: 'name', type: 'text', existingNullable: true },

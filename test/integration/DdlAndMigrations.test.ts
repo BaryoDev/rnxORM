@@ -41,6 +41,9 @@ async function cleanMigrationTables(db: DbContext): Promise<void> {
 }
 
 describe('migrations on real databases', () => {
+    // Without a real database the file would hold no test, which Jest fails.
+    if (realProviders.length === 0) it.skip('needs a real database (USE_REAL_DB=true)', () => undefined);
+
     let logSpy: jest.SpyInstance;
     beforeEach(() => {
         logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);

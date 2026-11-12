@@ -293,7 +293,7 @@ export abstract class SqlTranslator {
         table: string,
         column: string,
         type: string,
-        keep: { nullable?: boolean; defaultSql?: string }
+        keep: { nullable?: boolean; defaultSql?: string; autoIncrement?: boolean }
     ): string;
 
     protected renderDdlBoolean(value: boolean): string {
@@ -437,6 +437,7 @@ export abstract class SqlTranslator {
                 return one(
                     this.renderEnsureAlterColumnType(name(op.table), name(op.column), this.mapType(op.type), {
                         nullable: op.existingNullable,
+                        autoIncrement: op.existingAutoIncrement,
                         defaultSql:
                             op.existingDefault === undefined ? undefined : assertDefaultExpression(op.existingDefault, api),
                     })

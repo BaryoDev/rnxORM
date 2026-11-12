@@ -937,6 +937,7 @@ export class DbContext {
                         defaultSql: r.column_default === undefined || r.column_default === null
                             ? undefined
                             : String(r.column_default),
+                        autoIncrement: String(r.extra ?? '').toLowerCase().includes('auto_increment'),
                     },
                 ])
             );
@@ -963,6 +964,7 @@ export class DbContext {
                                 type: col.type,
                                 existingNullable: existing.nullable,
                                 existingDefault: existing.defaultSql,
+                                existingAutoIncrement: existing.autoIncrement || undefined,
                             });
                         } catch (error: any) {
                             // Data may be incompatible, or the column's default could not be repeated.

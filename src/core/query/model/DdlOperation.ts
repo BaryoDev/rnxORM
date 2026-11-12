@@ -173,6 +173,8 @@ export interface EnsureAlterColumnTypeOp {
     existingNullable?: boolean;
     /** The column's current default as the database reports it (an SQL expression). */
     existingDefault?: string;
+    /** The column is AUTO_INCREMENT today (MariaDB). */
+    existingAutoIncrement?: boolean;
 }
 
 export type DdlOperation =

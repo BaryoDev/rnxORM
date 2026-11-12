@@ -240,13 +240,13 @@ describe('MigrationBuilder', () => {
 
     describe('addColumn', () => {
         it.each(DIALECTS)(
-            'emits ALTER TABLE ... ADD COLUMN for %s',
+            'emits ALTER TABLE ... ADD COLUMN for %s (ADD on mssql)',
             async dialect => {
                 const queries = await runBuilder(dialect, b =>
                     b.addColumn('mig_users', 'age', 'INTEGER')
                 );
                 expect(queries.map(c => c.sql)).toEqual([
-                    `ALTER TABLE ${q('mig_users', dialect)} ADD COLUMN ${q('age', dialect)} INTEGER`
+                    `ALTER TABLE ${q('mig_users', dialect)} ${dialect === 'mssql' ? 'ADD' : 'ADD COLUMN'} ${q('age', dialect)} INTEGER`
                 ]);
             }
         );

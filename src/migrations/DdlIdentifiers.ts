@@ -88,13 +88,13 @@ export function assertColumnType(type: string, apiName: string): string {
 
 /**
  * Validate a column default read back from the database's own metadata, so it
- * can be repeated in a MODIFY. Accepts NULL, a number, a quoted string with
- * doubled quotes, and CURRENT_TIMESTAMP in its usual spellings. Anything else
+ * can be repeated in a MODIFY. Accepts NULL, a number, a quoted string (doubled
+ * or backslash-escaped quotes), and CURRENT_TIMESTAMP in its usual spellings. Anything else
  * is refused rather than interpolated.
  * @throws when the expression is not one of those shapes
  */
 const DEFAULT_EXPRESSION =
-    /^(NULL|-?\d+(\.\d+)?|'(?:[^']|'')*'|(CURRENT_TIMESTAMP|NOW)(\(\d*\))?)$/i;
+    /^(NULL|-?\d+(\.\d+)?|'(?:[^'\\]|''|\\.)*'|(CURRENT_TIMESTAMP|NOW)(\(\d*\))?)$/i;
 
 export function assertDefaultExpression(expression: string, apiName: string): string {
     const trimmed = String(expression).trim();
