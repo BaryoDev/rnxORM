@@ -35,25 +35,25 @@ describe('where and aggregates resolve columns against the context model', () =>
         it('uses the mapped column for a condition lambda on QueryBuilder', async () => {
             const { p, ctx } = setup();
             await ctx.set(WaUser).where(u => eq(u.name, 'a')).toList();
-            expect(p.lastCall!.sql).toContain('WHERE full_name');
+            expect(p.lastCall!.sql).toContain('WHERE "full_name"');
         });
 
         it('uses the mapped column for the string form on QueryBuilder', async () => {
             const { p, ctx } = setup();
             await ctx.set(WaUser).where('name', '=', 'a').toList();
-            expect(p.lastCall!.sql).toContain('WHERE full_name');
+            expect(p.lastCall!.sql).toContain('WHERE "full_name"');
         });
 
         it('uses the mapped column for a condition lambda on SelectQueryBuilder', async () => {
             const { p, ctx } = setup();
             await ctx.set(WaUser).select(u => ({ n: u.name })).where(u => eq(u.name, 'a')).toList();
-            expect(p.lastCall!.sql).toContain('WHERE full_name');
+            expect(p.lastCall!.sql).toContain('WHERE "full_name"');
         });
 
         it('uses the mapped column for the string form on SelectQueryBuilder', async () => {
             const { p, ctx } = setup();
             await ctx.set(WaUser).select(u => ({ n: u.name })).where('name', '=', 'a').toList();
-            expect(p.lastCall!.sql).toContain('WHERE full_name');
+            expect(p.lastCall!.sql).toContain('WHERE "full_name"');
         });
     });
 
@@ -65,13 +65,13 @@ describe('where and aggregates resolve columns against the context model', () =>
             it(`${fn} uses the mapped column on DbSet`, async () => {
                 const { p, ctx } = setup();
                 await (ctx.set(WaUser) as any)[fn]((u: WaUser) => u.salary);
-                expect(p.lastCall!.sql).toContain(`${sqlFn[fn]}(pay)`);
+                expect(p.lastCall!.sql).toContain(`${sqlFn[fn]}("pay")`);
             });
 
             it(`${fn} uses the mapped column on QueryBuilder`, async () => {
                 const { p, ctx } = setup();
                 await (ctx.set(WaUser).where(u => gt(u.salary, 1)) as any)[fn]((u: WaUser) => u.salary);
-                expect(p.lastCall!.sql).toContain(`${sqlFn[fn]}(pay)`);
+                expect(p.lastCall!.sql).toContain(`${sqlFn[fn]}("pay")`);
             });
         }
     });
@@ -83,7 +83,7 @@ describe('where and aggregates resolve columns against the context model', () =>
                 .having('SUM(salary)', '>', 1)
                 .select(g => ({ k: g.key, s: g.sum(u => u.salary) }))
                 .toList();
-            expect(p.lastCall!.sql).toContain('HAVING SUM(pay)');
+            expect(p.lastCall!.sql).toContain('HAVING SUM("pay")');
         });
 
         it('orderBy uses the mapped column', async () => {
@@ -92,7 +92,7 @@ describe('where and aggregates resolve columns against the context model', () =>
                 .orderBy('name')
                 .select(g => ({ k: g.key, s: g.sum(u => u.salary) }))
                 .toList();
-            expect(p.lastCall!.sql).toContain('ORDER BY full_name');
+            expect(p.lastCall!.sql).toContain('ORDER BY "full_name"');
         });
 
         it('orderByDescending uses the mapped column', async () => {
@@ -101,7 +101,7 @@ describe('where and aggregates resolve columns against the context model', () =>
                 .orderByDescending('name')
                 .select(g => ({ k: g.key, s: g.sum(u => u.salary) }))
                 .toList();
-            expect(p.lastCall!.sql).toContain('ORDER BY full_name DESC');
+            expect(p.lastCall!.sql).toContain('ORDER BY "full_name" DESC');
         });
     });
 });
@@ -125,11 +125,11 @@ describe('aggregate column type comes from the context model', () => {
     it('average casts an int column on DbSet', async () => {
         const { p, ctx } = setup();
         await ctx.set(WaTyped).average(u => u.salary);
-        expect(p.lastCall!.sql).toContain('AVG(CAST(pay AS DECIMAL(38,6)))');
+        expect(p.lastCall!.sql).toContain('AVG(CAST([pay] AS DECIMAL(38,6)))');
     });
     it('average casts an int column on QueryBuilder', async () => {
         const { p, ctx } = setup();
         await ctx.set(WaTyped).where(u => gt(u.salary, 1)).average(u => u.salary);
-        expect(p.lastCall!.sql).toContain('AVG(CAST(pay AS DECIMAL(38,6)))');
+        expect(p.lastCall!.sql).toContain('AVG(CAST([pay] AS DECIMAL(38,6)))');
     });
 });

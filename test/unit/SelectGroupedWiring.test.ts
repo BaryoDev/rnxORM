@@ -80,13 +80,13 @@ describe('select() pagination text', () => {
     it.each<CaptureDialect>(['postgresql', 'mariadb'])('%s: skip/take with no WHERE or ORDER BY uses one space', async dialect => {
         const { db, provider } = makeDb(dialect);
         await db.set(SgwOrder).select(o => ({ c: o.cat })).take(3).toList();
-        expect(provider.lastCall!.sql).toContain('FROM sgw_orders LIMIT 3');
+        expect(provider.lastCall!.sql).toContain(dialect === 'mariadb' ? 'FROM `sgw_orders` LIMIT 3' : 'FROM "sgw_orders" LIMIT 3');
         expect(provider.lastCall!.sql).not.toContain('  ');
     });
 
     it('mariadb: skip without take renders the largest LIMIT', async () => {
         const { db, provider } = makeDb('mariadb');
         await db.set(SgwOrder).select(o => ({ c: o.cat })).skip(3).toList();
-        expect(provider.lastCall!.sql).toContain('FROM sgw_orders LIMIT 18446744073709551615 OFFSET 3');
+        expect(provider.lastCall!.sql).toContain('FROM `sgw_orders` LIMIT 18446744073709551615 OFFSET 3');
     });
 });

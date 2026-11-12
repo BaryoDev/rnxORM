@@ -16,9 +16,19 @@ const translators: Record<Dialect, SqlTranslator> = {
 };
 const dialects = Object.keys(translators) as Dialect[];
 
-/** Expected text uses {n} for the nth placeholder; this fills in the dialect's form. */
+/** Quotes one name the way the dialect does. */
+function quote(name: string, dialect: Dialect): string {
+    if (dialect === 'postgresql') return `"${name}"`;
+    if (dialect === 'mssql') return `[${name}]`;
+    return `\`${name}\``;
+}
+
+/**
+ * Expected text writes quoted names with double quotes and uses {n} for the
+ * nth placeholder; this fills in the dialect's quotes and placeholders.
+ */
 function fill(template: string, dialect: Dialect): string {
-    return template.replace(/\{(\d+)\}/g, (_m, n: string) => {
+    return template.replace(/"([^"]+)"/g, (_m, name: string) => quote(name, dialect)).replace(/\{(\d+)\}/g, (_m, n: string) => {
         if (dialect === 'postgresql') return `$${n}`;
         if (dialect === 'mssql') return `@p${Number(n) - 1}`;
         return '?';
@@ -44,16 +54,16 @@ describe('DML translation', () => {
 
             it('renders a plain insert without returning', () => {
                 const stmt = t.translateInsert(model);
-                expect(stmt.text).toBe(fill('INSERT INTO users (name, age) VALUES ({1}, {2})', dialect));
+                expect(stmt.text).toBe(fill('INSERT INTO "users" ("name", "age") VALUES ({1}, {2})', dialect));
                 expect(stmt.params).toEqual(['Ann', 30]);
             });
 
             it('asks for the generated key when returning is set', () => {
                 const stmt = t.translateInsert({ ...model, returning: 'id' });
                 const expected = {
-                    postgresql: 'INSERT INTO users (name, age) VALUES ({1}, {2}) RETURNING id',
-                    mssql: 'INSERT INTO users (name, age) OUTPUT INSERTED.id VALUES ({1}, {2})',
-                    mariadb: 'INSERT INTO users (name, age) VALUES ({1}, {2})',
+                    postgresql: 'INSERT INTO "users" ("name", "age") VALUES ({1}, {2}) RETURNING "id"',
+                    mssql: 'INSERT INTO "users" ("name", "age") OUTPUT INSERTED."id" VALUES ({1}, {2})',
+                    mariadb: 'INSERT INTO "users" ("name", "age") VALUES ({1}, {2})',
                 }[dialect];
                 expect(stmt.text).toBe(fill(expected, dialect));
                 expect(stmt.params).toEqual(['Ann', 30]);
@@ -68,8 +78,8 @@ describe('DML translation', () => {
                 });
                 const expected =
                     dialect === 'mssql'
-                        ? 'SET IDENTITY_INSERT users ON; INSERT INTO users (id, name) VALUES ({1}, {2}); SET IDENTITY_INSERT users OFF'
-                        : 'INSERT INTO users (id, name) VALUES ({1}, {2})';
+                        ? 'SET IDENTITY_INSERT "users" ON; INSERT INTO "users" ("id", "name") VALUES ({1}, {2}); SET IDENTITY_INSERT "users" OFF'
+                        : 'INSERT INTO "users" ("id", "name") VALUES ({1}, {2})';
                 expect(stmt.text).toBe(fill(expected, dialect));
                 expect(stmt.params).toEqual([7, 'Ann']);
             });
@@ -87,7 +97,7 @@ describe('DML translation', () => {
                 };
                 const stmt = t.translateUpdate(model);
                 expect(stmt.text).toBe(
-                    fill('UPDATE users SET name = {1}, version = {2} WHERE id = {3} AND version = {4}', dialect)
+                    fill('UPDATE "users" SET "name" = {1}, "version" = {2} WHERE "id" = {3} AND "version" = {4}', dialect)
                 );
                 expect(stmt.params).toEqual(['Bob', 3, 5, 2]);
             });
@@ -98,7 +108,7 @@ describe('DML translation', () => {
                     set: [{ column: 'name', value: 'Bob' }],
                     where: { op: 'and', parts: [eq('id', 5)] },
                 });
-                expect(stmt.text).toBe(fill('UPDATE users SET name = {1} WHERE id = {2}', dialect));
+                expect(stmt.text).toBe(fill('UPDATE "users" SET "name" = {1} WHERE "id" = {2}', dialect));
                 expect(stmt.params).toEqual(['Bob', 5]);
             });
 
@@ -111,7 +121,7 @@ describe('DML translation', () => {
             it('renders the key predicate', () => {
                 const model: DeleteModel = { table: 'users', where: { op: 'and', parts: [eq('id', 5)] } };
                 const stmt = t.translateDelete(model);
-                expect(stmt.text).toBe(fill('DELETE FROM users WHERE id = {1}', dialect));
+                expect(stmt.text).toBe(fill('DELETE FROM "users" WHERE "id" = {1}', dialect));
                 expect(stmt.params).toEqual([5]);
             });
 
@@ -120,7 +130,7 @@ describe('DML translation', () => {
                     table: 'users',
                     where: { op: 'and', parts: [eq('id', 5), eq('version', 2)] },
                 });
-                expect(stmt.text).toBe(fill('DELETE FROM users WHERE id = {1} AND version = {2}', dialect));
+                expect(stmt.text).toBe(fill('DELETE FROM "users" WHERE "id" = {1} AND "version" = {2}', dialect));
                 expect(stmt.params).toEqual([5, 2]);
             });
         });
@@ -132,7 +142,35 @@ describe('DML translation', () => {
             set: [{ column: 'name', value: 'Bob' }],
             where: { op: 'and', parts: [eq('id', 5), eq('version', 2)] },
         });
-        expect(stmt.text).toBe('UPDATE users SET name = ? WHERE id = ? AND version = ?');
+        expect(stmt.text).toBe('UPDATE `users` SET `name` = ? WHERE `id` = ? AND `version` = ?');
         expect(stmt.params).toEqual(['Bob', 5, 2]);
+    });
+});
+
+describe('DML identifier quoting for reserved words', () => {
+    it.each([
+        [
+            'postgresql',
+            'INSERT INTO "user" ("order", "group") VALUES ($1, $2) RETURNING "id"',
+            'UPDATE "user" SET "order" = $1 WHERE "id" = $2',
+            'DELETE FROM "user" WHERE "id" = $1',
+        ],
+        [
+            'mssql',
+            'INSERT INTO [user] ([order], [group]) OUTPUT INSERTED.[id] VALUES (@p0, @p1)',
+            'UPDATE [user] SET [order] = @p0 WHERE [id] = @p1',
+            'DELETE FROM [user] WHERE [id] = @p0',
+        ],
+        [
+            'mariadb',
+            'INSERT INTO `user` (`order`, `group`) VALUES (?, ?)',
+            'UPDATE `user` SET `order` = ? WHERE `id` = ?',
+            'DELETE FROM `user` WHERE `id` = ?',
+        ],
+    ] as const)('%s', (dialect, insert, update, del) => {
+        const t = translators[dialect];
+        expect(t.translateInsert({ table: 'user', columns: ['order', 'group'], values: [1, 2], returning: 'id' }).text).toBe(insert);
+        expect(t.translateUpdate({ table: 'user', set: [{ column: 'order', value: 1 }], where: eq('id', 5) }).text).toBe(update);
+        expect(t.translateDelete({ table: 'user', where: eq('id', 5) }).text).toBe(del);
     });
 });

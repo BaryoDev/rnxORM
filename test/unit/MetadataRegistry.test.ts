@@ -62,7 +62,7 @@ describe('one registry across copies of the package (#53)', () => {
 
         await ctx.set(DupUser).toList();
 
-        expect(p.lastCall!.sql).toBe('SELECT * FROM dup_users');
+        expect(p.lastCall!.sql).toBe('SELECT * FROM "dup_users"');
     });
 
     it('lets a context of one copy retarget an entity decorated by the other', async () => {
@@ -82,7 +82,7 @@ describe('one registry across copies of the package (#53)', () => {
         const ctx = new RetargetingContext(p);
         await ctx.set(DupOrder).toList();
 
-        expect(p.lastCall!.sql).toBe('SELECT * FROM tenant_orders');
+        expect(p.lastCall!.sql).toBe('SELECT * FROM "tenant_orders"');
         // The scoped model is a copy of what the other copy's decorators
         // registered, not an empty entry created by `mb.entity()`.
         expect(ctx.metadata.getEntity(DupOrder)!.columns.map(c => c.columnName)).toEqual(['id']);

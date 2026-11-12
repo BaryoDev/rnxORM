@@ -42,6 +42,10 @@ export class MariaDbTranslator extends SqlTranslator {
         return `LOWER(${left}) LIKE LOWER(${placeholder})`;
     }
 
+    protected quoteQueryPart(part: string): string {
+        return `\`${part.replace(/`/g, '``')}\``;
+    }
+
     protected quoteDdlPart(part: string): string {
         return `\`${part}\``;
     }

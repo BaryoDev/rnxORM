@@ -58,7 +58,7 @@ describe('value converters end-to-end', () => {
         db.set(VcSetting).add(setting);
         await db.saveChanges();
 
-        const insert = provider.calls.find(c => c.sql.startsWith('INSERT INTO vc_settings'))!;
+        const insert = provider.calls.find(c => c.sql.startsWith('INSERT INTO "vc_settings"'))!;
         expect(insert.params).toContain('["dark","compact"]');
     });
 
@@ -85,7 +85,7 @@ describe('value converters end-to-end', () => {
         setting.tags = ['light'];
         await db.saveChanges();
 
-        const update = provider.calls.find(c => c.sql.startsWith('UPDATE vc_settings'))!;
+        const update = provider.calls.find(c => c.sql.startsWith('UPDATE "vc_settings"'))!;
         expect(update.params).toContain('["light"]');
     });
 });
@@ -103,7 +103,7 @@ describe('keyless entities', () => {
 
         const summaries = await db.set(VcSummary).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM vw_summaries');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "vw_summaries"');
         expect(summaries).toHaveLength(2);
         expect(summaries[1].total).toBe(200);
     });
@@ -190,7 +190,7 @@ describe('value converters on query inputs (#35)', () => {
         const { db, provider } = makeDb();
         await db.set(VcAccount).where('role', '=', VcRole.Admin).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM vc_accounts WHERE role = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "vc_accounts" WHERE "role" = $1');
         expect(provider.lastCall!.params).toEqual(['Admin']);
     });
 
@@ -205,7 +205,7 @@ describe('value converters on query inputs (#35)', () => {
         const { db, provider } = makeDb();
         await db.set(VcAccount).where('role', 'IS', null).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM vc_accounts WHERE role IS NULL');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "vc_accounts" WHERE "role" IS NULL');
         expect(provider.lastCall!.params).toEqual([]);
     });
 
@@ -222,7 +222,7 @@ describe('value converters on query inputs (#35)', () => {
 
         await db.set(VcToken).find('abc');
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM vc_tokens WHERE id = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "vc_tokens" WHERE "id" = $1');
         expect(provider.lastCall!.params).toEqual(['tok_abc']);
     });
 
@@ -286,7 +286,7 @@ describe('value converters on include() lookups (#35)', () => {
 
         const orgs = await db.set(VcOrg).include(o => o.members).toList();
 
-        expect(provider.calls[1].sql).toBe('SELECT * FROM vc_members WHERE orgid IN ($1)');
+        expect(provider.calls[1].sql).toBe('SELECT * FROM "vc_members" WHERE "orgid" IN ($1)');
         expect(provider.calls[1].params).toEqual(['org_7']);
         // The collection has to actually attach: keying the map by the row's FK
         // (database form) and looking it up by the entity key (domain form)

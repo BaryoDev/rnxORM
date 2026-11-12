@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks. PostgreSQL tables created through `ensureCreated()` with a mixed-case name are now case-sensitive, the same as the migration path.
 - **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
   translator now returns them as text in the select list, so the driver cannot
   round them to a double. `sum()` and `average()` already parse them back, but

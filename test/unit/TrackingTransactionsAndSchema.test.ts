@@ -74,7 +74,7 @@ describe('asNoTracking()', () => {
         const saved = await db.saveChanges();
 
         expect(saved).toBe(1);
-        const update = provider.calls.find(c => c.sql.startsWith('UPDATE tt_items'))!;
+        const update = provider.calls.find(c => c.sql.startsWith('UPDATE "tt_items"'))!;
         expect(update.params).toContain('B');
     });
 });
@@ -90,9 +90,9 @@ describe('saveChanges() transaction wrapping', () => {
         await db.saveChanges();
 
         expect(provider.transactionCalls).toEqual(['begin', 'commit']);
-        expect(provider.calls.some(c => c.sql.startsWith('INSERT INTO tt_items'))).toBe(true);
+        expect(provider.calls.some(c => c.sql.startsWith('INSERT INTO "tt_items"'))).toBe(true);
         // The write ran on the handle, not the pool.
-        const insertAt = provider.calls.findIndex(c => c.sql.startsWith('INSERT INTO tt_items'));
+        const insertAt = provider.calls.findIndex(c => c.sql.startsWith('INSERT INTO "tt_items"'));
         expect(provider.queryConnections[insertAt]).toBe('tx1');
         expect(provider.openTransactions).toBe(0);
     });
@@ -135,7 +135,7 @@ describe('shadow properties on insert', () => {
         db.set(TtAudited).add(audited);
         await db.saveChanges();
 
-        const insert = provider.calls.find(c => c.sql.startsWith('INSERT INTO tt_audited'))!;
+        const insert = provider.calls.find(c => c.sql.startsWith('INSERT INTO "tt_audited"'))!;
         expect(insert.sql).toContain('createdBy');
         expect(insert.params).toContain('system');
     });

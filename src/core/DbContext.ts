@@ -973,9 +973,12 @@ export class DbContext {
                     const pkValue = (seedItem as any)[pkColumn.propertyName];
 
                     if (pkValue !== undefined) {
-                        const placeholder = this.provider.getParameterPlaceholder(1);
-                        const checkSql = `SELECT COUNT(*) as count FROM ${tableName} WHERE ${pkColumn.columnName} = ${placeholder}`;
-                        const result = await this.query(checkSql, [pkValue]);
+                        const check = this.provider.getTranslator().translateSelect({
+                            table: tableName,
+                            items: [{ operand: { kind: 'agg', fn: 'count' }, alias: 'count' }],
+                            where: { op: 'eq', left: { kind: 'column', name: pkColumn.columnName }, value: asQueryParameter(pkValue) },
+                        });
+                        const result = await this.query(check.text, check.params);
                         const exists = toCount(result.rows[0]?.count) > 0;
 
                         if (!exists) {

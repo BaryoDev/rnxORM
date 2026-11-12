@@ -35,9 +35,21 @@ interface RenderState {
  * dialect overrides only the hooks that differ.
  */
 export abstract class SqlTranslator {
-    /** Identifiers are bare in the query path today. */
+    /**
+     * Quotes a table or column name for the query path, one part at a time so
+     * `schema.name` still works. Always quotes, so a name like `order` or
+     * `user` is an identifier and not a keyword.
+     */
     protected quoteIdentifier(name: string): string {
-        return name;
+        return name.split('.').map((part) => this.quoteQueryPart(part)).join('.');
+    }
+
+    /**
+     * Wraps one name in the dialect's quote characters and doubles any quote
+     * character inside it. Defaults to the ANSI double quote.
+     */
+    protected quoteQueryPart(part: string): string {
+        return `"${part.replace(/"/g, '""')}"`;
     }
 
     /** 1-based position of the parameter. */
@@ -106,7 +118,7 @@ export abstract class SqlTranslator {
                     ? this.renderAggregateOutput(item.operand.fn, item.operand.column, item.operand.columnType)
                     : this.renderOperand(item.operand);
                 if (item.alias === undefined) return sql;
-                return `${sql}${item.operand.kind === 'agg' ? ' as ' : ' AS '}${item.alias}`;
+                return `${sql}${item.operand.kind === 'agg' ? ' as ' : ' AS '}${this.quoteQueryPart(item.alias)}`;
             })
             .join(', ');
     }
@@ -225,25 +237,45 @@ export abstract class SqlTranslator {
     protected abstract renderMigrationHistory(table: string): string;
 
     /** CREATE TABLE for `ensureTable`; `columns` is the joined column list. */
-    protected renderEnsureTable(table: string, columns: string): string {
+    protected renderEnsureTable(table: string, columns: string, _tableName: string): string {
         return `CREATE TABLE IF NOT EXISTS ${table} (${columns});`;
     }
 
     /** Key column type in a join table. */
     protected readonly joinKeyType: string = 'INT';
 
+    /** The validated, quoted names of a join table, shared by every dialect's rendering. */
+    protected joinTableNames(op: EnsureJoinTableOp) {
+        const api = op.op;
+        const name = (n: string) => this.quoteDdlName(n, api);
+        return {
+            t: name(op.table),
+            c1: name(op.column1),
+            c2: name(op.column2),
+            rt1: name(op.referencedTable1),
+            rt2: name(op.referencedTable2),
+            ref1: name(op.referencedColumn1 ?? 'id'),
+            ref2: name(op.referencedColumn2 ?? 'id'),
+            cascade: op.onDelete ? ` ON DELETE ${op.onDelete}` : ' ON DELETE CASCADE',
+        };
+    }
+
     protected renderEnsureJoinTable(op: EnsureJoinTableOp): string {
-        const { table: t, column1: c1, column2: c2 } = op;
-        const cascade = op.onDelete ? ` ON DELETE ${op.onDelete}` : ' ON DELETE CASCADE';
-        const ref1 = op.referencedColumn1 ?? 'id';
-        const ref2 = op.referencedColumn2 ?? 'id';
+        const { t, c1, c2, rt1, rt2, ref1, ref2, cascade } = this.joinTableNames(op);
         return `CREATE TABLE IF NOT EXISTS ${t} (
             ${c1} ${this.joinKeyType} NOT NULL,
             ${c2} ${this.joinKeyType} NOT NULL,
             PRIMARY KEY (${c1}, ${c2}),
-            FOREIGN KEY (${c1}) REFERENCES ${op.referencedTable1}(${ref1})${cascade},
-            FOREIGN KEY (${c2}) REFERENCES ${op.referencedTable2}(${ref2})${cascade}
+            FOREIGN KEY (${c1}) REFERENCES ${rt1}(${ref1})${cascade},
+            FOREIGN KEY (${c2}) REFERENCES ${rt2}(${ref2})${cascade}
         )`;
+    }
+
+    /** The unqualified last part of a validated `name` or `schema.name`. */
+    protected lastNamePart(name: string, apiName: string): string {
+        this.quoteDdlName(name, apiName);
+        const parts = name.split('.');
+        return parts[parts.length - 1];
     }
 
     protected renderEnsureAddColumn(table: string, column: string, type: string): string {
@@ -359,35 +391,38 @@ export abstract class SqlTranslator {
             case 'createMigrationHistory':
                 return one(this.renderMigrationHistory(op.table));
             case 'ensureTable': {
+                const table = name(op.table);
                 const defs = op.columns.map((col) => {
-                    let def = `${col.name} ${this.mapType(col.type)}`;
+                    const colName = name(col.name);
+                    let def = `${colName} ${this.mapType(col.type)}`;
                     if (col.isPrimaryKey) {
-                        def = col.type === 'integer' ? this.renderAutoIncrementColumn(col.name) : `${def} PRIMARY KEY`;
+                        def = col.type === 'integer' ? this.renderAutoIncrementColumn(colName) : `${def} PRIMARY KEY`;
                     } else if (!col.nullable) {
                         def += ' NOT NULL';
                     }
                     return def;
                 });
-                return one(this.renderEnsureTable(op.table, defs.join(', ')));
+                return one(this.renderEnsureTable(table, defs.join(', '), this.lastNamePart(op.table, api)));
             }
             case 'ensureJoinTable':
                 return one(this.renderEnsureJoinTable(op));
             case 'ensureForeignKey': {
+                const constraint = name(`fk_${this.lastNamePart(op.table, api)}_${op.column}`);
                 let text =
-                    `ALTER TABLE ${op.table} ADD CONSTRAINT fk_${op.table}_${op.column} ` +
-                    `FOREIGN KEY (${op.column}) REFERENCES ${op.referencedTable}(${op.referencedColumn})`;
+                    `ALTER TABLE ${name(op.table)} ADD CONSTRAINT ${constraint} ` +
+                    `FOREIGN KEY (${name(op.column)}) REFERENCES ${name(op.referencedTable)}(${name(op.referencedColumn)})`;
                 if (op.onDelete) text += ` ON DELETE ${op.onDelete}`;
                 if (op.onUpdate) text += ` ON UPDATE ${op.onUpdate}`;
                 return one(text);
             }
             case 'ensureIndex':
-                return one(`CREATE ${op.unique ? 'UNIQUE ' : ''}INDEX ${op.index} ON ${op.table} (${op.columns.join(', ')})`);
+                return one(`CREATE ${op.unique ? 'UNIQUE ' : ''}INDEX ${name(op.index)} ON ${name(op.table)} (${op.columns.map(name).join(', ')})`);
             case 'ensureUniqueConstraint':
-                return one(`ALTER TABLE ${op.table} ADD CONSTRAINT ${op.constraint} UNIQUE (${op.columns.join(', ')})`);
+                return one(`ALTER TABLE ${name(op.table)} ADD CONSTRAINT ${name(op.constraint)} UNIQUE (${op.columns.map(name).join(', ')})`);
             case 'ensureAddColumn':
-                return one(this.renderEnsureAddColumn(op.table, op.column, this.mapType(op.type)));
+                return one(this.renderEnsureAddColumn(name(op.table), name(op.column), this.mapType(op.type)));
             case 'ensureAlterColumnType':
-                return one(this.renderEnsureAlterColumnType(op.table, op.column, this.mapType(op.type)));
+                return one(this.renderEnsureAlterColumnType(name(op.table), name(op.column), this.mapType(op.type)));
             default:
                 return assertNever(op);
         }

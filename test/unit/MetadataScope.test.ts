@@ -72,8 +72,8 @@ describe('model is scoped per context type (#32)', () => {
         await a.set(MsUser).toList();
         await b.set(MsUser).toList();
 
-        expect(pa.lastCall!.sql).toBe('SELECT * FROM tenant_a_users');
-        expect(pb.lastCall!.sql).toBe('SELECT * FROM tenant_b_users');
+        expect(pa.lastCall!.sql).toBe('SELECT * FROM "tenant_a_users"');
+        expect(pb.lastCall!.sql).toBe('SELECT * FROM "tenant_b_users"');
     });
 
     it('holds regardless of construction order', async () => {
@@ -86,8 +86,8 @@ describe('model is scoped per context type (#32)', () => {
         await b.set(MsUser).toList();
         await a.set(MsUser).toList();
 
-        expect(pb.lastCall!.sql).toBe('SELECT * FROM tenant_b_users');
-        expect(pa.lastCall!.sql).toBe('SELECT * FROM tenant_a_users');
+        expect(pb.lastCall!.sql).toBe('SELECT * FROM "tenant_b_users"');
+        expect(pa.lastCall!.sql).toBe('SELECT * FROM "tenant_a_users"');
     });
 
     it('keeps two instances of the same context type consistent', async () => {
@@ -100,8 +100,8 @@ describe('model is scoped per context type (#32)', () => {
         await one.set(MsUser).toList();
         await two.set(MsUser).toList();
 
-        expect(p1.lastCall!.sql).toBe('SELECT * FROM tenant_a_users');
-        expect(p2.lastCall!.sql).toBe('SELECT * FROM tenant_a_users');
+        expect(p1.lastCall!.sql).toBe('SELECT * FROM "tenant_a_users"');
+        expect(p2.lastCall!.sql).toBe('SELECT * FROM "tenant_a_users"');
     });
 
     it('does not leak a query filter between context types', async () => {
@@ -114,8 +114,8 @@ describe('model is scoped per context type (#32)', () => {
         await filtered.set(MsUser).toList();
         await unfiltered.set(MsUser).toList();
 
-        expect(pf.lastCall!.sql).toBe('SELECT * FROM ms_users WHERE isdeleted = $1');
-        expect(pu.lastCall!.sql).toBe('SELECT * FROM ms_users');
+        expect(pf.lastCall!.sql).toBe('SELECT * FROM "ms_users" WHERE "isdeleted" = $1');
+        expect(pu.lastCall!.sql).toBe('SELECT * FROM "ms_users"');
     });
 
     it('interleaves queries from two contexts correctly', async () => {
@@ -131,12 +131,12 @@ describe('model is scoped per context type (#32)', () => {
         await b.set(MsUser).toList();
 
         expect(pa.calls.map(c => c.sql)).toEqual([
-            'SELECT * FROM tenant_a_users',
-            'SELECT * FROM tenant_a_users',
+            'SELECT * FROM "tenant_a_users"',
+            'SELECT * FROM "tenant_a_users"',
         ]);
         expect(pb.calls.map(c => c.sql)).toEqual([
-            'SELECT * FROM tenant_b_users',
-            'SELECT * FROM tenant_b_users',
+            'SELECT * FROM "tenant_b_users"',
+            'SELECT * FROM "tenant_b_users"',
         ]);
     });
 
@@ -146,7 +146,7 @@ describe('model is scoped per context type (#32)', () => {
 
         await plain.set(MsUser).toList();
 
-        expect(p.lastCall!.sql).toBe('SELECT * FROM ms_users');
+        expect(p.lastCall!.sql).toBe('SELECT * FROM "ms_users"');
     });
 
     it('lets a bare DbContext see standalone ModelBuilder registrations', async () => {
@@ -160,7 +160,7 @@ describe('model is scoped per context type (#32)', () => {
         new ModelBuilder().entity(MsLate).toTable('late_table');
 
         await plain.set(MsLate).toList();
-        expect(p.lastCall!.sql).toBe('SELECT * FROM late_table');
+        expect(p.lastCall!.sql).toBe('SELECT * FROM "late_table"');
     });
 
     it('leaves the decorator registry unmodified by onModelCreating', () => {

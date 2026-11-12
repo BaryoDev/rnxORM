@@ -16,9 +16,19 @@ const translators: Record<Dialect, SqlTranslator> = {
 };
 const dialects = Object.keys(translators) as Dialect[];
 
-/** Expected text uses {n} for the nth placeholder; this fills in the dialect's form. */
+/** Quotes one name the way the dialect does. */
+function quote(name: string, dialect: Dialect): string {
+    if (dialect === 'postgresql') return `"${name}"`;
+    if (dialect === 'mssql') return `[${name}]`;
+    return `\`${name}\``;
+}
+
+/**
+ * Expected text writes quoted names with double quotes and uses {n} for the
+ * nth placeholder; this fills in the dialect's quotes and placeholders.
+ */
 function fill(template: string, dialect: Dialect): string {
-    return template.replace(/\{(\d+)\}/g, (_m, n: string) => {
+    return template.replace(/"([^"]+)"/g, (_m, name: string) => quote(name, dialect)).replace(/\{(\d+)\}/g, (_m, n: string) => {
         if (dialect === 'postgresql') return `$${n}`;
         if (dialect === 'mssql') return `@p${Number(n) - 1}`;
         return '?';
@@ -46,14 +56,14 @@ const shared: Case[] = [
         // SqlGeneration: 'generates SELECT DISTINCT *'
         name: 'distinct star',
         model: { table: T, distinct: true },
-        text: `SELECT DISTINCT * FROM ${T}`,
+        text: `SELECT DISTINCT * FROM "${T}"`,
         params: [],
     },
     {
         // SqlGeneration: 'translates single-property projections'
         name: 'distinct single column',
         model: { table: T, distinct: true, items: [{ operand: col('age') }] },
-        text: `SELECT DISTINCT age FROM ${T}`,
+        text: `SELECT DISTINCT "age" FROM "${T}"`,
         params: [],
     },
     {
@@ -66,7 +76,7 @@ const shared: Case[] = [
                 { operand: col('status'), alias: 'b' },
             ],
         },
-        text: 'SELECT title AS a, status AS b FROM sqlgen_docs',
+        text: 'SELECT "title" AS "a", "status" AS "b" FROM "sqlgen_docs"',
         params: [],
     },
     {
@@ -82,7 +92,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: `SELECT * FROM ${T} WHERE age > {1} AND name = {2}`,
+        text: `SELECT * FROM "${T}" WHERE "age" > {1} AND "name" = {2}`,
         params: [18, 'Alice'],
     },
     {
@@ -101,7 +111,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: `SELECT * FROM ${T} WHERE a != {1} AND b >= {2} AND c < {3} AND d <= {4} AND e LIKE {5} AND f NOT LIKE {6}`,
+        text: `SELECT * FROM "${T}" WHERE "a" != {1} AND "b" >= {2} AND "c" < {3} AND "d" <= {4} AND "e" LIKE {5} AND "f" NOT LIKE {6}`,
         params: [1, 2, 3, 4, 'x%', 'y%'],
     },
     {
@@ -111,7 +121,7 @@ const shared: Case[] = [
             table: 'sqlgen_docs',
             where: { op: 'in', left: col('status'), values: ['a', 'b', 'c'] },
         },
-        text: 'SELECT * FROM sqlgen_docs WHERE status IN ({1}, {2}, {3})',
+        text: 'SELECT * FROM "sqlgen_docs" WHERE "status" IN ({1}, {2}, {3})',
         params: ['a', 'b', 'c'],
     },
     {
@@ -127,7 +137,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: 'SELECT * FROM sqlgen_docs WHERE status IN ({1}, {2}, {3}) AND title = {4}',
+        text: 'SELECT * FROM "sqlgen_docs" WHERE "status" IN ({1}, {2}, {3}) AND "title" = {4}',
         params: ['a', 'b', 'c', 't'],
     },
     {
@@ -137,7 +147,7 @@ const shared: Case[] = [
             table: 'sqlgen_docs',
             where: { op: 'notIn', left: col('status'), values: ['a', 'b'] },
         },
-        text: 'SELECT * FROM sqlgen_docs WHERE status NOT IN ({1}, {2})',
+        text: 'SELECT * FROM "sqlgen_docs" WHERE "status" NOT IN ({1}, {2})',
         params: ['a', 'b'],
     },
     {
@@ -153,7 +163,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: 'SELECT * FROM sqlgen_docs WHERE 1 = 0 AND title = {1}',
+        text: 'SELECT * FROM "sqlgen_docs" WHERE 1 = 0 AND "title" = {1}',
         params: ['t'],
     },
     {
@@ -163,21 +173,21 @@ const shared: Case[] = [
             table: 'sqlgen_docs',
             where: { op: 'notIn', left: col('status'), values: [] },
         },
-        text: 'SELECT * FROM sqlgen_docs WHERE 1 = 1',
+        text: 'SELECT * FROM "sqlgen_docs" WHERE 1 = 1',
         params: [],
     },
     {
         // SqlGeneration: 'set and null operators (I4)' IS NULL
         name: 'isNull',
         model: { table: 'sqlgen_docs', where: { op: 'isNull', left: col('deletedat') } },
-        text: 'SELECT * FROM sqlgen_docs WHERE deletedat IS NULL',
+        text: 'SELECT * FROM "sqlgen_docs" WHERE "deletedat" IS NULL',
         params: [],
     },
     {
         // SqlGeneration: 'set and null operators (I4)' IS NOT NULL
         name: 'isNotNull',
         model: { table: 'sqlgen_docs', where: { op: 'isNotNull', left: col('deletedat') } },
-        text: 'SELECT * FROM sqlgen_docs WHERE deletedat IS NOT NULL',
+        text: 'SELECT * FROM "sqlgen_docs" WHERE "deletedat" IS NOT NULL',
         params: [],
     },
     {
@@ -192,7 +202,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: `SELECT * FROM ${T} WHERE name = {1} AND age BETWEEN {2} AND {3}`,
+        text: `SELECT * FROM "${T}" WHERE "name" = {1} AND "age" BETWEEN {2} AND {3}`,
         params: ['n', 18, 65],
     },
     {
@@ -213,7 +223,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: `SELECT * FROM ${T} WHERE age > {1} AND (name = {2} OR name = {3})`,
+        text: `SELECT * FROM "${T}" WHERE "age" > {1} AND ("name" = {2} OR "name" = {3})`,
         params: [18, 'a', 'b'],
     },
     {
@@ -231,7 +241,7 @@ const shared: Case[] = [
                 },
             },
         },
-        text: `SELECT * FROM ${T} WHERE NOT (name = {1} AND age IS NULL)`,
+        text: `SELECT * FROM "${T}" WHERE NOT ("name" = {1} AND "age" IS NULL)`,
         params: ['a'],
     },
     {
@@ -252,7 +262,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: `SELECT * FROM ${T} WHERE (a = {1} AND b = {2}) OR NOT (c = {3})`,
+        text: `SELECT * FROM "${T}" WHERE ("a" = {1} AND "b" = {2}) OR NOT ("c" = {3})`,
         params: [1, 2, 3],
     },
     {
@@ -268,7 +278,7 @@ const shared: Case[] = [
                 { operand: agg('count'), alias: 'count' },
             ],
         },
-        text: `SELECT SUM(age) as total, AVG(age) as avg, MIN(age) as min, MAX(age) as max, COUNT(*) as count FROM ${T}`,
+        text: `SELECT SUM("age") as "total", AVG("age") as "avg", MIN("age") as "min", MAX("age") as "max", COUNT(*) as "count" FROM "${T}"`,
         params: [],
     },
     {
@@ -283,7 +293,7 @@ const shared: Case[] = [
             ],
             groupBy: ['age'],
         },
-        text: `SELECT age, COUNT(*) as count, SUM(age) as total FROM ${T} GROUP BY age`,
+        text: `SELECT "age", COUNT(*) as "count", SUM("age") as "total" FROM "${T}" GROUP BY "age"`,
         params: [],
     },
     {
@@ -297,7 +307,7 @@ const shared: Case[] = [
             ],
             groupBy: ['full_name'],
         },
-        text: 'SELECT full_name AS dept, SUM(acct_balance) as total FROM sqlgen_accounts GROUP BY full_name',
+        text: 'SELECT "full_name" AS "dept", SUM("acct_balance") as "total" FROM "sqlgen_accounts" GROUP BY "full_name"',
         params: [],
     },
     {
@@ -309,7 +319,7 @@ const shared: Case[] = [
             groupBy: ['age'],
             having: { op: 'gt', left: agg('count'), value: 5 },
         },
-        text: `SELECT age, COUNT(*) as count FROM ${T} GROUP BY age HAVING COUNT(*) > {1}`,
+        text: `SELECT "age", COUNT(*) as "count" FROM "${T}" GROUP BY "age" HAVING COUNT(*) > {1}`,
         params: [5],
     },
     {
@@ -321,7 +331,7 @@ const shared: Case[] = [
             groupBy: ['age'],
             having: { op: 'gte', left: agg('sum', 'age'), value: 10 },
         },
-        text: `SELECT age, COUNT(*) as n FROM ${T} WHERE name LIKE {1} GROUP BY age HAVING SUM(age) >= {2}`,
+        text: `SELECT "age", COUNT(*) as "n" FROM "${T}" WHERE "name" LIKE {1} GROUP BY "age" HAVING SUM("age") >= {2}`,
         params: ['A%', 10],
     },
     {
@@ -335,7 +345,7 @@ const shared: Case[] = [
                 { operand: { kind: 'agg', fn: 'max', column: 'age', columnType: 'int' }, alias: 'hi' },
             ],
         },
-        text: `SELECT SUM(age) as total, AVG(age) as mean, MIN(age) as lo, MAX(age) as hi FROM ${T}`,
+        text: `SELECT SUM("age") as "total", AVG("age") as "mean", MIN("age") as "lo", MAX("age") as "hi" FROM "${T}"`,
         params: [],
     },
     {
@@ -353,7 +363,7 @@ const shared: Case[] = [
                 ],
             },
         },
-        text: `SELECT age, COUNT(*) as n FROM ${T} WHERE age > {1} GROUP BY age HAVING AVG(age) > {2} AND COUNT(*) <= {3}`,
+        text: `SELECT "age", COUNT(*) as "n" FROM "${T}" WHERE "age" > {1} GROUP BY "age" HAVING AVG("age") > {2} AND COUNT(*) <= {3}`,
         params: [18, 30, 9],
     },
     {
@@ -367,19 +377,19 @@ const shared: Case[] = [
                 { operand: col('age'), direction: 'asc' },
             ],
         },
-        text: `SELECT COUNT(*) as n, age FROM ${T} GROUP BY age ORDER BY n DESC, age ASC`,
+        text: `SELECT COUNT(*) as "n", "age" FROM "${T}" GROUP BY "age" ORDER BY "n" DESC, "age" ASC`,
         params: [],
     },
     {
         name: 'empty and renders as always true',
         model: { table: T, where: { op: 'and', parts: [] } },
-        text: `SELECT * FROM ${T} WHERE 1 = 1`,
+        text: `SELECT * FROM "${T}" WHERE 1 = 1`,
         params: [],
     },
     {
         name: 'empty or renders as always false',
         model: { table: T, where: { op: 'or', parts: [] } },
-        text: `SELECT * FROM ${T} WHERE 1 = 0`,
+        text: `SELECT * FROM "${T}" WHERE 1 = 0`,
         params: [],
     },
 ];
@@ -403,13 +413,13 @@ describe('SelectTranslator ilike', () => {
         where: { op: 'ilike', left: col('name'), value: 'a%' },
     };
     const expected: Record<Dialect, string> = {
-        postgresql: `SELECT * FROM ${T} WHERE name ILIKE $1`,
-        mssql: `SELECT * FROM ${T} WHERE LOWER(name) LIKE LOWER(@p0)`,
-        mariadb: `SELECT * FROM ${T} WHERE LOWER(name) LIKE LOWER(?)`,
+        postgresql: `SELECT * FROM "${T}" WHERE "name" ILIKE $1`,
+        mssql: `SELECT * FROM "${T}" WHERE LOWER("name") LIKE LOWER(@p0)`,
+        mariadb: `SELECT * FROM "${T}" WHERE LOWER("name") LIKE LOWER(?)`,
     };
     it.each(dialects)('%s', (dialect) => {
         expect(translators[dialect].translateSelect(model)).toEqual({
-            text: expected[dialect],
+            text: fill(expected[dialect], dialect),
             params: ['a%'],
         });
     });
@@ -432,9 +442,9 @@ describe('SelectTranslator pagination', () => {
             name: 'where, order by, skip and take',
             model: { table: T, where, ...ordered, skip: 5, take: 10 },
             text: {
-                postgresql: `SELECT * FROM ${T} WHERE age > $1 ORDER BY name ASC LIMIT 10 OFFSET 5`,
-                mariadb: `SELECT * FROM ${T} WHERE age > ? ORDER BY name ASC LIMIT 10 OFFSET 5`,
-                mssql: `SELECT * FROM ${T} WHERE age > @p0 ORDER BY name ASC OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
+                postgresql: `SELECT * FROM "${T}" WHERE "age" > $1 ORDER BY "name" ASC LIMIT 10 OFFSET 5`,
+                mariadb: `SELECT * FROM "${T}" WHERE "age" > ? ORDER BY "name" ASC LIMIT 10 OFFSET 5`,
+                mssql: `SELECT * FROM "${T}" WHERE "age" > @p0 ORDER BY "name" ASC OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
             },
             params: [18],
         },
@@ -443,9 +453,9 @@ describe('SelectTranslator pagination', () => {
             name: 'skip and take without order by',
             model: { table: T, skip: 5, take: 10 },
             text: {
-                postgresql: `SELECT * FROM ${T} LIMIT 10 OFFSET 5`,
-                mariadb: `SELECT * FROM ${T} LIMIT 10 OFFSET 5`,
-                mssql: `SELECT * FROM ${T} ORDER BY (SELECT NULL) OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
+                postgresql: `SELECT * FROM "${T}" LIMIT 10 OFFSET 5`,
+                mariadb: `SELECT * FROM "${T}" LIMIT 10 OFFSET 5`,
+                mssql: `SELECT * FROM "${T}" ORDER BY (SELECT NULL) OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
             },
             params: [],
         },
@@ -453,9 +463,9 @@ describe('SelectTranslator pagination', () => {
             name: 'take only',
             model: { table: T, take: 10 },
             text: {
-                postgresql: `SELECT * FROM ${T} LIMIT 10`,
-                mariadb: `SELECT * FROM ${T} LIMIT 10`,
-                mssql: `SELECT * FROM ${T} ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY`,
+                postgresql: `SELECT * FROM "${T}" LIMIT 10`,
+                mariadb: `SELECT * FROM "${T}" LIMIT 10`,
+                mssql: `SELECT * FROM "${T}" ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY`,
             },
             params: [],
         },
@@ -463,9 +473,9 @@ describe('SelectTranslator pagination', () => {
             name: 'take only with order by',
             model: { table: T, ...ordered, take: 10 },
             text: {
-                postgresql: `SELECT * FROM ${T} ORDER BY name ASC LIMIT 10`,
-                mariadb: `SELECT * FROM ${T} ORDER BY name ASC LIMIT 10`,
-                mssql: `SELECT * FROM ${T} ORDER BY name ASC OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY`,
+                postgresql: `SELECT * FROM "${T}" ORDER BY "name" ASC LIMIT 10`,
+                mariadb: `SELECT * FROM "${T}" ORDER BY "name" ASC LIMIT 10`,
+                mssql: `SELECT * FROM "${T}" ORDER BY "name" ASC OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY`,
             },
             params: [],
         },
@@ -474,9 +484,9 @@ describe('SelectTranslator pagination', () => {
             name: 'skip only',
             model: { table: T, skip: 5 },
             text: {
-                postgresql: `SELECT * FROM ${T} OFFSET 5`,
-                mariadb: `SELECT * FROM ${T} LIMIT 18446744073709551615 OFFSET 5`,
-                mssql: `SELECT * FROM ${T} ORDER BY (SELECT NULL) OFFSET 5 ROWS`,
+                postgresql: `SELECT * FROM "${T}" OFFSET 5`,
+                mariadb: `SELECT * FROM "${T}" LIMIT 18446744073709551615 OFFSET 5`,
+                mssql: `SELECT * FROM "${T}" ORDER BY (SELECT NULL) OFFSET 5 ROWS`,
             },
             params: [],
         },
@@ -484,9 +494,9 @@ describe('SelectTranslator pagination', () => {
             name: 'skip only with order by',
             model: { table: T, ...ordered, skip: 5 },
             text: {
-                postgresql: `SELECT * FROM ${T} ORDER BY name ASC OFFSET 5`,
-                mariadb: `SELECT * FROM ${T} ORDER BY name ASC LIMIT 18446744073709551615 OFFSET 5`,
-                mssql: `SELECT * FROM ${T} ORDER BY name ASC OFFSET 5 ROWS`,
+                postgresql: `SELECT * FROM "${T}" ORDER BY "name" ASC OFFSET 5`,
+                mariadb: `SELECT * FROM "${T}" ORDER BY "name" ASC LIMIT 18446744073709551615 OFFSET 5`,
+                mssql: `SELECT * FROM "${T}" ORDER BY "name" ASC OFFSET 5 ROWS`,
             },
             params: [],
         },
@@ -501,9 +511,9 @@ describe('SelectTranslator pagination', () => {
                 take: 3,
             },
             text: {
-                postgresql: `SELECT age, COUNT(*) as count FROM ${T} GROUP BY age LIMIT 3 OFFSET 2`,
-                mariadb: `SELECT age, COUNT(*) as count FROM ${T} GROUP BY age LIMIT 3 OFFSET 2`,
-                mssql: `SELECT age, COUNT(*) as count FROM ${T} GROUP BY age ORDER BY (SELECT NULL) OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY`,
+                postgresql: `SELECT "age", COUNT(*) as "count" FROM "${T}" GROUP BY "age" LIMIT 3 OFFSET 2`,
+                mariadb: `SELECT "age", COUNT(*) as "count" FROM "${T}" GROUP BY "age" LIMIT 3 OFFSET 2`,
+                mssql: `SELECT "age", COUNT(*) as "count" FROM "${T}" GROUP BY "age" ORDER BY (SELECT NULL) OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY`,
             },
             params: [],
         },
@@ -513,7 +523,7 @@ describe('SelectTranslator pagination', () => {
         describe(dialect, () => {
             it.each(cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
                 expect(translators[dialect].translateSelect(c.model)).toEqual({
-                    text: c.text[dialect],
+                    text: fill(c.text[dialect], dialect),
                     params: c.params,
                 });
             });
@@ -544,12 +554,13 @@ describe('SelectTranslator dialect differences', () => {
 
         const normalise = (text: string) =>
             text
+                .replace(/[`\[\]]/g, '"')
                 .replace(/\$\d+|@p\d+|\?/g, '#')
                 .replace(/ LIMIT 2 OFFSET 1| OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY/, ' PAGE');
         const normalised = out.map((o) => normalise(o.text));
         expect(new Set(normalised).size).toBe(1);
         expect(normalised[0]).toBe(
-            `SELECT DISTINCT name, age AS a FROM ${T} WHERE age IN (#, #) AND age BETWEEN # AND # ORDER BY name DESC PAGE`
+            `SELECT DISTINCT "name", "age" AS "a" FROM "${T}" WHERE "age" IN (#, #) AND "age" BETWEEN # AND # ORDER BY "name" DESC PAGE`
         );
     });
 
@@ -572,18 +583,18 @@ describe('SelectTranslator exact decimal aggregates', () => {
     it('casts sum over a decimal column to text on mssql only', () => {
         const model = selectOf(typed('sum', 'decimal'));
         expect(translators.mssql.translateSelect(model).text).toBe(
-            `SELECT CAST(SUM(amount) AS NVARCHAR(MAX)) as total FROM ${T}`
+            fill(`SELECT CAST(SUM("amount") AS NVARCHAR(MAX)) as "total" FROM "${T}"`, 'mssql')
         );
-        expect(translators.postgresql.translateSelect(model).text).toBe(`SELECT SUM(amount) as total FROM ${T}`);
-        expect(translators.mariadb.translateSelect(model).text).toBe(`SELECT SUM(amount) as total FROM ${T}`);
+        expect(translators.postgresql.translateSelect(model).text).toBe(fill(`SELECT SUM("amount") as "total" FROM "${T}"`, 'postgresql'));
+        expect(translators.mariadb.translateSelect(model).text).toBe(fill(`SELECT SUM("amount") as "total" FROM "${T}"`, 'mariadb'));
     });
 
     it.each(['decimal(38,10)', 'DECIMAL(10,2)', 'numeric(18,4)', 'numeric', 'dec(18,2)'])('casts sum and avg over %s', (type) => {
         expect(translators.mssql.translateSelect(selectOf(typed('sum', type))).text).toContain(
-            'CAST(SUM(amount) AS NVARCHAR(MAX))'
+            fill('CAST(SUM("amount") AS NVARCHAR(MAX))', 'mssql')
         );
         expect(translators.mssql.translateSelect(selectOf(typed('avg', type))).text).toContain(
-            'CAST(AVG(amount) AS NVARCHAR(MAX))'
+            fill('CAST(AVG("amount") AS NVARCHAR(MAX))', 'mssql')
         );
     });
 
@@ -591,7 +602,7 @@ describe('SelectTranslator exact decimal aggregates', () => {
         'leaves %s columns alone',
         (type) => {
             expect(translators.mssql.translateSelect(selectOf(typed('sum', type))).text).toBe(
-                `SELECT SUM(amount) as total FROM ${T}`
+                fill(`SELECT SUM("amount") as "total" FROM "${T}"`, 'mssql')
             );
         }
     );
@@ -615,7 +626,7 @@ describe('SelectTranslator exact decimal aggregates', () => {
             orderBy: [{ operand: typed('sum', 'decimal(38,10)'), direction: 'desc' }],
         };
         expect(translators.mssql.translateSelect(model).text).toBe(
-            `SELECT name, CAST(SUM(amount) AS NVARCHAR(MAX)) as total FROM ${T} GROUP BY name HAVING SUM(amount) > @p0 ORDER BY SUM(amount) DESC`
+            fill(`SELECT "name", CAST(SUM("amount") AS NVARCHAR(MAX)) as "total" FROM "${T}" GROUP BY "name" HAVING SUM("amount") > @p0 ORDER BY SUM("amount") DESC`, 'mssql')
         );
     });
 });
@@ -626,10 +637,10 @@ describe('SelectTranslator mssql average over integer columns', () => {
     it.each(['int', 'integer', 'bigint', 'smallint', 'tinyint', 'INT'])('widens avg over %s on mssql only', (type) => {
         const model: SelectModel = { table: T, items: [{ operand: avgOf(type), alias: 'mean' }] };
         expect(translators.mssql.translateSelect(model).text).toBe(
-            `SELECT AVG(CAST(qty AS DECIMAL(38,6))) as mean FROM ${T}`
+            fill(`SELECT AVG(CAST("qty" AS DECIMAL(38,6))) as "mean" FROM "${T}"`, 'mssql')
         );
-        expect(translators.postgresql.translateSelect(model).text).toBe(`SELECT AVG(qty) as mean FROM ${T}`);
-        expect(translators.mariadb.translateSelect(model).text).toBe(`SELECT AVG(qty) as mean FROM ${T}`);
+        expect(translators.postgresql.translateSelect(model).text).toBe(fill(`SELECT AVG("qty") as "mean" FROM "${T}"`, 'postgresql'));
+        expect(translators.mariadb.translateSelect(model).text).toBe(fill(`SELECT AVG("qty") as "mean" FROM "${T}"`, 'mariadb'));
     });
 
     it('widens in HAVING too, so the comparison matches the other dialects', () => {
@@ -639,20 +650,20 @@ describe('SelectTranslator mssql average over integer columns', () => {
             having: { op: 'gt', left: avgOf('int'), value: 1 },
         };
         expect(translators.mssql.translateSelect(model).text).toBe(
-            `SELECT * FROM ${T} GROUP BY grp HAVING AVG(CAST(qty AS DECIMAL(38,6))) > @p0`
+            fill(`SELECT * FROM "${T}" GROUP BY "grp" HAVING AVG(CAST("qty" AS DECIMAL(38,6))) > @p0`, 'mssql')
         );
     });
 
     it('leaves avg over float and untyped columns alone, and sum over integers', () => {
         for (const type of ['float', 'real', undefined]) {
             const model: SelectModel = { table: T, items: [{ operand: avgOf(type), alias: 'mean' }] };
-            expect(translators.mssql.translateSelect(model).text).toBe(`SELECT AVG(qty) as mean FROM ${T}`);
+            expect(translators.mssql.translateSelect(model).text).toBe(fill(`SELECT AVG("qty") as "mean" FROM "${T}"`, 'mssql'));
         }
         const sum: SelectModel = {
             table: T,
             items: [{ operand: { kind: 'agg', fn: 'sum', column: 'qty', columnType: 'int' }, alias: 's' }],
         };
-        expect(translators.mssql.translateSelect(sum).text).toBe(`SELECT SUM(qty) as s FROM ${T}`);
+        expect(translators.mssql.translateSelect(sum).text).toBe(fill(`SELECT SUM("qty") as "s" FROM "${T}"`, 'mssql'));
     });
 });
 
@@ -667,19 +678,19 @@ describe('SelectTranslator ordering by an aggregate alias', () => {
 
     it('sorts by the numeric aggregate on mssql, not the NVARCHAR alias', () => {
         expect(translators.mssql.translateSelect(byAlias('decimal(38,10)')).text).toBe(
-            `SELECT grp, CAST(SUM(amount) AS NVARCHAR(MAX)) as total FROM ${T} GROUP BY grp ORDER BY SUM(amount) DESC`
+            fill(`SELECT "grp", CAST(SUM("amount") AS NVARCHAR(MAX)) as "total" FROM "${T}" GROUP BY "grp" ORDER BY SUM("amount") DESC`, 'mssql')
         );
     });
 
     it('keeps ORDER BY total on postgres and mariadb', () => {
-        const expected = `SELECT grp, SUM(amount) as total FROM ${T} GROUP BY grp ORDER BY total DESC`;
-        expect(translators.postgresql.translateSelect(byAlias('decimal(38,10)')).text).toBe(expected);
-        expect(translators.mariadb.translateSelect(byAlias('decimal(38,10)')).text).toBe(expected);
+        const expected = `SELECT "grp", SUM("amount") as "total" FROM "${T}" GROUP BY "grp" ORDER BY "total" DESC`;
+        expect(translators.postgresql.translateSelect(byAlias('decimal(38,10)')).text).toBe(fill(expected, 'postgresql'));
+        expect(translators.mariadb.translateSelect(byAlias('decimal(38,10)')).text).toBe(fill(expected, 'mariadb'));
     });
 
     it('keeps ORDER BY total on mssql when the alias was not cast', () => {
         expect(translators.mssql.translateSelect(byAlias('float')).text).toBe(
-            `SELECT grp, SUM(amount) as total FROM ${T} GROUP BY grp ORDER BY total DESC`
+            fill(`SELECT "grp", SUM("amount") as "total" FROM "${T}" GROUP BY "grp" ORDER BY "total" DESC`, 'mssql')
         );
     });
 
@@ -688,7 +699,43 @@ describe('SelectTranslator ordering by an aggregate alias', () => {
             table: T,
             items: [{ operand: { kind: 'agg', fn: 'avg', column: 'amount', columnType: 'decimal' }, alias: 'mean' }],
         };
-        expect(translators.postgresql.translateSelect(model).text).toBe(`SELECT AVG(amount) as mean FROM ${T}`);
-        expect(translators.mariadb.translateSelect(model).text).toBe(`SELECT AVG(amount) as mean FROM ${T}`);
+        expect(translators.postgresql.translateSelect(model).text).toBe(fill(`SELECT AVG("amount") as "mean" FROM "${T}"`, 'postgresql'));
+        expect(translators.mariadb.translateSelect(model).text).toBe(fill(`SELECT AVG("amount") as "mean" FROM "${T}"`, 'mariadb'));
+    });
+});
+
+describe('identifier quoting in the query path', () => {
+    const model: SelectModel = {
+        table: 'order',
+        items: [{ operand: col('user'), alias: 'group' }],
+        where: { op: 'eq', left: col('select'), value: 1 },
+        orderBy: [{ operand: col('from'), direction: 'asc' }],
+    };
+
+    it.each([
+        ['postgresql', 'SELECT "user" AS "group" FROM "order" WHERE "select" = $1 ORDER BY "from" ASC'],
+        ['mssql', 'SELECT [user] AS [group] FROM [order] WHERE [select] = @p0 ORDER BY [from] ASC'],
+        ['mariadb', 'SELECT `user` AS `group` FROM `order` WHERE `select` = ? ORDER BY `from` ASC'],
+    ] as const)('%s quotes the table, columns, alias and ORDER BY', (dialect, text) => {
+        expect(translators[dialect].translateSelect(model).text).toBe(text);
+    });
+
+    it.each([
+        ['postgresql', 'SELECT * FROM "we""ird"'],
+        ['mssql', 'SELECT * FROM [we"ird]'],
+        ['mariadb', 'SELECT * FROM `we"ird`'],
+    ] as const)('%s leaves a quote of the other dialects alone', (dialect, text) => {
+        expect(translators[dialect].translateSelect({ table: 'we"ird' }).text).toBe(text);
+    });
+
+    it('doubles the closing quote character inside a name', () => {
+        expect(translators.postgresql.translateSelect({ table: 'a"b' }).text).toBe('SELECT * FROM "a""b"');
+        expect(translators.mssql.translateSelect({ table: 'a]b' }).text).toBe('SELECT * FROM [a]]b]');
+        expect(translators.mariadb.translateSelect({ table: 'a`b' }).text).toBe('SELECT * FROM `a``b`');
+    });
+
+    it('quotes each part of a schema-qualified table', () => {
+        expect(translators.mssql.translateSelect({ table: 'dbo.order' }).text).toBe('SELECT * FROM [dbo].[order]');
+        expect(translators.postgresql.translateSelect({ table: 'public.user' }).text).toBe('SELECT * FROM "public"."user"');
     });
 });

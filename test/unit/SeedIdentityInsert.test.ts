@@ -31,18 +31,18 @@ describe('Seed insert with an explicit auto-increment key', () => {
         const db = new DbContext(provider);
         await db.connect();
         await db.ensureCreated();
-        return provider.calls.map((c) => c.sql).filter((s) => s.includes('INSERT INTO seed_roles'));
+        return provider.calls.map((c) => c.sql).filter((s) => s.includes('INSERT INTO "seed_roles"'));
     }
 
     it('wraps the insert in IDENTITY_INSERT on mssql', async () => {
         const sql = await seedSql('mssql');
         expect(sql).toEqual([
-            'SET IDENTITY_INSERT seed_roles ON; INSERT INTO seed_roles (id, name) VALUES (@p0, @p1); SET IDENTITY_INSERT seed_roles OFF',
+            'SET IDENTITY_INSERT [seed_roles] ON; INSERT INTO [seed_roles] ([id], [name]) VALUES (@p0, @p1); SET IDENTITY_INSERT [seed_roles] OFF',
         ]);
     });
 
     it('does not use IDENTITY_INSERT on postgresql or mariadb', async () => {
-        expect(await seedSql('postgresql')).toEqual(['INSERT INTO seed_roles (id, name) VALUES ($1, $2)']);
-        expect(await seedSql('mariadb')).toEqual(['INSERT INTO seed_roles (id, name) VALUES (?, ?)']);
+        expect(await seedSql('postgresql')).toEqual(['INSERT INTO "seed_roles" ("id", "name") VALUES ($1, $2)']);
+        expect(await seedSql('mariadb')).toEqual(['INSERT INTO `seed_roles` (`id`, `name`) VALUES (?, ?)']);
     });
 });

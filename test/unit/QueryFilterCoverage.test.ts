@@ -69,7 +69,7 @@ describe('structured query filter: count()', () => {
 
         const count = await db.set(QfcUser).count();
 
-        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as count FROM qfc_users WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as "count" FROM "qfc_users" WHERE "isdeleted" = $1');
         expect(provider.lastCall!.params).toEqual([false]);
         expect(count).toBe(5);
     });
@@ -81,7 +81,7 @@ describe('structured query filter: count()', () => {
         await db.set(QfcUser).where('salary', '>', 1000).count();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT COUNT(*) as count FROM qfc_users WHERE salary > $1 AND isdeleted = $2'
+            'SELECT COUNT(*) as "count" FROM "qfc_users" WHERE "salary" > $1 AND "isdeleted" = $2'
         );
         expect(provider.lastCall!.params).toEqual([1000, false]);
     });
@@ -93,7 +93,7 @@ describe('structured query filter: skip()/take() pagination', () => {
         await db.set(QfcUser).skip(5).take(10).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM qfc_users WHERE isdeleted = $1 LIMIT 10 OFFSET 5'
+            'SELECT * FROM "qfc_users" WHERE "isdeleted" = $1 LIMIT 10 OFFSET 5'
         );
         expect(provider.lastCall!.params).toEqual([false]);
     });
@@ -103,7 +103,7 @@ describe('structured query filter: skip()/take() pagination', () => {
         await db.set(QfcUser).skip(5).take(10).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT * FROM qfc_users WHERE isdeleted = @p0 ORDER BY (SELECT NULL) OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY'
+            'SELECT * FROM [qfc_users] WHERE [isdeleted] = @p0 ORDER BY (SELECT NULL) OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY'
         );
         expect(provider.lastCall!.params).toEqual([false]);
     });
@@ -123,7 +123,7 @@ describe('structured query filter: all()', () => {
 
         // all() issues exactly one query, which is the normal filtered toList() SQL.
         expect(provider.calls).toHaveLength(1);
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users WHERE id > $1 AND isdeleted = $2');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_users" WHERE "id" > $1 AND "isdeleted" = $2');
         expect(result).toBe(true);
     });
 });
@@ -134,7 +134,7 @@ describe('structured query filter: sum/average/min/max', () => {
         provider.nextResult({ rows: [{ total: '999' }], rowCount: 1 });
         await db.set(QfcUser).sum((u) => u.salary);
 
-        expect(provider.lastCall!.sql).toBe('SELECT SUM(salary) as total FROM qfc_users WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT SUM("salary") as "total" FROM "qfc_users" WHERE "isdeleted" = $1');
         expect(provider.lastCall!.params).toEqual([false]);
     });
 
@@ -143,7 +143,7 @@ describe('structured query filter: sum/average/min/max', () => {
         provider.nextResult({ rows: [{ avg: '50' }], rowCount: 1 });
         await db.set(QfcUser).average((u) => u.salary);
 
-        expect(provider.lastCall!.sql).toBe('SELECT AVG(salary) as avg FROM qfc_users WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT AVG("salary") as "avg" FROM "qfc_users" WHERE "isdeleted" = $1');
     });
 
     it('includes the filter in MIN SQL (QueryBuilder path, after a where() condition)', async () => {
@@ -152,7 +152,7 @@ describe('structured query filter: sum/average/min/max', () => {
         await db.set(QfcUser).where('salary', '>', 0).min((u) => u.salary);
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT MIN(salary) as min FROM qfc_users WHERE salary > $1 AND isdeleted = $2'
+            'SELECT MIN("salary") as "min" FROM "qfc_users" WHERE "salary" > $1 AND "isdeleted" = $2'
         );
         expect(provider.lastCall!.params).toEqual([0, false]);
     });
@@ -163,7 +163,7 @@ describe('structured query filter: sum/average/min/max', () => {
         await db.set(QfcUser).where('salary', '>', 0).max((u) => u.salary);
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT MAX(salary) as max FROM qfc_users WHERE salary > $1 AND isdeleted = $2'
+            'SELECT MAX("salary") as "max" FROM "qfc_users" WHERE "salary" > $1 AND "isdeleted" = $2'
         );
     });
 });
@@ -173,7 +173,7 @@ describe('structured query filter: select() projections', () => {
         const { db, provider } = makeDb();
         await db.set(QfcUser).select((u) => ({ userName: u.name })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT name AS userName FROM qfc_users WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT "name" AS "userName" FROM "qfc_users" WHERE "isdeleted" = $1');
         expect(provider.lastCall!.params).toEqual([false]);
     });
 
@@ -186,7 +186,7 @@ describe('structured query filter: select() projections', () => {
 
         const results = await db.set(QfcUser).select((u) => ({ label: `${u.name}!` })).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_users" WHERE "isdeleted" = $1');
         expect(results).toEqual([{ label: 'Alice!' }]);
     });
 });
@@ -201,7 +201,7 @@ describe('structured query filter: find()', () => {
 
         const user = await db.set(QfcUser).find(1);
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users WHERE id = $1 AND isdeleted = $2');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_users" WHERE "id" = $1 AND "isdeleted" = $2');
         expect(provider.lastCall!.params).toEqual([1, false]);
         expect(user!.name).toBe('Alice');
     });
@@ -212,7 +212,7 @@ describe('ignoreQueryFilters() omits the structured filter', () => {
         const { db, provider } = makeDb();
         await db.set(QfcUser).ignoreQueryFilters().toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_users"');
         expect(provider.lastCall!.params).toEqual([]);
     });
 
@@ -221,7 +221,7 @@ describe('ignoreQueryFilters() omits the structured filter', () => {
         provider.nextResult({ rows: [{ count: '9' }], rowCount: 1 });
         await db.set(QfcUser).ignoreQueryFilters().count();
 
-        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as count FROM qfc_users ');
+        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as "count" FROM "qfc_users" ');
         expect(provider.lastCall!.params).toEqual([]);
     });
 });
@@ -235,7 +235,7 @@ describe('structured filters ARE applied to groupBy() (issue #23, closed)', () =
         const { db, provider } = makeDb();
         await db.set(QfcUser).groupBy((u) => u.name).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users WHERE isdeleted = $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_users" WHERE "isdeleted" = $1');
         expect(provider.lastCall!.params).toEqual([false]);
     });
 
@@ -248,7 +248,7 @@ describe('structured filters ARE applied to groupBy() (issue #23, closed)', () =
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT name, COUNT(*) as count FROM qfc_users WHERE isdeleted = $1 GROUP BY name'
+            'SELECT "name", COUNT(*) as "count" FROM "qfc_users" WHERE "isdeleted" = $1 GROUP BY "name"'
         );
         expect(provider.lastCall!.params).toEqual([false]);
     });
@@ -263,7 +263,7 @@ describe('structured filters ARE applied to groupBy() (issue #23, closed)', () =
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT name, COUNT(*) as count FROM qfc_users WHERE salary > $1 AND isdeleted = $2 GROUP BY name'
+            'SELECT "name", COUNT(*) as "count" FROM "qfc_users" WHERE "salary" > $1 AND "isdeleted" = $2 GROUP BY "name"'
         );
         expect(provider.lastCall!.params).toEqual([0, false]);
     });
@@ -278,7 +278,7 @@ describe('structured filters ARE applied to groupBy() (issue #23, closed)', () =
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT name, COUNT(*) as count FROM qfc_users WHERE isdeleted = $1 GROUP BY name HAVING COUNT(*) > $2'
+            'SELECT "name", COUNT(*) as "count" FROM "qfc_users" WHERE "isdeleted" = $1 GROUP BY "name" HAVING COUNT(*) > $2'
         );
         expect(provider.lastCall!.params).toEqual([false, 5]);
     });
@@ -294,7 +294,7 @@ describe('structured filters ARE applied to groupBy() (issue #23, closed)', () =
         await grouped.having('COUNT(*)', '>', 5).select((g) => ({ count: g.count() })).toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT name, COUNT(*) as count FROM qfc_users WHERE isdeleted = $1 GROUP BY name HAVING COUNT(*) > $2'
+            'SELECT "name", COUNT(*) as "count" FROM "qfc_users" WHERE "isdeleted" = $1 GROUP BY "name" HAVING COUNT(*) > $2'
         );
         expect(provider.lastCall!.params).toEqual([false, 5]);
     });
@@ -310,7 +310,7 @@ describe('structured filters ARE applied to groupBy() (issue #23, closed)', () =
             .toList();
 
         expect(provider.lastCall!.sql).toBe(
-            'SELECT name, COUNT(*) as count FROM qfc_users WHERE salary > $1 GROUP BY name'
+            'SELECT "name", COUNT(*) as "count" FROM "qfc_users" WHERE "salary" > $1 GROUP BY "name"'
         );
         expect(provider.lastCall!.params).toEqual([0]);
     });
@@ -330,7 +330,7 @@ describe('legacy lambda form of hasQueryFilter (issue #23 remaining limitation)'
         const users = await db.set(QfcLegacyUser).toList();
 
         // No WHERE clause at all - the legacy predicate never reaches SQL.
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_legacy_users');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_legacy_users"');
         // But the in-memory filter still removes the non-matching row from the result.
         expect(users).toHaveLength(1);
         expect(users[0].name).toBe('Kept');
@@ -348,7 +348,7 @@ describe('legacy lambda form of hasQueryFilter (issue #23 remaining limitation)'
 
         const users = await db.set(QfcLegacyUser).where('id', '>', 0).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_legacy_users WHERE id > $1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_legacy_users" WHERE "id" > $1');
         expect(users).toHaveLength(1);
         expect(users[0].name).toBe('Kept');
     });
@@ -366,7 +366,7 @@ describe('legacy lambda form of hasQueryFilter (issue #23 remaining limitation)'
         // filtered out in memory. This is the remaining gap from issue #23:
         // count() is only fixed for the structured filter form, not the legacy
         // lambda form.
-        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as count FROM qfc_legacy_users');
+        expect(provider.lastCall!.sql).toBe('SELECT COUNT(*) as "count" FROM "qfc_legacy_users"');
         expect(count).toBe(10);
     });
 });
@@ -420,7 +420,7 @@ describe('legacy lambda form + row limits (#45)', () => {
 
         const users = await db.set(QfcLegacyUser).ignoreQueryFilters().take(1).toList();
 
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_legacy_users LIMIT 1');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_legacy_users" LIMIT 1');
         expect(users).toHaveLength(1);
     });
 
@@ -433,6 +433,6 @@ describe('legacy lambda form + row limits (#45)', () => {
     it('the structured filter form still paginates normally', async () => {
         const { db, provider } = makeDb();
         await db.set(QfcUser).take(10).toList();
-        expect(provider.lastCall!.sql).toBe('SELECT * FROM qfc_users WHERE isdeleted = $1 LIMIT 10');
+        expect(provider.lastCall!.sql).toBe('SELECT * FROM "qfc_users" WHERE "isdeleted" = $1 LIMIT 10');
     });
 });
