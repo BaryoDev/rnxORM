@@ -33,7 +33,8 @@ describe('a bare number column keeps its cents', () => {
 
                 const read = await db.set(MoneyProbe).toList();
                 console.log(`${providerName}: stored 19.99 -> read back ${read[0].price}`);
-                expect(Number(read[0].price)).toBeCloseTo(19.99, 2);
+                expect(typeof read[0].price).toBe('number');
+                expect(read[0].price).toBeCloseTo(19.99, 2);
             } finally {
                 await db.query('DROP TABLE IF EXISTS money_probe').catch(() => undefined);
                 await db.disconnect();
