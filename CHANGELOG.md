@@ -16,7 +16,7 @@
 
 ### Fixed
 
-- **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks. PostgreSQL tables created through `ensureCreated()` with a mixed-case name are now case-sensitive, the same as the migration path.
+- **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks.
 - **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
   translator now returns them as text in the select list, so the driver cannot
   round them to a double. `sum()` and `average()` already parse them back, but
@@ -25,6 +25,10 @@
   that could lose digits. HAVING and ORDER BY still compare the number.
 - **SQL Server AVG over an integer column keeps its fraction.** The average of
   1 and 2 is now 1.5, as on PostgreSQL and MariaDB. It used to be 1.
+
+### Changed
+
+- **Breaking on PostgreSQL: mixed-case names from `ensureCreated()` are now case-sensitive.** Queries and `ensureCreated()` quote every identifier. An explicit `@Entity('Orders')` or `@Column({ name: 'Label' })` mixed-case name that an earlier version created through `ensureCreated()` is stored folded to lower case (`orders`, `label`), so the quoted query no longer finds it. Rename it in the entity to the lower-case form, or rename the table or column in the database. Default names are lower-cased by the decorators and are unaffected.
 
 ### Breaking
 

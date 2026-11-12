@@ -385,7 +385,7 @@ describe('save ordering and key propagation (#36)', () => {
 
         const tables = provider.calls
             .filter(c => c.sql.startsWith('INSERT'))
-            .map(c => c.sql.match(/INSERT INTO (\w+)/)![1]);
+            .map(c => c.sql.match(/INSERT INTO \W?(\w+)/)![1]);
         expect(tables).toEqual(['cd_users', 'cd_posts']);
     });
 
@@ -430,7 +430,7 @@ describe('save ordering and key propagation (#36)', () => {
 
         const tables = provider.calls
             .filter(c => c.sql.startsWith('DELETE'))
-            .map(c => c.sql.match(/DELETE FROM (\w+)/)![1]);
+            .map(c => c.sql.match(/DELETE FROM \W?(\w+)/)![1]);
         expect(tables).toEqual(['cd_posts', 'cd_users']);
     });
 

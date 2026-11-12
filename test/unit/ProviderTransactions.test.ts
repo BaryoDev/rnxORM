@@ -72,7 +72,7 @@ describe('saveChanges inside a caller-opened transaction (#38)', () => {
         db.set(TxItem).add(newItem(1));
         await db.saveChanges();
 
-        const insertAt = provider.calls.findIndex(c => c.sql.startsWith('INSERT INTO tx_items'));
+        const insertAt = provider.calls.findIndex(c => /^INSERT INTO \W?tx_items/.test(c.sql));
         expect(provider.queryConnections[insertAt]).toBe('tx1');
     });
 
