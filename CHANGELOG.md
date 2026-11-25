@@ -1,38 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Added
-
-- **Condition builders** (issue #30). `where(u => eq(u.email, x))` with `eq`, `ne`,
-  `gt`, `gte`, `lt`, `lte`, `like`, `notLike`, `ilike`, `inArray`, `notInArray`,
-  `isNull`, `isNotNull`, `between`, `and`, `or` and `not`, imported from
-  `rnxorm`. Value types follow the column at compile time. `between` is now
-  supported. The three-argument `where(column, op, value)` is deprecated and
-  will be removed in 4.0; it builds the same SQL.
-- **ES module support.** `rnxorm` now has an `exports` map, so both `import` and
-  `require` work. The ES entry is a thin wrapper over the CommonJS build, so
-  there is still one copy of the code and one metadata registry.
-
-### Fixed
-
-- **Migrations and `ensureCreated()` DDL.** SQL Server `addColumn` emits `ADD`, not `ADD COLUMN`. Migration history is ordered by `applied_at` then id. A type change in `ensureCreated()` keeps NOT NULL, the MariaDB default and AUTO_INCREMENT, and a failed change is logged with `console.warn` instead of swallowed.
-- **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks.
-- **Rows are converted by column type.** Number, boolean and bigint columns read back as the declared property type on every provider, not as driver strings, `BigInt` or 0/1.
-- **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
-  translator now returns them as text in the select list, so the driver cannot
-  round them to a double. `sum()` and `average()` already parse them back, but
-  a grouped select now returns the decimal sum or average as a string on SQL
-  Server, as it already did on PostgreSQL and MariaDB. It used to be a double
-  that could lose digits. HAVING and ORDER BY still compare the number.
-- **SQL Server AVG over an integer column keeps its fraction.** The average of
-  1 and 2 is now 1.5, as on PostgreSQL and MariaDB. It used to be 1.
-
-### Changed
-
-- **Breaking on PostgreSQL: mixed-case names from `ensureCreated()` are now case-sensitive.** Queries and `ensureCreated()` quote every identifier. An explicit `@Entity('Orders')` or `@Column({ name: 'Label' })` mixed-case name that an earlier version created through `ensureCreated()` is stored folded to lower case (`orders`, `label`), so the quoted query no longer finds it. Rename it in the entity to the lower-case form, or rename the table or column in the database. Default names are lower-cased by the decorators and are unaffected.
-
-- **Breaking for renamed or removed migrations: `revert()`, `revertTo()` and `getAppliedMigrationsOrdered()` throw on an applied migration that is not registered.** They used to skip it, so `revert()` undid an older migration while a newer one stayed applied. The error names the ids. Register the migration, or delete its row from `__MigrationHistory` if it was removed on purpose.
+## 3.0.0 (2026-11-25)
 
 ### Breaking
 
@@ -113,11 +81,41 @@
   return a string for a value a JS number cannot hold exactly; the type now says
   so. Narrow with `typeof` before arithmetic.
 
+### Added
+
+- **Condition builders** (issue #30). `where(u => eq(u.email, x))` with `eq`, `ne`,
+  `gt`, `gte`, `lt`, `lte`, `like`, `notLike`, `ilike`, `inArray`, `notInArray`,
+  `isNull`, `isNotNull`, `between`, `and`, `or` and `not`, imported from
+  `rnxorm`. Value types follow the column at compile time. `between` is now
+  supported. The three-argument `where(column, op, value)` is deprecated and
+  will be removed in 4.0; it builds the same SQL.
+- **ES module support.** `rnxorm` now has an `exports` map, so both `import` and
+  `require` work. The ES entry is a thin wrapper over the CommonJS build, so
+  there is still one copy of the code and one metadata registry.
+
 ### Fixed
+
+- **Migrations and `ensureCreated()` DDL.** SQL Server `addColumn` emits `ADD`, not `ADD COLUMN`. Migration history is ordered by `applied_at` then id. A type change in `ensureCreated()` keeps NOT NULL, the MariaDB default and AUTO_INCREMENT, and a failed change is logged with `console.warn` instead of swallowed.
+- **Query and `ensureCreated()` SQL quote every identifier.** An entity named `Order`, `User` or `Group` no longer breaks.
+- **Rows are converted by column type.** Number, boolean and bigint columns read back as the declared property type on every provider, not as driver strings, `BigInt` or 0/1.
+- **SQL Server SUM and AVG over decimal columns are exact** (issue #54). The
+  translator now returns them as text in the select list, so the driver cannot
+  round them to a double. `sum()` and `average()` already parse them back, but
+  a grouped select now returns the decimal sum or average as a string on SQL
+  Server, as it already did on PostgreSQL and MariaDB. It used to be a double
+  that could lose digits. HAVING and ORDER BY still compare the number.
+- **SQL Server AVG over an integer column keeps its fraction.** The average of
+  1 and 2 is now 1.5, as on PostgreSQL and MariaDB. It used to be 1.
 
 - **One metadata registry per process** (issue #53). A second copy of the
   package no longer gets its own decorator registry, and a class re-evaluated
   in watch mode no longer makes `ensureCreated()` create its table twice.
+
+### Changed
+
+- **Breaking on PostgreSQL: mixed-case names from `ensureCreated()` are now case-sensitive.** Queries and `ensureCreated()` quote every identifier. An explicit `@Entity('Orders')` or `@Column({ name: 'Label' })` mixed-case name that an earlier version created through `ensureCreated()` is stored folded to lower case (`orders`, `label`), so the quoted query no longer finds it. Rename it in the entity to the lower-case form, or rename the table or column in the database. Default names are lower-cased by the decorators and are unaffected.
+
+- **Breaking for renamed or removed migrations: `revert()`, `revertTo()` and `getAppliedMigrationsOrdered()` throw on an applied migration that is not registered.** They used to skip it, so `revert()` undid an older migration while a newer one stayed applied. The error names the ids. Register the migration, or delete its row from `__MigrationHistory` if it was removed on purpose.
 
 ## 2.4.0 (2026-09-20)
 
