@@ -91,5 +91,8 @@
     "pg": {
       "optional": true
     }
+  },
+  "allowScripts": {
+    "better-sqlite3": true
   }
 }
